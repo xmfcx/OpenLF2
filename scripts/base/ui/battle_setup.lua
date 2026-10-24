@@ -489,11 +489,66 @@ local function options_keys(state, key, context)
     return key
 end
 
+-- Mouse clicks (OpenLF2 extension): a click on a panel field, a picker line or an option row moves the cursor there
+-- and presses attack, as the keys would. Any player's click counts, like any player's keys.
+local function clicked_key(state, held, key)
+    if not held.click then return key end
+    local x, y, config, y0 = held.pointer_x, held.pointer_y, state.config, state.y0
+    local function hit(left, top, width, height) return x >= left and x < left + width and y >= top and y < top + height end
+    if state.state == setup_states.panel then
+        for side = 0, 1 do
+            local shift = side * 347 + origin_x
+            if hit(shift + 80, y0 + 150, 208, 25) then
+                config.row, config.side = panel_rows.defense, side
+                return "c"
+            end
+            for row = panel_rows.first_upper, panel_rows.reserve_lower do
+                for column = 0, row <= panel_rows.reserve_upper and 5 or 4 do
+                    local px, py
+                    if row < panel_rows.first_lower then px, py = column * 48 + 42, y0 + 243 + row * 18
+                    else px, py = column * 48 + 66, y0 + 298 + row * 18 end
+                    if hit(px + shift, py, 34, 16) then
+                        config.row, config.side, config.column = row, side, column
+                        return "c"
+                    end
+                end
+            end
+            if hit(shift + 43, y0 + 396, 272, 25) then
+                config.row, config.side = panel_rows.troop_picker, side
+                return "c"
+            end
+        end
+        if hit(origin_x + 301, y0 + 441, 106, 24) then
+            config.row = panel_rows.continue
+            return "c"
+        end
+    elseif state.state >= setup_states.troop_picker and state.state < setup_states.troop_picker_end then
+        local shift = 410 - config.side * 275
+        for line = 0, 9 do
+            if hit(shift + 44, line * 22 + (line < 5 and 144 or 192), 165, 23) then
+                config.picker = line
+                return "c"
+            end
+        end
+        if hit(shift + 22, 433, 83, 24) then config.picker = 10; return "c" end
+        if hit(shift + 122, 433, 106, 24) then config.picker = 11; return "c" end
+    elseif state.state == setup_states.options then
+        for row, highlight in pairs(option_highlights) do
+            if hit(highlight[2], highlight[3], highlight[1][3], highlight[1][4]) then
+                config.options_row = row
+                return "c"
+            end
+        end
+    end
+    return key
+end
+
 function screen.update(state, held, context)
     state.display = {}
     state.leave = nil
     local key = navigation.sample(state.input, held)
     draw_panel(state)
+    key = clicked_key(state, held, key)
     if state.state == setup_states.panel then key = panel_keys(state, key, context) end
     if state.state == setup_states.random_fighters then
         reroll(state)
