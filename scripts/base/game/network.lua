@@ -4,8 +4,20 @@
 local constants = require("base/game/constants")
 local controls = require("base/ui/controls")
 local recording = require("base/game/recording")
+local speed = require("base/game/speed")
 local network = {}
 local timeout = 30000
+-- Script sharing (OpenLF2 extension): when the profiles differ, the host offers its game scripts with this header,
+-- 8 decimal digits of size and a newline. The joining player is asked first; on "Y" the host sends the scripts, the
+-- joining game answers "D" once it has them all, the host listens again and the joining game swaps in the scripts
+-- (engine.replace_scripts: memory only, same sandbox) and joins again.
+local profile_prefix = "OpenLF2 TCP 1\n"
+local share_header = "OpenLF2 scripts 1 "
+local share_header_size = #share_header + 9
+local share_limit = 16 * 1024 * 1024
+local share_piece = 16384
+local ask_timeout = 120000
+local operations = {module = true, replace = true, extend = true}
 local function failed(state, message)
     engine.network("close")
     state.phase, state.error = "failed", message
@@ -21,6 +33,39 @@ local function take(state, count)
     local bytes = state.received:sub(1, count)
     state.received = state.received:sub(count + 1)
     return bytes
+end
+-- Declarations as a count line, then each of their four fields as a length line and the bytes.
+local function encode_scripts(declarations)
+    local parts = {#declarations .. "\n"}
+    for _, declaration in ipairs(declarations) do
+        for field = 1, 4 do parts[#parts + 1] = #declaration[field] .. "\n" .. declaration[field] end
+    end
+    return table.concat(parts)
+end
+local function decode_scripts(bytes)
+    local position = 1
+    local function number()
+        local digits = bytes:match("^(%d+)\n", position)
+        if not digits or #digits > 8 then return nil end
+        position = position + #digits + 1
+        return tonumber(digits)
+    end
+    local count = number()
+    if not count or count < 1 or count > 4096 then return nil end
+    local declarations = {}
+    for index = 1, count do
+        local declaration = {}
+        for field = 1, 4 do
+            local size = number()
+            if not size or position + size - 1 > #bytes then return nil end
+            declaration[field] = bytes:sub(position, position + size - 1)
+            position = position + size
+        end
+        if not operations[declaration[1]] then return nil end
+        declarations[index] = declaration
+    end
+    if position ~= #bytes + 1 then return nil end
+    return declarations
 end
 local function names_packet(host)
     local fields = {host and "11110000" or "00001111", string.rep("0", 24)}
@@ -50,7 +95,10 @@ function network.create(options)
 end
 function network.start(state, host, address)
     network.close(state)
-    state.host, state.error, state.received = host, nil, ""
+    state.host, state.error, state.received, state.address = host, nil, "", address
+    state.share, state.notice = nil, state.host and state.notice or nil
+    -- `accepted`: a peer connected to this host; `profiled`: its profile arrived (see ui/network's waiting page).
+    state.accepted, state.profiled = false, false
     state.names, state.pending, state.sequence, state.frames = nil, nil, 0, 0
     local started, problem = engine.network(host and "host" or "join", address, state.port)
     if not started then return failed(state, problem) end
@@ -62,31 +110,141 @@ function network.close(state)
     engine.network("close")
     state.phase, state.pending, state.received = "idle", nil, ""
 end
+-- The transfer of shared scripts: several polls per frame, as each poll moves at most one send and 8 KiB received.
+local function share_poll(state)
+    local share = state.share
+    for _ = 1, 32 do
+        if state.phase == "uploading" and share.sent < #share.bundle then
+            local piece = share.bundle:sub(share.sent + 1, share.sent + share_piece)
+            -- A full send queue refuses the piece; it is offered again after the next poll.
+            if engine.network("send", piece) then
+                share.sent = share.sent + #piece
+                state.deadline = engine.network_time() + timeout
+            end
+        end
+        local bytes, problem = engine.network("poll")
+        if not bytes then
+            -- The host closes the connection once it has the joining game's "D".
+            if state.phase == "finishing" then return network.swap(state) end
+            return failed(state, problem)
+        end
+        if state.phase == "uploading" and #bytes > 0 then
+            if bytes ~= "D" then return failed(state, "Invalid network scripts answer") end
+            engine.network("close")
+            local address = state.address
+            state.notice = "Scripts sent. Waiting for the other player to join again"
+            if not network.start(state, true, address) then return nil, state.error end
+            return false
+        elseif state.phase == "downloading" and #bytes > 0 then
+            share.chunks[#share.chunks + 1] = bytes
+            share.received = share.received + #bytes
+            state.deadline = engine.network_time() + timeout
+            if share.received > share.size then return failed(state, "Network scripts size mismatch") end
+            if share.received == share.size then
+                if not send(state, "D") then return nil, state.error end
+                state.phase, state.deadline = "finishing", engine.network_time() + 5000
+            end
+        end
+    end
+    if state.phase == "uploading" then
+        state.notice = string.format("Sending scripts: %d%%", math.floor(share.sent * 100 / #share.bundle))
+    elseif state.phase == "downloading" then
+        state.notice = string.format("Receiving scripts: %d%%", math.floor(share.received * 100 / share.size))
+    end
+    if engine.network_time() > state.deadline then
+        if state.phase == "finishing" then return network.swap(state) end
+        return failed(state, "Network connection timed out")
+    end
+    return false
+end
+-- The joining game has the host's scripts: they replace its own, and the new scripts join the host again.
+function network.swap(state)
+    engine.network("close")
+    local declarations = decode_scripts(table.concat(state.share.chunks))
+    if not declarations then return failed(state, "Invalid network scripts") end
+    local replaced, problem = engine.replace_scripts(declarations, {network_role = "join", network_address = state.address,
+        network_port = state.port, network_profile = state.remote_profile, network_retry = true})
+    if not replaced then return failed(state, "The host's scripts did not load: " .. tostring(problem)) end
+    state.phase = "swapped"
+    return false
+end
+-- The joining player's answer to the host's offer.
+function network.answer(state, allow)
+    if state.phase ~= "ask" then return end
+    if not allow then return failed(state, "You refused the host's scripts") end
+    if not send(state, "Y") then return end
+    state.phase, state.deadline = "downloading", engine.network_time() + timeout
+end
 -- Called from the lobby or once per attempted tick. No simulation or RNG draw occurs while
 -- waiting. Deadlines measure elapsed real time, never simulation time.
 function network.poll(state)
     if state.phase == "failed" then return nil, state.error end
+    if state.phase == "swapped" then return false end
+    if state.phase == "uploading" or state.phase == "downloading" or state.phase == "finishing" then
+        return share_poll(state)
+    end
     local bytes, problem = engine.network("poll")
-    if not bytes then return failed(state, problem) end
+    if not bytes then
+        if state.phase == "await_offer" then problem = "Network engine/scripts/mod profile mismatch"
+        elseif state.phase == "offered" then problem = "The other player refused the scripts or cannot receive them" end
+        return failed(state, problem)
+    end
     state.received = state.received .. bytes
     if #state.received > constants.network.max_receive_buffer_bytes then return failed(state, "Network receive buffer exceeded") end
-    if state.phase ~= "ready" and engine.network_time() > state.deadline then
+    -- A host waits for a peer until it is cancelled; the time limits start when one connects.
+    local listening = state.host and state.phase == "connecting" and not state.accepted
+    if state.phase ~= "ready" and not listening and engine.network_time() > state.deadline then
         return failed(state, "Network connection timed out")
     end
     if state.phase == "connecting" and engine.network("status") == "connected" then
+        if state.host then state.accepted, state.deadline = true, engine.network_time() + timeout end
         if not send(state, state.profile) then return nil, state.error end
         state.phase = "profile"
     end
     if state.phase == "profile" then
         local profile = take(state, #state.profile)
         if not profile then return false end
-        if profile ~= state.profile then return failed(state, "Network engine/scripts/mod profile mismatch") end
-        state.checksum = recording.data_checksum() % 65536
-        if state.host then
-            if not send(state, "u can connect\0") then return nil, state.error end
-            state.phase = "players"
-        else state.phase = "greeting" end
+        state.profiled = true
+        if profile ~= state.profile then
+            if state.host and engine.scripts then
+                state.share = {bundle = encode_scripts(engine.scripts()), sent = 0}
+                if #state.share.bundle > share_limit then return failed(state, "Network engine/scripts/mod profile mismatch") end
+                if not send(state, share_header .. string.format("%08d", #state.share.bundle) .. "\n") then return nil, state.error end
+                state.phase, state.deadline = "offered", engine.network_time() + ask_timeout
+            elseif not state.host and profile:sub(1, #profile_prefix) == profile_prefix
+                   and profile:sub(#profile_prefix + 1):match("^%x+$") then
+                state.remote_profile = profile:sub(#profile_prefix + 1)
+                state.phase, state.deadline = "await_offer", engine.network_time() + 5000
+            else
+                return failed(state, "Network engine/scripts/mod profile mismatch")
+            end
+        else
+            state.checksum = recording.data_checksum() % 65536
+            if state.host then
+                if not send(state, "u can connect\0") then return nil, state.error end
+                state.phase = "players"
+            else state.phase = "greeting" end
+        end
     end
+    if state.phase == "offered" then
+        local answer = take(state, 1)
+        if not answer then return false end
+        if answer ~= "Y" then return failed(state, "Invalid network scripts answer") end
+        state.phase, state.deadline = "uploading", engine.network_time() + timeout
+        return false
+    end
+    if state.phase == "await_offer" then
+        local header = take(state, share_header_size)
+        if not header then return false end
+        local digits = header:sub(#share_header + 1, -2)
+        local size = header:sub(1, #share_header) == share_header and header:sub(-1) == "\n"
+            and digits:match("^%d+$") and tonumber(digits)
+        if not size or size < 1 or size > share_limit then return failed(state, "Invalid network scripts offer") end
+        state.share = {size = size, chunks = {}, received = 0}
+        state.phase, state.deadline = "ask", engine.network_time() + ask_timeout
+        return false
+    end
+    if state.phase == "ask" then return false end
     if state.phase == "greeting" then
         local greeting = take(state, 14)
         if not greeting then return false end
@@ -128,6 +286,9 @@ function network.packet(state, input, hp)
     for index = 0, 3 do
         bytes[(state.host and 0 or 4) + index + 1] = recording.pack_keys(input[index] or "") + 1
     end
+    -- Byte 9 (OpenLF2 speed menu, base/ui/speed_menu): the host's fight speed in tenths plus one, 1 from the joining
+    -- peer. Both peers run the host's speed, so they skip the same frames.
+    bytes[9] = state.host and speed.tenths + 1 or 1
     bytes[10], bytes[12], bytes[14] = state.sequence, state.version, hp % 100 + 1
     bytes[15], bytes[16] = state.checksum % 256, math.floor(state.checksum / 256)
     for key, field in ipairs(function_bits) do
@@ -164,7 +325,7 @@ function network.exchange(state, input, hp)
         end
     end
     if remote:byte(11) % 2 ~= 1 or remote:byte(13) % 2 ~= 1 or remote:byte(13) > 31
-       or remote:byte(9) ~= 1 or remote:sub(17) ~= string.rep("\1", 4) .. "\0\0" then
+       or remote:byte(9) < 1 or remote:byte(9) > (state.host and 1 or 11) or remote:sub(17) ~= string.rep("\1", 4) .. "\0\0" then
         return failed(state, "Invalid network packet padding")
     end
     local combined = {functions = "", keys = {}, pointer_x = 0, pointer_y = 0, button = false, network = true}
@@ -180,6 +341,7 @@ function network.exchange(state, input, hp)
         if has(own:byte(field[1] + 1), field[2]) then combined.function_sources[1] = combined.function_sources[1] .. key end
         if has(remote:byte(field[1] + 1), field[2]) then combined.function_sources[2] = combined.function_sources[2] .. key end
     end
+    combined.speed_tenths = (state.host and own or remote):byte(9) - 1
     combined.unlock_bits = 0
     for _, mark in ipairs({{8, 1}, {16, 2}}) do
         if has(own:byte(13), mark[1]) or has(remote:byte(13), mark[1]) then

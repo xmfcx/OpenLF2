@@ -180,6 +180,9 @@ int create_bridge_slot(lua_State* state) {
     return 0;
 }
 // Private protocol, matching the fixed-size opcodes in runtime/bootstrap.lua.
+// The most commands one frame may hold (MAX_FRAME_COMMANDS in runtime/bootstrap.lua); a command has at most 20 fields.
+constexpr int max_frame_commands = 1 << 20;
+constexpr double max_frame_fields = max_frame_commands * 20.0;
 enum class FrameOpcode {
     viewport = 1, sprite, fill, overlay, render_area, clip, sound, rumble,
     music, speed, render_filter, text_input, replay_drop, fullscreen, action, text, file_dialog, world_sprite
@@ -251,7 +254,7 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
         };
         int commands = 0;
         while (reader.remaining()) {
-            if (++commands > 4096) throw std::runtime_error("too many frame commands");
+            if (++commands > max_frame_commands) throw std::runtime_error("too many frame commands");
             const auto opcode = static_cast<FrameOpcode>(reader.integer(1, 18));
             switch (opcode) {
             case FrameOpcode::viewport:
@@ -742,7 +745,7 @@ int invoke_frame(lua_State* state) {
     luaL_checktype(state, -2, LUA_TTABLE);
     luaL_checktype(state, -1, LUA_TNUMBER);
     const double count = lua_tonumber(state, -1);
-    if (!std::isfinite(count) || count < 0 || count > 4096 * 14 || count != std::floor(count))
+    if (!std::isfinite(count) || count < 0 || count > max_frame_fields || count != std::floor(count))
         return luaL_error(state, "invalid frame batch size");
     luaL_checkstack(state, 4, "frame decoding stack limit");
     invocation->result = decode_frame(state, lua_gettop(state) - 1, static_cast<int>(count));

@@ -26,7 +26,9 @@ local set_environment = setfenv
 local unpack_values = unpack or table.unpack
 local traceback = debug.traceback
 local protected_call = xpcall
-local module_definitions, module_cache, loading = {}, {}, {}
+-- The declarations this runtime runs: the host's at start, another network host's after replace_scripts.
+local current_declarations = declarations
+local replace_scripts
 
 local function copy_library(library)
     local copy = {}
@@ -34,14 +36,23 @@ local function copy_library(library)
     return copy
 end
 
-local load_module
-local function evaluate(declaration, previous)
+-- Script sharing in a network game (base/game/network): a copy of the running declarations, to send them.
+local function script_declarations()
+    local copy = {}
+    for index, declaration in ipairs(current_declarations) do
+        copy[index] = {declaration[1], declaration[2], declaration[3], declaration[4]}
+    end
+    return copy
+end
+
+-- `require_module`: the loader of the declarations the module belongs to.
+local function evaluate(declaration, previous, require_module)
     local environment = {
         assert = assert, error = error, ipairs = ipairs, pairs = pairs,
         next = next, select = select, tonumber = tonumber, tostring = tostring,
         type = type, unpack = unpack_values, pcall = pcall,
         math = copy_library(math), string = copy_library(string), table = copy_library(table),
-        require = load_module,
+        require = require_module,
         engine = {read_resource = read_resource, read_object_data = read_object_data,
             read_background_data = read_background_data, read_stage_data = read_stage_data,
             random = random, crt_random = crt_random, new_array = new_array,
@@ -49,7 +60,10 @@ local function evaluate(declaration, previous)
             random_state = random_state, set_random_state = set_random_state,
             reset_random_sequence = reset_random_sequence, save_recording = save_recording,
             take_recording = take_recording, local_time = local_time, build_label = build_label,
-            network = network, network_time = network_time},
+            network = network, network_time = network_time, scripts = script_declarations,
+            -- The most commands one frame may hold (MAX_FRAME_COMMANDS below; older runtimes allow 4096).
+            frame_command_limit = 1048576,
+            replace_scripts = function(list, changes) return replace_scripts(list, changes) end},
     }
     environment.math.random = nil
     environment.math.randomseed = nil
@@ -71,37 +85,76 @@ local function evaluate(declaration, previous)
     return exported
 end
 
-for _, declaration in ipairs(declarations) do
-    local target = declaration[2]
-    local chain = module_definitions[target] or {}
-    if declaration[1] == "replace" then
-        -- Replacement substitutes the base; explicit extensions still decorate the result.
-        chain[1] = declaration
-    elseif declaration[1] == "module" then
-        assert(#chain == 0, "duplicate module: " .. target)
-        chain[1] = declaration
-    else
-        chain[#chain + 1] = declaration
+-- A loader for one set of declarations, with its own module cache, so the modules of shared scripts never mix
+-- with the running ones.
+local function make_loader(list)
+    local module_definitions, module_cache, loading = {}, {}, {}
+    for _, declaration in ipairs(list) do
+        local target = declaration[2]
+        local chain = module_definitions[target] or {}
+        if declaration[1] == "replace" then
+            -- Replacement substitutes the base; explicit extensions still decorate the result.
+            chain[1] = declaration
+        elseif declaration[1] == "module" then
+            assert(#chain == 0, "duplicate module: " .. target)
+            chain[1] = declaration
+        else
+            chain[#chain + 1] = declaration
+        end
+        module_definitions[target] = chain
     end
-    module_definitions[target] = chain
+    local load_module
+    load_module = function(name)
+        assert(type(name) == "string", "require expects a module name")
+        if module_cache[name] then return module_cache[name] end
+        assert(not loading[name], "cyclic module import: " .. name)
+        local chain = assert(module_definitions[name], "module not declared: " .. name)
+        loading[name] = true
+        local exported
+        for _, declaration in ipairs(chain) do exported = evaluate(declaration, exported, load_module) end
+        loading[name] = nil
+        module_cache[name] = exported
+        return exported
+    end
+    return load_module
 end
 
-load_module = function(name)
-    assert(type(name) == "string", "require expects a module name")
-    if module_cache[name] then return module_cache[name] end
-    assert(not loading[name], "cyclic module import: " .. name)
-    local chain = assert(module_definitions[name], "module not declared: " .. name)
-    loading[name] = true
-    local exported
-    for _, declaration in ipairs(chain) do exported = evaluate(declaration, exported) end
-    loading[name] = nil
-    module_cache[name] = exported
-    return exported
-end
-
+local load_module = make_loader(declarations)
 local screen = load_module("base/ui/flow")
 local i18n = load_module("base/i18n/i18n")
 local state = screen.create(runtime_settings or {menu_seed = 0})
+-- Another network host's declarations replace the running ones in memory (nothing is written): they are checked like
+-- the host's own, run in the same sandbox with their own loader, and their screens start at the start of the next
+-- frame, with the settings `changes` (network keys only) over the runtime settings. On an error the running
+-- scripts stay.
+local operations = {module = true, replace = true, extend = true}
+local network_settings = {network_role = true, network_address = true, network_port = true, network_profile = true,
+    network_retry = true}
+local pending_swap
+replace_scripts = function(list, changes)
+    if type(list) ~= "table" or #list == 0 or #list > 4096 then return false, "invalid scripts" end
+    local checked = {}
+    for index, declaration in ipairs(list) do
+        if type(declaration) ~= "table" or not operations[declaration[1]] or type(declaration[2]) ~= "string"
+           or type(declaration[3]) ~= "string" or type(declaration[4]) ~= "string" then
+            return false, "invalid script declaration"
+        end
+        checked[index] = {declaration[1], declaration[2], declaration[3], declaration[4]}
+    end
+    local settings = {}
+    for key, value in pairs(runtime_settings or {menu_seed = 0}) do settings[key] = value end
+    for key, value in pairs(type(changes) == "table" and changes or {}) do
+        if network_settings[key] then settings[key] = value end
+    end
+    local success, result = protected_call(function()
+        local next_load = make_loader(checked)
+        local next_screen = next_load("base/ui/flow")
+        return {next_screen, next_load("base/i18n/i18n"), next_screen.create(settings)}
+    end, traceback)
+    if not success then return false, result end
+    current_declarations, pending_swap = checked, result
+    return true
+end
 -- Private frame protocol: fixed-size numeric opcodes, matching FrameOpcode in
 -- the Lua adapter. Reuse one flat buffer; the host validates each field once.
 local FrameOpcode = {
@@ -114,9 +167,13 @@ local MusicKind = {play = 0, stop = 1, resume = 2, volume = 3}
 local RenderFilter = {nearest = 0, linear = 1, xbrz = 2}
 local TextAlign = {left = 0, center = 1, right = 2}
 local INVALID_ENUM = -1
-local MAX_FRAME_COMMANDS = 4096
+local MAX_FRAME_COMMANDS = 1048576
 local frame_batch, previous_size = {}, 0
 local function render(input)
+    if pending_swap then
+        screen, i18n, state = pending_swap[1], pending_swap[2], pending_swap[3]
+        pending_swap = nil
+    end
     local size, count = 0, 0
     local function command(opcode, ...)
         assert(count < MAX_FRAME_COMMANDS, "frame command limit exceeded")

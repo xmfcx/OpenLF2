@@ -12,12 +12,13 @@ local sounds = require("base/game/sounds")
 local rumble = require("base/game/rumble")
 local controls = require("base/ui/controls")
 local options = require("base/game/options")
+local fight_effects = require("base/ui/fight_effects")
 local screen = {}
-local replay_lines, mode_line
+local replay_lines, mode_line, follow_step
 
 -- options: see base/game/match create().
 function screen.create(options)
-    local state = {match = match.create(options)}
+    local state = {match = match.create(options), effects = fight_effects.create()}
     local snapshots, next_snapshot = {{items = {}}, {items = {}}}, 1
     state.match.capture = function(current)
         local snapshot = screen.snapshot(current, snapshots[next_snapshot])
@@ -111,6 +112,8 @@ function screen.update(state, held, context)
             end
         end
     end
+    fight_effects.observe(state.effects, state.match)
+    follow_step(state, state.match)
     if result == "finished" then
         context.action("round_over")
         return
@@ -415,11 +418,93 @@ function screen.outcome(state)
     return {stage_level = run.id, auto_start = run.next_group, ending = run.ending}
 end
 
+-- The camera of a network game (OpenLF2 extension, drawing only; the match's own camera, which both peers share,
+-- is unchanged): base/game/camera's motion, step for step once per fight frame, but focused on this computer's
+-- fighters (`state.follow`, set by base/ui/flow) with the same look-ahead. Once they are all down it follows another
+-- living character, players first, and each Tab press (`state.follow_next`) moves on to the next one.
+local function cdiv(a, b)
+    local q = a / b
+    if q >= 0 then return math.floor(q) end
+    return math.ceil(q)
+end
+follow_step = function(state, current)
+    local follow = state.follow
+    if not follow then
+        state.follow_camera, state.follow_motion, state.spectated = nil, nil, nil
+        return
+    end
+    local motion = constants.camera_motion
+    local lookahead = motion.facing_lookahead
+    local sum, count = 0, 0
+    for _, slot in ipairs(follow) do
+        local value = current.items[slot]
+        if value and value.hp > 0 then
+            if value.record.frame(value.frame).state == constants.frame_states.lying then sum = sum + value.x_int
+            else sum = sum + lookahead + value.x_int - value.facing * (lookahead * 2) end
+            count = count + 1
+        end
+    end
+    state.spectated = nil
+    if count == 0 then
+        -- All of this computer's fighters are down: follow a living character, players first.
+        local candidates = {}
+        for pass = 1, 2 do
+            for index = 0, constants.item_slots - 1 do
+                local value = current.items[index]
+                if value and value.record.kind == record_kinds.character and value.hp > 0
+                   and (pass == 1) == (index < 20) then
+                    candidates[#candidates + 1] = index
+                end
+            end
+        end
+        if #candidates > 0 then
+            local position = 1
+            for at, index in ipairs(candidates) do
+                if index == state.followed then position = at end
+            end
+            position = (position - 1 + (state.follow_next or 0)) % #candidates + 1
+            state.followed = candidates[position]
+            state.spectated = state.followed
+            sum, count = current.items[state.followed].x_int, 1
+        end
+    else
+        state.followed = nil
+    end
+    state.follow_next = 0
+    local screen_width = constants.screen.width
+    local width = current.stage.width or screen_width
+    local camera, step = state.follow_camera, state.follow_motion
+    if not camera then camera, step = current.camera, current.camera_step or 0 end
+    if count == 0 then
+        state.follow_camera, state.follow_motion = current.camera, current.camera_step or 0
+        return
+    end
+    local target = cdiv(sum, count) - screen_width / 2
+    if target < 0 then target = 0 end
+    if target > width - screen_width then target = width - screen_width end
+    if current.camera_limit ~= 0 and target > current.camera_limit then target = current.camera_limit end
+    step = cdiv(cdiv(target - camera, motion.target_distance_divisor) + step * motion.previous_step_weight,
+        motion.step_weight_divisor)
+    if step == 0 then
+        if camera < target then step = 1
+        elseif target < camera then step = -1 end
+    end
+    camera = camera + step
+    if camera < 0 then camera = 0 end
+    if camera > width - screen_width then camera = width - screen_width end
+    state.follow_camera, state.follow_motion = camera, step
+end
+
 function screen.draw(state, context, window_bounds)
     context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0)
     local view = state.view
     local current = state.match
     if not view then return end
+    local spectated = state.follow and state.spectated
+    if state.follow and state.follow_camera then
+        view = {camera = math.floor(state.follow_camera), items = view.items, paused = view.paused, shake = view.shake,
+            stage = view.stage}
+    end
     local bounds, passable_bounds, wide
     if window_bounds and (window_bounds.left < 0 or window_bounds.top < 0
             or window_bounds.right > constants.screen.width or window_bounds.bottom > constants.screen.height) then
@@ -480,6 +565,13 @@ function screen.draw(state, context, window_bounds)
         draw_item(context, current.stage, view, entry, passable_bounds, lighting)
     end
     context.clip()
+    -- Ghosts and combo counters (OpenLF2 extension).
+    fight_effects.draw(state.effects, context, view)
+    if spectated then
+        local name = spectated < 8 and controls.name(spectated) or "Com"
+        font.gdi(context, "Following " .. name .. "  (Tab: next)", math.floor(constants.screen.width / 2), 132,
+            0xffffff, nil, "center")
+    end
     for _, command in ipairs(view.stage or {}) do
         if command[1] == "sprite" then context.sprite(command[2], command[3], command[4], command[5], true)
         elseif command[1] == "fill" then

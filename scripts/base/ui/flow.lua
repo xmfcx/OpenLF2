@@ -18,6 +18,9 @@ local control = require("base/game/control")
 local user_options = require("base/game/options")
 local touch_gamepad = require("base/ui/touch_gamepad")
 local quit_dialog = require("base/ui/quit_dialog")
+local speed_menu = require("base/ui/speed_menu")
+local damage_chart = require("base/ui/damage_chart")
+local input_timeline = require("base/ui/input_timeline")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -60,7 +63,8 @@ function flow.create(options)
         pointer_x = 0, pointer_y = 0, previous_button = false, volume_frames = 0,
         touch_gamepad = touch_gamepad.create(user_options.current().gamepad, user_options.current().digipad), mouse_touch = false,
         -- Optional mouse input can stand in for touch while testing the on-screen gamepad.
-        mouse_touch_enabled = options.mouse_touch == true}
+        mouse_touch_enabled = options.mouse_touch == true, speed_keys = speed_menu.tracker(),
+        chart = damage_chart.create(), timeline = input_timeline.create()}
     music.play("bgm/main.wma")
     -- A startup recording is already queued by the host; route consumes it on the first frame.
     if options.start_screen == "replay" then state.active = "title" end
@@ -273,9 +277,33 @@ function flow.describe(state)
     local status = recording.status_text()
     local unlocked = unlock.describe()
     return (state.session and "network_frames=" .. state.session.frames .. " " or "") .. "screen=" .. state.active .. (detail ~= "" and " " .. detail or "") .. (status and " status=" .. status or "")
-        .. (unlocked and " unlock=" .. unlocked or "")
+        .. (unlocked and " unlock=" .. unlocked or "") .. (speed.tenths < 10 and " speed=" .. speed.tenths / 10 or "")
+        .. (state.speed_menu and " speed_menu" or "")
+end
+-- The runtime stops a frame with too many commands: 1048576 in this runtime (engine.frame_command_limit), 4096 in
+-- older ones (such as the released Windows build that a joining player may run). A busy fight (battle mode's
+-- soldiers) and the OpenLF2 overlays drawn on top of it could get there, so the frame's commands are counted and
+-- those past a safe share of the limit are left out: the last overlays lose detail instead of the game stopping.
+-- (Some runtime commands, such as translated text, add commands of their own, hence the margin.)
+local command_budget = math.floor((engine.frame_command_limit or 4096) * 0.92)
+local function budgeted(context)
+    local used = 0
+    local limited = {}
+    for name, command in pairs(context) do
+        if type(command) == "function" then
+            limited[name] = function(...)
+                if used >= command_budget then return end
+                used = used + 1
+                return command(...)
+            end
+        else
+            limited[name] = command
+        end
+    end
+    return limited
 end
 function flow.draw(state, context)
+    context = budgeted(context)
     context.replay_drop(can_drop_replay(state))
     local shown_options = user_options.current()
     context.render_filter(shown_options.upscaling_filter)
@@ -302,6 +330,9 @@ function flow.draw(state, context)
         local fps_text = "FPS: " .. state.fps
         font.gdi(context, fps_text, math.floor((constants.screen.width - font.gdi_width(fps_text)) / 2), 0x213)
     end
+    if state.active == "match" and state.chart.match then damage_chart.draw(state.chart, context) end
+    if state.active == "match" then input_timeline.draw(state.timeline, context) end
+    if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
 end
 local function disconnect(state, message)
@@ -312,15 +343,98 @@ local function disconnect(state, message)
     state.title = title.create(state.options)
     state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
     state.launch.message = message
+    state.speed_menu, state.speed_release = nil, nil
     speed.fast = false
     music.play("bgm/main.wma")
 end
 -- Whether Escape (and Android's back button, which the platform reports as Escape) is free to ask about leaving
--- the game: not in a network game, where it disconnects, and not on the launch screen's pages that use it.
+-- the game: not in a network game, where it disconnects, not on the network screen, where it cancels, and not on the
+-- launch screen's pages that use it.
 local function escape_free(state)
-    if state.session then return false end
+    if state.session or state.active == "network" then return false end
     if state.active == "launch" then return state.launch.page == "menu" end
     return true
+end
+local function merged_letters(into, from)
+    for letter in from:gmatch(".") do
+        if not into:find(letter, 1, true) then into = into .. letter end
+    end
+    return into
+end
+-- The keys of a player slot, for fight_due, in a fixed order so that two states compare as strings.
+local key_letters = {"u", "d", "l", "r", "c", "b", "f"}
+-- Changes at most this many frames after the previous one merge into one state ("pressed together").
+local merge_frames = 1
+-- The most states that wait; more merge the two oldest, so the lag stays under this many key reads.
+local state_queue_limit = 3
+local function key_state(held)
+    local letters = {}
+    for _, letter in ipairs(key_letters) do
+        if held:find(letter, 1, true) then letters[#letters + 1] = letter end
+    end
+    return table.concat(letters)
+end
+-- The game speed menu's setting (base/ui/speed_menu): a fight runs on `speed.tenths` of every ten frames, spread
+-- evenly, and it reads the players' keys on every second frame that runs (input_phase in base/game/match). The keys
+-- reach it through a queue of whole key states per player slot, like lf2-arena's: each change of a slot's keys is
+-- queued with its frame, a change at most one frame after the previous one merges into it (keys pressed together,
+-- such as defend, up and attack, stay one state), and each read takes the oldest state. A merge that would erase a
+-- change (a press and release in two frames) queues it instead, so a short tap still counts. More than three
+-- waiting states merge the two oldest, so the lag stays under three reads. Function keys of skipped frames are added
+-- to the next frame that runs. F4 always runs a frame, so a stopped fight can still be left. A network game runs
+-- the host's speed from the exchanged input, so both peers skip the same frames and queue the same keys.
+local function fight_due(state, input)
+    local tenths = state.session and (input.speed_tenths or 10) or speed.tenths
+    -- While the flow waits for the keys to be let go (a screen has just changed), the fight does not run: the keys
+    -- pass through as they are, so the wait can end, and the buffer starts afresh after it.
+    if state.active ~= "match" or tenths >= 10 or state.wait_release then
+        state.speed_progress, state.speed_held, state.speed_input = 0, nil, nil
+        return true
+    end
+    state.speed_progress = (state.speed_progress or 0) + tenths
+    local due = state.speed_progress >= 10 or input.functions:find("4", 1, true) ~= nil
+    local keys = state.speed_input
+    if not keys then
+        keys = {frame = 0, slots = {}}
+        for slot = 0, 7 do keys.slots[slot] = {given = key_state(input[slot] or ""), queue = {}} end
+        state.speed_input = keys
+    end
+    keys.frame = keys.frame + 1
+    for slot = 0, 7 do
+        local entry = keys.slots[slot]
+        local queue = entry.queue
+        local now = key_state(input[slot] or "")
+        local tail = queue[#queue]
+        if now ~= (tail and tail.keys or entry.given) then
+            local before = queue[#queue - 1]
+            before = before and before.keys or entry.given
+            if tail and keys.frame - tail.frame <= merge_frames and now ~= before then
+                tail.keys, tail.frame = now, keys.frame
+            else
+                queue[#queue + 1] = {keys = now, frame = keys.frame}
+                if #queue > state_queue_limit then table.remove(queue, 1) end
+            end
+        end
+    end
+    local held = state.speed_held or {}
+    local fields = {"functions", "function_presses"}
+    if due then
+        state.speed_progress = math.max(state.speed_progress - 10, 0)
+        local reads = (state.match.match.input_phase + 1) % 2 == 0
+        for slot = 0, 7 do
+            local entry = keys.slots[slot]
+            if reads and #entry.queue > 0 then entry.given = table.remove(entry.queue, 1).keys end
+            input[slot] = entry.given
+        end
+        for _, field in ipairs(fields) do
+            if held[field] then input[field] = merged_letters(input[field] or "", held[field]) end
+        end
+        state.speed_held = nil
+    else
+        for _, field in ipairs(fields) do held[field] = merged_letters(held[field] or "", input[field] or "") end
+        state.speed_held = held
+    end
+    return due
 end
 -- raw: the host's input; screens get it per player slot, with the last known pointer position
 -- and `click`, a fresh press of the left button.
@@ -394,10 +508,54 @@ function flow.update(state, raw, context)
         if touched:find(letter, 1, true) and not input[0]:find(letter, 1, true) then input[0] = input[0] .. letter end
     end
     local local_keys = input.keys
+    -- The damage share chart follows the local mouse, before a network game exchanges input.
+    if state.active == "match" then
+        damage_chart.pointer(state.chart, input)
+        input_timeline.pointer(state.timeline, input)
+    end
+    -- In a network game the match screen's camera follows this computer's fighters, and Tab picks whom to follow
+    -- once they are all down (base/ui/match_screen, drawing only).
+    if state.active == "match" then
+        local follow = nil
+        if state.session then follow = state.session.host and {0, 1, 2, 3} or {4, 5, 6, 7} end
+        state.match.follow = follow
+        local tab = input.keys[virtual_keys.tab] == true
+        if tab and not state.tab_held then state.match.follow_next = (state.match.follow_next or 0) + 1 end
+        state.tab_held = tab
+    end
+    if state.session then
+        -- The game speed menu in a network game works on the local keys before they are sent. The game below keeps
+        -- running (both peers must run the same frames), so the local players' keys are held back instead, while
+        -- the menu is open and until the keys that closed it are let go; Escape closes it without disconnecting.
+        local speed_keys = speed_menu.observe(state.speed_keys, input)
+        -- The pointer and click are worked out further down only for the exchanged input, so the menu gets its own.
+        local menu_input = {}
+        for key, value in pairs(input) do menu_input[key] = value end
+        if not (input.pointer_x and input.pointer_x >= 0 and input.pointer_y >= 0) then
+            menu_input.pointer_x, menu_input.pointer_y = state.pointer_x, state.pointer_y
+        end
+        menu_input.click = input.button and not state.speed_button
+        state.speed_button = input.button
+        if state.speed_menu then
+            if speed_menu.update(state.speed_menu, menu_input, context, speed_keys) == "close" then
+                state.speed_menu, state.speed_release = nil, true
+            end
+        elseif speed_keys then
+            state.speed_menu = speed_menu.create(not state.session.host)
+        end
+        if state.speed_release and controls.idle(input) and not input.keys[virtual_keys.escape]
+           and not input.keys[virtual_keys.enter] then
+            state.speed_release = nil
+        end
+        if state.speed_menu or state.speed_release then
+            for slot = 0, 7 do input[slot] = "" end
+            input.functions, input.function_presses = "", ""
+        end
+    end
     if state.session then
         unlock.observe(input)
         if not state.session.pending then input.unlock_bits = unlock.take_pending() end
-        if input.keys[virtual_keys.escape] then
+        if input.keys[virtual_keys.escape] and not (state.speed_menu or state.speed_release) then
             disconnect(state, i18n.tr("Network game disconnected"))
         else
             local hp = state.active == "match" and recording.hp_sum(state.match.match) or 0
@@ -408,6 +566,7 @@ function flow.update(state, raw, context)
             else input = combined end
         end
     end
+    speed.network_tenths = state.session and input.speed_tenths or nil
     local joining_cli = state.network_cli and state.active == "network"
     if input.pointer_x and input.pointer_x >= 0 and input.pointer_y >= 0 then
         state.pointer_x, state.pointer_y = input.pointer_x, input.pointer_y
@@ -438,6 +597,8 @@ function flow.update(state, raw, context)
     if input.keys[virtual_keys.escape] and not state.escape_held then escape_pressed = true end
     state.escape_held = input.keys[virtual_keys.escape] == true
     local closed_now = false
+    -- Typing M, F, D opens the game speed menu, and typing it again closes it (network games handle it above).
+    local speed_keys = not state.session and speed_menu.observe(state.speed_keys, input)
     if state.quit_dialog then
         -- While the question is open the screen below is frozen.
         local answer = quit_dialog.update(state.quit_dialog, input, context)
@@ -453,6 +614,13 @@ function flow.update(state, raw, context)
             -- pointer button until it is released.
             state.quit_dialog, state.wait_release, state.swallow_pointer, closed_now = nil, true, true, true
         end
+    elseif state.speed_menu and not state.session then
+        -- Like the question above, the screen below is frozen while the menu is open.
+        if speed_menu.update(state.speed_menu, input, context, speed_keys) == "close" then
+            state.speed_menu, state.wait_release, state.swallow_pointer, closed_now = nil, true, true, true
+        end
+    elseif speed_keys then
+        state.speed_menu = speed_menu.create()
     elseif escape_pressed and escape_free(state) then
         state.quit_dialog = quit_dialog.create(state.active == "match" and "leave" or "exit")
     end
@@ -463,7 +631,26 @@ function flow.update(state, raw, context)
     if state.swallow_pointer and not state.quit_dialog then
         if input.button then input.button, input.click = false, false else state.swallow_pointer = nil end
     end
-    if not state.quit_dialog and not closed_now then route(state, input, context) end
+    -- The input timeline watches this computer's first player with a fighter: the keys as held, and as the fight
+    -- read them.
+    local fight = state.active == "match" and state.match.match
+    local first_local = state.session and not state.session.host and 4 or 0
+    local watched = first_local
+    for slot = first_local, first_local + 3 do
+        if fight and fight.items[slot] and fight.items[slot].human then watched = slot; break end
+    end
+    local held_keys, frame_before = input[watched], fight and fight.frame_number
+    local reads = fight and (fight.input_phase + 1) % 2 == 0
+    if not state.quit_dialog and (state.session or not state.speed_menu) and not closed_now and fight_due(state, input) then
+        route(state, input, context)
+    end
+    if fight and state.active == "match" and state.match.match == fight then
+        local stepped = fight.frame_number ~= frame_before
+        local waiting = state.speed_input and #state.speed_input.slots[watched].queue or nil
+        input_timeline.record(state.timeline, fight, held_keys, stepped and reads and input[watched] or nil, stepped,
+            waiting)
+    end
+    if state.active == "match" then damage_chart.observe(state.chart, state.match.match) end
     if joining_cli then
         if state.network.session.error then error(state.network.session.error) end
         -- CLI traces start at the title; the handshake consumes no trace frames.

@@ -17,13 +17,121 @@ local frames = {[1] = {0, 41, 434, 80}, [2] = {434, 41, 62, 68}, [3] = {0, 247, 
 local function inside(input, left, top, right, bottom)
     return input.pointer_x >= left and input.pointer_x <= right and input.pointer_y >= top and input.pointer_y <= bottom
 end
+-- The question when the host offers its game scripts (base/game/network): Allow or Refuse, Refuse focused first;
+-- Escape refuses.
+local question = {x = 192, y = 196, width = 410, height = 132}
+local allow_button = {x = question.x + 50, y = question.y + 94, width = 130, height = 26}
+local refuse_button = {x = question.x + 230, y = question.y + 94, width = 130, height = 26}
+local function inside_area(input, area)
+    return inside(input, area.x, area.y, area.x + area.width, area.y + area.height)
+end
+-- The join page's server list (OpenLF2 extension): the addresses joined before and the favorites, saved in
+-- config.json ("network_servers"), favorites first. A click on a row joins it, a click on its star makes it a
+-- favorite or not. While the page is open, each server is checked in turn with a short connection (closed at once;
+-- a waiting host goes on waiting): green is a host waiting for a player, red is none.
+local servers_limit, servers_shown = 8, 5
+local server_rows = {x = 0xdb, y = 418, width = 363, height = 17, step = 18}
+local star_width = 26
+local probe_timeout, probe_interval = 1500, 4000
+local function load_servers()
+    local document = engine.read_settings()
+    local saved = type(document) == "table" and document.network_servers
+    local list = {}
+    if type(saved) == "table" then
+        for _, entry in ipairs(saved) do
+            if type(entry) == "table" and type(entry.address) == "string" and #entry.address <= 15
+               and entry.address:match("^[%d.]+$") and #list < servers_limit then
+                list[#list + 1] = {address = entry.address, favorite = entry.favorite == true}
+            end
+        end
+    end
+    return list
+end
+local function save_servers(list)
+    local document = engine.read_settings()
+    if type(document) ~= "table" then document = {} end
+    local saved = {}
+    for index, entry in ipairs(list) do saved[index] = {address = entry.address, favorite = entry.favorite} end
+    document.network_servers = saved
+    engine.write_settings(document)
+end
+-- Favorites first, then the others, each in their order.
+local function sort_servers(list)
+    local sorted = {}
+    for pass = 1, 2 do
+        for _, entry in ipairs(list) do
+            if entry.favorite == (pass == 1) then sorted[#sorted + 1] = entry end
+        end
+    end
+    return sorted
+end
+-- A joined address moves to the front of its group; the oldest non-favorite goes when the list is full.
+local function remember_server(state, address)
+    local favorite = false
+    for index = #state.servers, 1, -1 do
+        if state.servers[index].address == address then
+            favorite = state.servers[index].favorite
+            table.remove(state.servers, index)
+        end
+    end
+    table.insert(state.servers, 1, {address = address, favorite = favorite})
+    state.servers = sort_servers(state.servers)
+    for index = #state.servers, 1, -1 do
+        if #state.servers <= servers_limit then break end
+        if not state.servers[index].favorite then table.remove(state.servers, index) end
+    end
+    save_servers(state.servers)
+end
+local function server_row(index)
+    local top = server_rows.y + (index - 1) * server_rows.step
+    return {x = server_rows.x, y = top, width = server_rows.width, height = server_rows.height}
+end
+-- One step of the status checks: start the next one that is due, or finish the running one.
+local function probe_servers(state)
+    local now = engine.network_time()
+    local probe = state.probe
+    if probe then
+        local _, problem = engine.network("poll")
+        local up
+        if engine.network("status") == "connected" then up = true
+        elseif problem or now - probe.started > probe_timeout then up = false end
+        if up ~= nil then
+            engine.network("close")
+            state.server_status[probe.address] = {up = up, checked = now}
+            state.probe = nil
+        end
+        return
+    end
+    for index = 1, math.min(#state.servers, servers_shown) do
+        local address = state.servers[index].address
+        local status = state.server_status[address]
+        if not status or now - status.checked > probe_interval then
+            if engine.network("join", address, state.session.port) then
+                state.probe = {address = address, started = now}
+            else
+                state.server_status[address] = {up = false, checked = now}
+            end
+            return
+        end
+    end
+end
+local function stop_probe(state)
+    if state.probe then
+        engine.network("close")
+        state.probe = nil
+    end
+end
 function screen.create(options)
     return {session = transport.create(options), page = "choice", address = "", previous_keys = {},
+        servers = sort_servers(load_servers()), server_status = {},
         nav = navigation.create(), keyboard = false,
         background = (options.menu_seed or 0) % 13 + 1, pointer_x = 0, pointer_y = 0,
-        bind = options.network_bind or "0.0.0.0", started = engine.network_time()}
+        bind = options.network_bind or "0.0.0.0", started = engine.network_time(),
+        -- After a script swap the joining game connects again; the host may need a moment to listen again.
+        retry_until = options.network_retry and engine.network_time() + 5000 or nil}
 end
 function screen.begin(state, host, address)
+    stop_probe(state)
     state.message = nil
     if transport.start(state.session, host, address) then state.page = "waiting"
     else state.message = state.session.error end
@@ -31,25 +139,57 @@ function screen.begin(state, host, address)
 end
 -- The clickable areas for keyboard and controller navigation (base/ui/navigation); the join
 -- page starts on its Connect button so Enter connects at once, as it always did.
-local function navigation_spec(page)
+local function navigation_spec(page, asking, servers)
     local target = navigation.target
+    if asking then
+        return {page = "share", default = 2, autofocus = true, targets = {
+            target(allow_button.x, allow_button.y, allow_button.x + allow_button.width, allow_button.y + allow_button.height),
+            target(refuse_button.x, refuse_button.y, refuse_button.x + refuse_button.width, refuse_button.y + refuse_button.height)}}
+    end
     if page == "waiting" then return {page = page, targets = {target(0x142, 0x169, 0x1d8, 0x182)}} end
     if page == "join" then
-        return {page = page, autofocus = true,
-            targets = {target(0xef, 0x165, 0x185, 0x17e), target(0x19b, 0x165, 0x231, 0x17e)}}
+        local targets = {target(0xef, 0x165, 0x185, 0x17e), target(0x19b, 0x165, 0x231, 0x17e)}
+        for index = 1, math.min(servers, servers_shown) do
+            local row = server_row(index)
+            targets[#targets + 1] = target(row.x, row.y, row.x + row.width - star_width, row.y + row.height)
+        end
+        return {page = page, autofocus = true, targets = targets}
     end
     return {page = page, targets = {target(0x104, 0x112, 0x223, 0x12c), target(0x104, 0x131, 0x223, 0x14a),
         target(0x104, 0x150, 0x223, 0x169)}}
 end
 function screen.update(state, flow_input, context)
-    local input = navigation.apply(state.nav, flow_input, navigation_spec(state.page))
+    local asking = state.page == "waiting" and state.session.phase == "ask"
+    local input = navigation.apply(state.nav, flow_input, navigation_spec(state.page, asking, #state.servers))
     state.pointer_x, state.pointer_y = input.pointer_x, input.pointer_y
     local cancel = input.nav.cancel
-    if state.page == "waiting" then
+    if asking then
+        if cancel or input.click and inside_area(input, refuse_button) then
+            sounds.direct(state, "cancel")
+            transport.answer(state.session, false)
+        elseif input.click and inside_area(input, allow_button) then
+            sounds.direct(state, "ok")
+            transport.answer(state.session, true)
+        end
+        cancel = false
+        local _, problem = transport.poll(state.session)
+        if problem then state.page, state.message = "choice", problem end
+    elseif state.page == "waiting" then
         cancel = cancel or input.click and inside(input, 0x142, 0x169, 0x1d8, 0x182)
         if not cancel then
             local ready, problem = transport.poll(state.session)
-            if ready then context.action("network_ready")
+            if ready then
+                if not state.session.host then remember_server(state, state.session.address) end
+                context.action("network_ready")
+            elseif problem and state.retry_until and not state.session.host
+                   and engine.network_time() < state.retry_until then
+                screen.begin(state, false, state.session.address)
+            elseif problem and state.session.host and state.session.accepted then
+                -- A peer that left before the game started (a status check, a refused script offer...): the host
+                -- waits again, and tells why only when the peer got as far as its profile.
+                local shown = state.session.profiled and problem or nil
+                screen.begin(state, true, state.session.address)
+                state.message = shown
             elseif problem then state.page, state.message = "choice", problem end
         end
     elseif state.page == "join" then
@@ -67,10 +207,29 @@ function screen.update(state, flow_input, context)
             if #state.address < 15 then state.address = state.address .. character end
         end
         cancel = cancel or input.click and inside(input, 0x19b, 0x165, 0x231, 0x17e)
+        -- A saved server: its star makes it a favorite or not, the rest of its row joins it.
+        local joining = false
+        for index = 1, math.min(#state.servers, servers_shown) do
+            local row, entry = server_row(index), state.servers[index]
+            if not cancel and input.click and inside_area(input, row) then
+                if input.pointer_x >= row.x + row.width - star_width then
+                    entry.favorite = not entry.favorite
+                    state.servers = sort_servers(state.servers)
+                    save_servers(state.servers)
+                else
+                    sounds.direct(state, "ok")
+                    state.address, joining = entry.address, true
+                    screen.begin(state, false, entry.address)
+                end
+                break
+            end
+        end
         -- Enter connects wherever the focus is (the raw keys: navigation may have taken it).
-        if not cancel and (flow_input.keys[virtual_keys.enter] and not state.previous_keys[virtual_keys.enter]
+        if not cancel and not joining and (flow_input.keys[virtual_keys.enter] and not state.previous_keys[virtual_keys.enter]
            or input.click and inside(input, 0xef, 0x165, 0x185, 0x17e)) then
             screen.begin(state, false, state.address)
+        elseif not cancel and not joining then
+            probe_servers(state)
         end
     else
         cancel = cancel or input.click and inside(input, 0x104, 0x150, 0x223, 0x169)
@@ -83,6 +242,7 @@ function screen.update(state, flow_input, context)
         end
     end
     if cancel then
+        stop_probe(state)
         transport.close(state.session)
         sounds.direct(state, "cancel")
         if state.page == "choice" then context.action("launch") else state.page = "choice" end
@@ -118,11 +278,52 @@ function screen.draw(state, context)
         sprite(13, 0xef, 0x165)
         sprite(12, 0x19b, 0x165)
         font.gdi(context, state.address .. "_", 0x153, 0x147, 0xffffff, 0x001e50)
+        local shown = math.min(#state.servers, servers_shown)
+        if shown > 0 then
+            font.gdi(context, i18n.tr("Servers (click to join, * for favorite)"), server_rows.x + 4, server_rows.y - 17, 0xc8c8e0)
+        end
+        for index = 1, shown do
+            local row, entry = server_row(index), state.servers[index]
+            local pointed = inside_area(state, row)
+            context.fill(row.x, row.y, row.width, row.height, pointed and 0x32 or 0x10, pointed and 0x4d or 0x20,
+                pointed and 0x9a or 0x50, 220)
+            local status = state.server_status[entry.address]
+            local checking = state.probe and state.probe.address == entry.address
+            local r, g, b, text = 0x80, 0x80, 0x90, "checking..."
+            if status and status.up then r, g, b, text = 0x50, 0xe0, 0x70, "waiting for you"
+            elseif status then r, g, b, text = 0xe0, 0x50, 0x50, "not hosting" end
+            if checking and not status then text = "checking..." end
+            context.fill(row.x + 6, row.y + 5, 7, 7, r, g, b)
+            font.gdi(context, entry.address, row.x + 20, row.y, 0xffffff)
+            font.gdi(context, i18n.tr(text), row.x + 150, row.y, r * 65536 + g * 256 + b)
+            font.gdi(context, "*", row.x + row.width - 16, row.y, entry.favorite and 0xffd24a or 0x606070)
+        end
     else
         local input = {pointer_x = state.pointer_x, pointer_y = state.pointer_y}
         if inside(input, 0x104, 0x112, 0x223, 0x12c) then sprite(5, 0x103, 0x112) end
         if inside(input, 0x104, 0x131, 0x223, 0x14a) then sprite(6, 0x103, 0x130) end
         if inside(input, 0x104, 0x150, 0x223, 0x169) then sprite(12, 0x149, 0x150) end
+    end
+    if state.page == "waiting" and state.session.phase == "ask" then
+        context.fill(question.x, question.y, question.width, question.height, 0xa0, 0xa0, 0xc0)
+        context.fill(question.x + 2, question.y + 2, question.width - 4, question.height - 4, 0x10, 0x20, 0x50)
+        local middle = question.x + math.floor(question.width / 2)
+        font.gdi(context, i18n.tr("The host wants to send its game scripts (%d KB).",
+            math.floor(state.session.share.size / 1024 + 0.5)), middle, question.y + 16, 0xffffff, nil, "center")
+        font.gdi(context, i18n.tr("Do you allow it?"), middle, question.y + 36, 0xffffff, nil, "center")
+        font.gdi(context, i18n.tr("They replace your scripts until you restart the game."), middle, question.y + 62,
+            0xa0a0c0, nil, "center")
+        for _, button in ipairs({{allow_button, "Allow"}, {refuse_button, "Refuse"}}) do
+            local area = button[1]
+            local pointed = inside_area(state, area)
+            context.fill(area.x, area.y, area.width, area.height, 0xa0, 0xa0, 0xc0)
+            context.fill(area.x + 1, area.y + 1, area.width - 2, area.height - 2,
+                pointed and 0x32 or 0x10, pointed and 0x4d or 0x20, pointed and 0x9a or 0x50)
+            font.gdi(context, i18n.tr(button[2]), area.x + math.floor(area.width / 2), area.y + 5, 0xffffff, nil, "center")
+        end
+    end
+    if state.session.notice and state.page == "waiting" then
+        font.gdi(context, i18n.clip(i18n.tr(state.session.notice), 94), 10, 490)
     end
     if state.message then font.gdi(context, i18n.clip(state.message, 94), 10, 510) end
     context.image("pe/lf2_cursor", math.min(state.pointer_x, 0x307), math.min(state.pointer_y + 2, 0x217), true)
