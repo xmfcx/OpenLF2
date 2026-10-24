@@ -354,6 +354,13 @@ function flow.draw(state, context)
     -- Fullscreen (OpenLF2 extension): no-op without a real window; reasserted every frame
     -- like the filter above.
     context.fullscreen(shown_options.fullscreen)
+    -- Screens can draw hints at this computer's pointer while it shows (drawing only, like the pointer itself).
+    local pointer_shown = state.local_pointer_x
+        and engine.network_time() - (state.pointer_moved_at or -pointer_shown_ms) < pointer_shown_ms
+    local shown_screen = screen_state(state)
+    if type(shown_screen) == "table" then
+        shown_screen.local_pointer = pointer_shown and {state.local_pointer_x, state.local_pointer_y} or nil
+    end
     if state.active == "match" and shown_options.battlefield_layout == "expand" then
         screen_module(state.active).draw(screen_state(state), context, state.window_bounds)
     else

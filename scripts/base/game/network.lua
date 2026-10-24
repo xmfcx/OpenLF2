@@ -375,6 +375,7 @@ function network.exchange(state, input, hp)
     local click = host_click or join_click
     if click then
         combined.pointer_x, combined.pointer_y, combined.button = click[1], click[2], true
+        combined.click_host = host_click ~= nil
         if (host_click and state.host) or (not host_click and not state.host) then combined.applied_click = state.sent_click end
     end
     for slot = 0, 7 do
