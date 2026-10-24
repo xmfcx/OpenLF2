@@ -138,7 +138,7 @@ local function disconnect(state, message)
     state.launch.page, state.launch.message = "menu", message
     state.title = title.create(state.options)
     state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
-    state.speed_menu, state.speed_release = nil, nil
+    state.speed_menu, state.speed_release, state.local_click = nil, nil, nil
     speed.fast = false
     music.play("bgm/main.wma")
 end
@@ -591,9 +591,19 @@ function flow.update(state, raw, context)
            and not input.keys[virtual_keys.enter] then
             state.speed_release = nil
         end
+        -- A click of this computer's mouse waits until a packet carries it (base/game/network: one click a frame);
+        -- a newer click replaces one that still waits.
+        local pointed = input.pointer_x and input.pointer_x >= 0 and input.pointer_y >= 0
+        if pointed and input.button and not state.local_button then
+            state.local_click = {math.min(input.pointer_x, constants.screen.width - 1),
+                math.min(input.pointer_y, constants.screen.height - 1)}
+        end
+        state.local_button = input.button
+        input.click_at = state.local_click
         if state.speed_menu or state.speed_release then
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses = "", ""
+            input.click_at, state.local_click = nil, nil
         end
     end
     if state.session then
@@ -607,7 +617,10 @@ function flow.update(state, raw, context)
             if problem then
                 disconnect(state, problem)
             elseif not combined then return false
-            else input = combined end
+            else
+                input = combined
+                if input.applied_click and input.applied_click == state.local_click then state.local_click = nil end
+            end
         end
     end
     speed.network_tenths = state.session and input.speed_tenths or nil
@@ -619,7 +632,8 @@ function flow.update(state, raw, context)
     -- Renderer capability flags are kept for frames that don't repeat them.
     if input.filters then state.filters = input.filters end
     input.filters = state.filters or {}
-    input.click = input.button and not state.previous_button
+    -- An exchanged button is one click (see the network exchange above), also on two frames in a row.
+    input.click = input.button and (input.network or not state.previous_button)
     state.previous_button = input.button
     -- Unlock words: typed marks are taken before the screen runs, except during a replay
     -- (recorded bits act instead); a recording match stores the frame's bits.
