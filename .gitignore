@@ -12,3 +12,5 @@
 *.so
 *.dylib
 __pycache__/
+/.idea/
+/cmake-build-*/
