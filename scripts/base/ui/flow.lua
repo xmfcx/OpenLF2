@@ -127,6 +127,22 @@ local function leave_replay(state)
     state.wait_release = true
 end
 
+-- Ends the session (a network connection, or a local game) and opens the launch menu with a clean state: the next
+-- game starts as after a program start. `message` (or nil) shows on the launch menu.
+local function disconnect(state, message)
+    if state.session then network.close(state.session) end
+    state.session = nil
+    controls.replace_names(nil)
+    unlock.end_replay()
+    state.active, state.wait_release = "launch", nil
+    state.launch.page, state.launch.message = "menu", message
+    state.title = title.create(state.options)
+    state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
+    state.speed_menu, state.speed_release = nil, nil
+    speed.fast = false
+    music.play("bgm/main.wma")
+end
+
 local function route(state, input, context)
     if can_drop_replay(state) then
         local block, problem = engine.take_recording()
@@ -274,6 +290,12 @@ local function route(state, input, context)
         state.active = "title"
         -- Do not turn the key returning to the title into a new title action.
         state.wait_release = true
+    elseif requested == "quit" and state.active == "title" then
+        -- The title's Quit (OpenLF2 change): the original closes the program here, OpenLF2 goes back to the launch
+        -- menu, whose Exit closes it. In a network game both computers choose it on the same frame and each closes
+        -- its side of the connection.
+        disconnect(state, nil)
+        state.wait_release = true
     elseif requested then context.action(requested) end
 end
 function flow.describe(state)
@@ -361,18 +383,6 @@ function flow.draw(state, context)
         local x, y = pointer_position(state)
         draw_image("pe/lf2_cursor", x, y, true)
     end
-end
-local function disconnect(state, message)
-    network.close(state.session)
-    state.session = nil
-    controls.replace_names(nil)
-    state.active, state.wait_release = "launch", nil
-    state.title = title.create(state.options)
-    state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
-    state.launch.message = message
-    state.speed_menu, state.speed_release = nil, nil
-    speed.fast = false
-    music.play("bgm/main.wma")
 end
 -- Whether Escape (and Android's back button, which the platform reports as Escape) is free to ask about leaving
 -- the game: not in a network game, where it disconnects, not on the network and versions screens, where it goes back,
