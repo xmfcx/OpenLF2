@@ -25,6 +25,21 @@ local refuse_button = {x = question.x + 230, y = question.y + 94, width = 130, h
 local function inside_area(input, area)
     return inside(input, area.x, area.y, area.x + area.width, area.y + area.height)
 end
+-- When the host names a game version (base/ui/versions) other than this one, the question also offers to switch to
+-- it: the game installs it if needed, restarts in it and joins the host again.
+local switch_buttons = {
+    switch = {x = question.x + 15, y = question.y + 94, width = 120, height = 26},
+    allow = {x = question.x + 145, y = question.y + 94, width = 120, height = 26},
+    refuse = {x = question.x + 275, y = question.y + 94, width = 120, height = 26},
+}
+local function switchable(state)
+    local version = state.session.host_version
+    return engine.versions ~= nil and version ~= nil and version ~= "" and version ~= transport.own_version()
+end
+local function question_buttons(state)
+    if switchable(state) then return switch_buttons.switch, switch_buttons.allow, switch_buttons.refuse end
+    return nil, allow_button, refuse_button
+end
 -- The join page's server list (OpenLF2 extension): the addresses joined before and the favorites, saved in
 -- config.json ("network_servers"), favorites first. A click on a row joins it, a click on its star makes it a
 -- favorite or not. While the page is open, each server is checked in turn with a short connection (closed at once;
@@ -142,9 +157,11 @@ end
 local function navigation_spec(page, asking, servers)
     local target = navigation.target
     if asking then
-        return {page = "share", default = 2, autofocus = true, targets = {
-            target(allow_button.x, allow_button.y, allow_button.x + allow_button.width, allow_button.y + allow_button.height),
-            target(refuse_button.x, refuse_button.y, refuse_button.x + refuse_button.width, refuse_button.y + refuse_button.height)}}
+        local targets = {}
+        for _, area in ipairs(asking) do
+            targets[#targets + 1] = target(area.x, area.y, area.x + area.width, area.y + area.height)
+        end
+        return {page = "share", default = #targets, autofocus = true, targets = targets}
     end
     if page == "waiting" then return {page = page, targets = {target(0x142, 0x169, 0x1d8, 0x182)}} end
     if page == "join" then
@@ -158,18 +175,68 @@ local function navigation_spec(page, asking, servers)
     return {page = page, targets = {target(0x104, 0x112, 0x223, 0x12c), target(0x104, 0x131, 0x223, 0x14a),
         target(0x104, 0x150, 0x223, 0x169)}}
 end
+-- One step of switching to the host's game version: install it from the version index when it is missing, then
+-- start it with the host's address, so the game restarts in it and joins again.
+function screen.switch_step(state, cancel)
+    local switch = state.switch
+    local function stop(message)
+        state.switch, state.page, state.message = nil, "choice", message
+    end
+    if cancel then return stop("Switching canceled.") end
+    local function launch()
+        local started, problem = engine.versions("launch", switch.id, switch.address, switch.port)
+        if not started then return stop(problem) end
+        switch.phase, switch.text, switch.progress = "launching", "Restarting the game...", nil
+    end
+    if switch.phase == "start" then
+        local info = engine.versions("describe") or {}
+        local installed = info.base_id == switch.id
+        for _, version in ipairs(info.installed or {}) do installed = installed or version.id == switch.id end
+        if installed then return launch() end
+        local started, problem = engine.versions("index")
+        if not started then return stop(problem) end
+        switch.phase, switch.text = "index", "Reading the version list..."
+        return
+    end
+    if switch.phase ~= "index" and switch.phase ~= "install" then return end
+    local job = engine.versions("poll") or {}
+    if job.state == "running" then
+        switch.progress = job.progress
+    elseif job.state == "failed" then
+        stop(job.message)
+    elseif job.state == "done" and switch.phase == "index" then
+        local started, problem = engine.versions("install", switch.id)
+        if not started then return stop(problem) end
+        switch.phase, switch.text, switch.progress = "install", "Downloading...", 0
+    elseif job.state == "done" and switch.phase == "install" then
+        launch()
+    end
+end
 function screen.update(state, flow_input, context)
     local asking = state.page == "waiting" and state.session.phase == "ask"
-    local input = navigation.apply(state.nav, flow_input, navigation_spec(state.page, asking, #state.servers))
+    local switch, allow, refuse = question_buttons(state)
+    local areas = asking and (switch and {switch, allow, refuse} or {allow, refuse}) or nil
+    local input = navigation.apply(state.nav, flow_input, navigation_spec(state.page, areas, #state.servers))
     state.pointer_x, state.pointer_y = input.pointer_x, input.pointer_y
     local cancel = input.nav.cancel
-    if asking then
-        if cancel or input.click and inside_area(input, refuse_button) then
+    if state.page == "switching" then
+        screen.switch_step(state, cancel)
+        cancel = false
+    elseif asking then
+        if cancel or input.click and inside_area(input, refuse) then
             sounds.direct(state, "cancel")
             transport.answer(state.session, false)
-        elseif input.click and inside_area(input, allow_button) then
+        elseif input.click and inside_area(input, allow) then
             sounds.direct(state, "ok")
             transport.answer(state.session, true)
+        elseif switch and input.click and inside_area(input, switch) then
+            sounds.direct(state, "ok")
+            state.switch = {id = state.session.host_version, address = state.session.address,
+                port = state.session.port, phase = "start"}
+            transport.close(state.session)
+            state.page, state.message = "switching", nil
+            screen.switch_step(state, false)
+            return
         end
         cancel = false
         local _, problem = transport.poll(state.session)
@@ -311,9 +378,17 @@ function screen.draw(state, context)
         font.gdi(context, i18n.tr("The host wants to send its game scripts (%d KB).",
             math.floor(state.session.share.size / 1024 + 0.5)), middle, question.y + 16, 0xffffff, nil, "center")
         font.gdi(context, i18n.tr("Do you allow it?"), middle, question.y + 36, 0xffffff, nil, "center")
-        font.gdi(context, i18n.tr("They replace your scripts until you restart the game."), middle, question.y + 62,
-            0xa0a0c0, nil, "center")
-        for _, button in ipairs({{allow_button, "Allow"}, {refuse_button, "Refuse"}}) do
+        local switch, allow, refuse = question_buttons(state)
+        if switch then
+            font.gdi(context, i18n.tr("The host runs version %s, you run %s.", state.session.host_version,
+                transport.own_version() or "?"), middle, question.y + 62, 0xffd24a, nil, "center")
+        else
+            font.gdi(context, i18n.tr("They replace your scripts until you restart the game."), middle, question.y + 62,
+                0xa0a0c0, nil, "center")
+        end
+        local shown = {{allow, "Allow"}, {refuse, "Refuse"}}
+        if switch then table.insert(shown, 1, {switch, "Switch version"}) end
+        for _, button in ipairs(shown) do
             local area = button[1]
             local pointed = inside_area(state, area)
             context.fill(area.x, area.y, area.width, area.height, 0xa0, 0xa0, 0xc0)
@@ -321,6 +396,16 @@ function screen.draw(state, context)
                 pointed and 0x32 or 0x10, pointed and 0x4d or 0x20, pointed and 0x9a or 0x50)
             font.gdi(context, i18n.tr(button[2]), area.x + math.floor(area.width / 2), area.y + 5, 0xffffff, nil, "center")
         end
+    end
+    if state.page == "switching" and state.switch then
+        context.fill(question.x, question.y, question.width, question.height, 0xa0, 0xa0, 0xc0)
+        context.fill(question.x + 2, question.y + 2, question.width - 4, question.height - 4, 0x10, 0x20, 0x50)
+        local middle = question.x + math.floor(question.width / 2)
+        font.gdi(context, i18n.tr("Switching to version %s", state.switch.id), middle, question.y + 24, 0xffffff, nil, "center")
+        local text = state.switch.text or ""
+        if state.switch.progress then text = string.format("%s %d%%", text, math.floor(state.switch.progress * 100)) end
+        font.gdi(context, i18n.tr(text), middle, question.y + 52, 0xc8c8e0, nil, "center")
+        font.gdi(context, i18n.tr("Escape: cancel"), middle, question.y + 96, 0x8080a0, nil, "center")
     end
     if state.session.notice and state.page == "waiting" then
         font.gdi(context, i18n.clip(i18n.tr(state.session.notice), 94), 10, 490)

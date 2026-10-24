@@ -345,6 +345,21 @@ else()
 endif()
 target_link_libraries(openlf2 PRIVATE openlf2_engine openlf2_resources openlf2_adapter_sdl
     openlf2_adapter_luajit openlf2_adapter_compression openlf2_adapter_crypto openlf2_adapter_music openlf2_adapter_network openlf2_adapter_download SDL3::SDL3)
+# Game versions (OpenLF2 extension): installed builds, the published index and switching between them.
+set(OPENLF2_VERSION_INDEX_URL "" CACHE STRING "HTTPS address of the game version index (versions.json)")
+if(WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(openlf2_platform_name "windows-x64")
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(openlf2_platform_name "linux-x64")
+else()
+    string(TOLOWER "${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" openlf2_platform_name)
+endif()
+target_sources(openlf2 PRIVATE src/app/versions.cpp)
+target_link_libraries(openlf2 PRIVATE ZLIB::ZLIB)
+target_compile_definitions(openlf2 PRIVATE "OPENLF2_PLATFORM_NAME=\"${openlf2_platform_name}\""
+    "OPENLF2_VERSION_INDEX_URL=\"${OPENLF2_VERSION_INDEX_URL}\"")
+add_dependencies(openlf2 openlf2_build_info)
+target_include_directories(openlf2 PRIVATE "${PROJECT_BINARY_DIR}/generated")
 if(OPENLF2_DEPENDENCY_PROVIDER STREQUAL "web")
     target_link_libraries(openlf2 PRIVATE openlf2_adapter_settings)
     target_link_options(openlf2 PRIVATE

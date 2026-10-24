@@ -71,9 +71,10 @@ public:
     // Diagnostic text from the active screen's optional describe(); for tests and traces.
     virtual Result<std::string> describe() = 0;
 };
-// All services must outlive the runtime.
+class VersionStore;
+// All services must outlive the runtime. `versions` is optional (game versions, OpenLF2 extension).
 Result<std::unique_ptr<ScriptRuntime>> make_script_runtime(bool enable_jit, const ResourceSource& resources,
                                                            const ScriptDataSource& data, ScriptRandom& random,
                                                            SettingsStore& settings, ScriptRecordings& recordings,
-                                                           NetworkTransport& network);
+                                                           NetworkTransport& network, VersionStore* versions = nullptr);
 }

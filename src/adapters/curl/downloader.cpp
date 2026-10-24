@@ -100,6 +100,7 @@ Result<std::string> android_ca_bundle() {
 #endif
 class CurlDownloader final : public Downloader {
 public:
+    explicit CurlDownloader(bool verify_server) : verify_server_(verify_server) {}
     Result<Bytes> fetch(std::string_view url, std::size_t limit, const DownloadProgress& progress) const override {
         const std::unique_ptr<CURL, CleanupEasy> handle(curl_easy_init());
         if (!handle) return fail(ErrorCode::dependency, "download: libcurl could not start a transfer");
@@ -109,9 +110,9 @@ public:
         CURLcode code = CURLE_OK;
         set(handle.get(), CURLOPT_URL, address.c_str(), code);
         set(handle.get(), CURLOPT_ERRORBUFFER, message.data(), code);
-        // Downloads accept HTTPS connections without authenticating the server.
-        set(handle.get(), CURLOPT_SSL_VERIFYPEER, 0L, code);
-        set(handle.get(), CURLOPT_SSL_VERIFYHOST, 0L, code);
+        // Downloads accept HTTPS connections without authenticating the server, unless asked to.
+        set(handle.get(), CURLOPT_SSL_VERIFYPEER, verify_server_ ? 1L : 0L, code);
+        set(handle.get(), CURLOPT_SSL_VERIFYHOST, verify_server_ ? 2L : 0L, code);
 #ifdef __ANDROID__
         // Android names CA files using hashes that need not match the OpenSSL
         // version linked into curl. Load the system PEM certificates as a bundle.
@@ -170,12 +171,13 @@ public:
 
 private:
     CurlSession session_;
+    bool verify_server_ = false;
 };
 }
-Result<std::unique_ptr<Downloader>> make_downloader() {
+Result<std::unique_ptr<Downloader>> make_downloader(bool verify_server) {
     if (const auto code = curl_global_init(CURL_GLOBAL_DEFAULT); code != CURLE_OK) {
         return fail(ErrorCode::dependency, std::string("download: libcurl: ") + curl_easy_strerror(code));
     }
-    return std::unique_ptr<Downloader>(std::make_unique<CurlDownloader>());
+    return std::unique_ptr<Downloader>(std::make_unique<CurlDownloader>(verify_server));
 }
 }

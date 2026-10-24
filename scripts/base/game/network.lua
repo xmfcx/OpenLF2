@@ -18,6 +18,24 @@ local share_limit = 16 * 1024 * 1024
 local share_piece = 16384
 local ask_timeout = 120000
 local operations = {module = true, replace = true, extend = true}
+-- After its offer the host also names its game version (base/ui/versions) on a line of its own; joining games
+-- before this ignore the line, newer ones can offer to switch to that version.
+local version_prefix = "OpenLF2 version "
+-- This build's game version, from its label ("OpenLF2 <version> (<commit>)").
+function network.own_version()
+    return engine.build_label and engine.build_label:match("^OpenLF2 (%S+)") or nil
+end
+local function take_version_line(state)
+    if state.host_version or #state.received < #version_prefix then return end
+    if state.received:sub(1, #version_prefix) ~= version_prefix then return end
+    local line = state.received:match("^" .. version_prefix .. "([%w%.%_%+%-]+)\n")
+    if line then
+        state.host_version = line
+        state.received = state.received:sub(#version_prefix + #line + 2)
+    elseif #state.received > #version_prefix + 65 then
+        state.host_version = ""
+    end
+end
 local function failed(state, message)
     engine.network("close")
     state.phase, state.error = "failed", message
@@ -98,7 +116,7 @@ function network.start(state, host, address)
     state.host, state.error, state.received, state.address = host, nil, "", address
     state.share, state.notice = nil, state.host and state.notice or nil
     -- `accepted`: a peer connected to this host; `profiled`: its profile arrived (see ui/network's waiting page).
-    state.accepted, state.profiled = false, false
+    state.accepted, state.profiled, state.host_version = false, false, nil
     state.names, state.pending, state.sequence, state.frames = nil, nil, 0, 0
     local started, problem = engine.network(host and "host" or "join", address, state.port)
     if not started then return failed(state, problem) end
@@ -209,7 +227,10 @@ function network.poll(state)
             if state.host and engine.scripts then
                 state.share = {bundle = encode_scripts(engine.scripts()), sent = 0}
                 if #state.share.bundle > share_limit then return failed(state, "Network engine/scripts/mod profile mismatch") end
-                if not send(state, share_header .. string.format("%08d", #state.share.bundle) .. "\n") then return nil, state.error end
+                local offer = share_header .. string.format("%08d", #state.share.bundle) .. "\n"
+                local version = network.own_version()
+                if version then offer = offer .. version_prefix .. version .. "\n" end
+                if not send(state, offer) then return nil, state.error end
                 state.phase, state.deadline = "offered", engine.network_time() + ask_timeout
             elseif not state.host and profile:sub(1, #profile_prefix) == profile_prefix
                    and profile:sub(#profile_prefix + 1):match("^%x+$") then
@@ -242,9 +263,13 @@ function network.poll(state)
         if not size or size < 1 or size > share_limit then return failed(state, "Invalid network scripts offer") end
         state.share = {size = size, chunks = {}, received = 0}
         state.phase, state.deadline = "ask", engine.network_time() + ask_timeout
+        take_version_line(state)
         return false
     end
-    if state.phase == "ask" then return false end
+    if state.phase == "ask" then
+        take_version_line(state)
+        return false
+    end
     if state.phase == "greeting" then
         local greeting = take(state, 14)
         if not greeting then return false end

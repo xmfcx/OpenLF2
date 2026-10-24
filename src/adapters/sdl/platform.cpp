@@ -1263,6 +1263,25 @@ Result<std::filesystem::path> settings_directory() {
     return std::filesystem::path(reinterpret_cast<const char8_t*>(path.get()));
 #endif
 }
+Result<void> launch_program(const std::filesystem::path& program, std::span<const std::string> arguments) {
+#if defined(__SWITCH__) || defined(__vita__) || defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+    (void)program;
+    (void)arguments;
+    return fail(ErrorCode::unsupported, "this platform cannot start other programs");
+#else
+    const auto name = program.u8string();
+    std::vector<std::string> owned{std::string(name.begin(), name.end())};
+    owned.insert(owned.end(), arguments.begin(), arguments.end());
+    std::vector<const char*> argv;
+    for (const auto& argument : owned) argv.push_back(argument.c_str());
+    argv.push_back(nullptr);
+    // SDL_DestroyProcess only frees SDL's handle: the program keeps running after this one quits.
+    SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+    if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
+    SDL_DestroyProcess(process);
+    return {};
+#endif
+}
 Result<std::unique_ptr<Platform>> make_platform(const ResourceSource& resources, const Viewport& viewport,
                                                 const MusicDecoder& decoder, std::string_view renderer,
                                                 const std::optional<WindowPlacement>& placement) {

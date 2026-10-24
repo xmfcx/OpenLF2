@@ -68,7 +68,15 @@ end
 
 local function menu(state, input, context)
     background(state)
-    text(state, engine.build_label, 790 - font.gdi_width(engine.build_label), 4, 0x5077d0)
+    -- The build label opens the game versions (OpenLF2 extension, base/ui/versions).
+    local label_left = 790 - font.gdi_width(engine.build_label)
+    local pointed = inside(input, label_left - 4, 0, 794, 20)
+    text(state, engine.build_label, label_left, 4, pointed and 0xa0c8ff or 0x5077d0)
+    if pointed and input.click then
+        sounds.direct(state, "ok")
+        context.action("versions")
+        return
+    end
     -- The block is left-aligned, as far right as its widest line allows; the last line (the links) sits a little
     -- apart from the others.
     local widest = 0

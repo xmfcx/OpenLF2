@@ -4,6 +4,7 @@
 #include "openlf2/ports/scripts.hpp"
 #include "openlf2/core/json.hpp"
 #include "openlf2/core/files.hpp"
+#include "openlf2/ports/versions.hpp"
 #include "openlf2_build_info.hpp"
 #include <algorithm>
 #include <cmath>
@@ -50,16 +51,42 @@ struct BridgeSlot {
 // allocation failure cannot skip a C++ destructor in the native callback's frame.
 struct ResourceBridge {
     ResourceBridge(const ResourceSource& source, const ScriptDataSource& data_source, ScriptRandom& generator,
-                   SettingsStore& settings_store, ScriptRecordings& recording_service, NetworkTransport& transport)
+                   SettingsStore& settings_store, ScriptRecordings& recording_service, NetworkTransport& transport,
+                   VersionStore* version_store)
         : resources(source), data(data_source), random(generator), settings(settings_store),
-          recordings(recording_service), network(transport) {}
+          recordings(recording_service), network(transport), versions(version_store) {}
     const ResourceSource& resources;
     const ScriptDataSource& data;
     ScriptRandom& random;
     SettingsStore& settings;
     ScriptRecordings& recordings;
     NetworkTransport& network;
+    VersionStore* versions;
     std::optional<Result<std::string>> pending_network;
+    std::optional<Result<ScriptValue>> pending_version;
+    // Game versions (OpenLF2 extension, see ports/versions.hpp): "describe", "index", "install" id, "poll",
+    // "delete" id, "launch" id [join address, port].
+    bool version_operation(std::string_view operation, std::string_view id, std::string_view address,
+                           std::uint16_t port) noexcept {
+        try {
+            const auto started = [](Result<void> outcome) -> Result<ScriptValue> {
+                if (!outcome) return std::unexpected(outcome.error());
+                return ScriptValue{true};
+            };
+            if (!versions) pending_version = fail(ErrorCode::unsupported, "this run has no game versions");
+            else if (operation == "describe") pending_version = versions->describe();
+            else if (operation == "poll") pending_version = versions->poll();
+            else if (operation == "index") pending_version = started(versions->fetch_index());
+            else if (operation == "install") pending_version = started(versions->install(id));
+            else if (operation == "delete") pending_version = started(versions->remove(id));
+            else if (operation == "launch") {
+                std::vector<std::string> extra;
+                if (!address.empty()) extra = {"--join", std::string(address), "--port", std::to_string(port)};
+                pending_version = started(versions->launch(id, extra));
+            } else pending_version = fail(ErrorCode::script, "Unknown version operation");
+            return true;
+        } catch (...) { pending_version.reset(); return false; }
+    }
     bool network_operation(std::string_view operation, std::string_view value, std::uint16_t port) noexcept {
         try {
             pending_network = std::string{};
@@ -386,6 +413,32 @@ int network_operation(lua_State* state) {
     lua_pushlstring(state, bridge->pending_network->value().data(), bridge->pending_network->value().size());
     return 1;
 }
+void push_value(lua_State* state, const ScriptValue& value, int depth);
+int version_operation(lua_State* state) {
+    auto* bridge = resource_bridge(state);
+    if (lua_type(state, 1) != LUA_TSTRING) return luaL_error(state, "version operation must be a string");
+    std::size_t operation_size = 0, id_size = 0, address_size = 0;
+    const auto* operation = lua_tolstring(state, 1, &operation_size);
+    const auto* id = lua_type(state, 2) == LUA_TSTRING ? lua_tolstring(state, 2, &id_size) : "";
+    const auto* address = lua_type(state, 3) == LUA_TSTRING ? lua_tolstring(state, 3, &address_size) : "";
+    const auto port = lua_type(state, 4) == LUA_TNUMBER ? lua_tonumber(state, 4) : 12345;
+    if (operation_size > 16 || id_size > 64 || address_size > 64) return luaL_error(state, "version argument exceeds limit");
+    if (!std::isfinite(port) || port < 1 || port > 65535 || port != std::floor(port)) return luaL_error(state, "version port must be 1..65535");
+    if (!bridge->version_operation(std::string_view(operation, operation_size), std::string_view(id, id_size),
+                                   std::string_view(address, address_size), static_cast<std::uint16_t>(port))) {
+        return luaL_error(state, "version allocation failed");
+    }
+    if (!bridge->pending_version->has_value()) {
+        const auto& message = bridge->pending_version->error().message;
+        lua_pushnil(state);
+        lua_pushlstring(state, message.data(), message.size());
+        bridge->pending_version.reset();
+        return 2;
+    }
+    push_value(state, bridge->pending_version->value(), 0);
+    bridge->pending_version.reset();
+    return 1;
+}
 int network_time(lua_State* state) {
     lua_pushnumber(state, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count());
     return 1;
@@ -688,7 +741,7 @@ int open_libraries(lua_State* state) {
     lua_pushcclosure(state, write_settings, 1);
     lua_setglobal(state, "openlf2_write_settings");
     const std::pair<const char*, lua_CFunction> recording_functions[] = {
-        {"openlf2_network", network_operation}, {"openlf2_network_time", network_time},
+        {"openlf2_network", network_operation}, {"openlf2_network_time", network_time}, {"openlf2_versions", version_operation},
         {"openlf2_random_state", random_state}, {"openlf2_set_random_state", set_random_state},
         {"openlf2_reset_random_sequence", reset_random_sequence}, {"openlf2_save_recording", save_recording},
         {"openlf2_take_recording", take_recording}, {"openlf2_local_time", local_time}};
@@ -820,8 +873,8 @@ private:
 Result<std::unique_ptr<ScriptRuntime>> make_script_runtime(bool enable_jit, const ResourceSource& resources,
                                                            const ScriptDataSource& data, ScriptRandom& random,
                                                            SettingsStore& settings, ScriptRecordings& recordings,
-                                                           NetworkTransport& network) {
-    auto bridge = std::make_unique<ResourceBridge>(resources, data, random, settings, recordings, network);
+                                                           NetworkTransport& network, VersionStore* versions) {
+    auto bridge = std::make_unique<ResourceBridge>(resources, data, random, settings, recordings, network, versions);
     State state(luaL_newstate());
     if (!state) return fail(ErrorCode::script, "cannot allocate Lua state");
 #ifdef __EMSCRIPTEN__

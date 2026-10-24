@@ -251,4 +251,6 @@ Result<std::unique_ptr<Platform>> make_platform(const ResourceSource& resources,
                                                 const std::optional<WindowPlacement>& placement = std::nullopt);
 // The per-user directory for the configuration, created if needed (SDL_GetPrefPath).
 Result<std::filesystem::path> settings_directory();
+// Starts another program with `arguments` and returns without waiting for it (game versions, OpenLF2 extension).
+Result<void> launch_program(const std::filesystem::path& program, std::span<const std::string> arguments);
 }

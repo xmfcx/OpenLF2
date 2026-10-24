@@ -31,6 +31,7 @@ local function screen_module(name)
     if name == "ending" then return require("base/ui/ending") end
     if name == "network" then return require("base/ui/network") end
     if name == "launch" then return require("base/ui/launch") end
+    if name == "versions" then return require("base/ui/versions") end
     return title
 end
 -- Whether the current screen reads key sets directly (not mouse/touch via base/ui/navigation);
@@ -155,7 +156,11 @@ local function route(state, input, context)
         context.action("quit")
         return
     end
-    if requested == "network" then
+    if requested == "versions" then
+        state.versions = require("base/ui/versions").create(state.options)
+        state.active = "versions"
+        state.wait_release = true
+    elseif requested == "network" then
         state.network = require("base/ui/network").create(state.options)
         state.active = "network"
     elseif requested == "network_ready" then
@@ -348,10 +353,10 @@ local function disconnect(state, message)
     music.play("bgm/main.wma")
 end
 -- Whether Escape (and Android's back button, which the platform reports as Escape) is free to ask about leaving
--- the game: not in a network game, where it disconnects, not on the network screen, where it cancels, and not on the
--- launch screen's pages that use it.
+-- the game: not in a network game, where it disconnects, not on the network and versions screens, where it goes back,
+-- and not on the launch screen's pages that use it.
 local function escape_free(state)
-    if state.session or state.active == "network" then return false end
+    if state.session or state.active == "network" or state.active == "versions" then return false end
     if state.active == "launch" then return state.launch.page == "menu" end
     return true
 end

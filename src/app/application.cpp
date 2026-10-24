@@ -14,6 +14,8 @@
 #include "openlf2/ports/download.hpp"
 #include "openlf2/ports/platform.hpp"
 #include "openlf2/ports/scripts.hpp"
+#include "openlf2/ports/versions.hpp"
+#include "openlf2_build_info.hpp"
 #include "openlf2/resources/background_data.hpp"
 #include "openlf2/resources/stage_data.hpp"
 #include "openlf2/resources/bitmap.hpp"
@@ -121,6 +123,13 @@ struct Configuration {
     bool default_controller = false;
     std::vector<std::string> input_trace; // held action letters per frame, headless
     std::optional<std::uint32_t> seed;
+    // Game versions (OpenLF2 extension): this program's folder, all arguments (passed on when the chosen version
+    // starts at once), the arguments that stay when another version starts later (--config-dir and so on), and
+    // --no-redirect, which a started version gets so that it does not start yet another one.
+    std::filesystem::path program_directory;
+    std::vector<std::string> arguments;
+    std::vector<std::string> lasting_arguments;
+    bool no_redirect = false;
 };
 // Headless input trace mini-language: udlrcbf (player 1 actions), '/' next player, digits F1-F9,
 // "@X_Y" pointer, "#N" raw key, "$Nx"/"%x" controller, "^x" typed char, "&N_X_Y" touch.
@@ -375,6 +384,8 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
                                     const std::filesystem::path& directory) {
     Configuration config;
     config.scripts = directory / "scripts";
+    config.program_directory = directory;
+    config.arguments.assign(arguments.begin(), arguments.end());
     bool files_only = false;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         const auto& argument = arguments[index];
@@ -390,12 +401,21 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         }
         if (argument == "--help") config.help = true;
         else if (argument == "--headless") config.headless = true;
-        else if (argument == "--jit") config.jit = true;
-        else if (argument == "--no-jit") config.jit = false;
+        else if (argument == "--no-redirect") config.no_redirect = true;
+        else if (argument == "--jit" || argument == "--no-jit") {
+            config.jit = argument == "--jit";
+            config.lasting_arguments.push_back(argument);
+        }
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
-        else if (argument == "--mouse-touch") config.mouse_touch = true;
-        else if (argument == "--default-controller") config.default_controller = true;
+        else if (argument == "--mouse-touch") {
+            config.mouse_touch = true;
+            config.lasting_arguments.push_back(argument);
+        }
+        else if (argument == "--default-controller") {
+            config.default_controller = true;
+            config.lasting_arguments.push_back(argument);
+        }
         else if (argument == "--host" || argument == "--join" || argument == "--port") {
             if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a value");
             const auto& value = arguments[index];
@@ -434,11 +454,15 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--renderer") {
             if (++index == arguments.size()) return fail(ErrorCode::format, "--renderer needs a renderer name");
             config.renderer = arguments[index];
+            config.lasting_arguments.insert(config.lasting_arguments.end(), {argument, arguments[index]});
         }
         else if (argument == "--installer" || argument == "--scripts" || argument == "--mod"
                  || argument == "--config-dir" || argument == "--replay") {
             if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a path");
             const auto& value = arguments[index];
+            if (argument == "--installer" || argument == "--config-dir") {
+                config.lasting_arguments.insert(config.lasting_arguments.end(), {argument, value});
+            }
             if (argument == "--installer") config.installer = value;
             else if (argument == "--scripts") config.scripts = value;
             else if (argument == "--config-dir") config.config_directory = std::filesystem::path(value);
@@ -848,6 +872,55 @@ Result<void> run(const Configuration& config) {
         settings = make_file_settings(std::move(*directory));
     }
 #endif
+    // Game versions (OpenLF2 extension): the program the player starts records itself and opens the chosen version
+    // instead, when one is chosen and installed; a version started that way (or from the game) runs itself.
+    std::unique_ptr<VersionStore> versions;
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__) && !defined(__SWITCH__) && !defined(__vita__)
+    if (!config.headless) {
+        std::filesystem::path root;
+        if (config.config_directory) root = *config.config_directory / "versions";
+        else if (auto directory = settings_directory()) root = *directory / "versions";
+#ifdef _WIN32
+        const auto program = config.program_directory / "openlf2.exe";
+#else
+        const auto program = config.program_directory / "openlf2";
+#endif
+        std::error_code error;
+        const bool installed = !root.empty() && std::filesystem::weakly_canonical(program.parent_path().parent_path(), error)
+            == std::filesystem::weakly_canonical(root, error);
+        std::filesystem::path base_program = program;
+        std::string base_id = OPENLF2_VERSION_ID;
+        if (installed) {
+            std::string recorded_id;
+            if (auto recorded = recorded_base_program(*settings, &recorded_id)) {
+                base_program = *recorded;
+                base_id = recorded_id;
+            }
+        } else {
+            if (auto recorded = record_base_program(*settings, program, OPENLF2_VERSION_ID); !recorded) {
+                std::cerr << "Game versions: " << recorded.error().message << '\n';
+            }
+            const auto chosen = chosen_version(*settings);
+            if (!config.no_redirect && chosen && *chosen != OPENLF2_VERSION_ID) {
+                const auto target = root / std::filesystem::path(std::u8string(chosen->begin(), chosen->end())) / program.filename();
+                if (std::filesystem::is_regular_file(target, error)) {
+                    auto arguments = config.arguments;
+                    arguments.push_back("--no-redirect");
+                    if (auto started = launch_program(target, arguments); started) return {};
+                    else std::cerr << "Game versions: " << started.error().message << '\n';
+                }
+            }
+        }
+        // Version checksums come from the same server as the builds, so the server must be authenticated.
+        auto downloader = make_downloader(true);
+        if (!downloader) std::cerr << "Game versions: " << downloader.error().message << '\n';
+        if (!root.empty() && downloader) {
+            VersionSetup setup{root, program, base_program, base_id, OPENLF2_VERSION_ID, OPENLF2_COMMIT,
+                OPENLF2_PLATFORM_NAME, OPENLF2_VERSION_INDEX_URL, config.lasting_arguments};
+            versions = make_version_store(std::move(setup), *settings, std::move(*downloader));
+        }
+    }
+#endif
     // Open the window before installer setup, restoring saved desktop placement if present.
     std::unique_ptr<Platform> platform;
     if (!config.headless) {
@@ -898,7 +971,8 @@ Result<void> run(const Configuration& config) {
     if (config.replay) recordings.offer(*config.replay);
     auto network = make_network_transport();
     if (!network) return std::unexpected(network.error());
-    auto runtime = make_script_runtime(config.jit, resources, original_data, random, *settings, recordings, **network);
+    auto runtime = make_script_runtime(config.jit, resources, original_data, random, *settings, recordings, **network,
+                                       versions.get());
     if (!runtime) return std::unexpected(runtime.error());
     // Settings are host-generated literals; screens decide what an entry point means.
     const auto sources = bundle_source(scripts->modules) + std::string(bootstrap->begin(), bootstrap->end());
@@ -1261,6 +1335,17 @@ Result<void> run(const Configuration& config) {
                 continue;
             }
             std::cout << "Requested screen: " << action << " (not implemented yet)\n";
+        }
+        // A game version chosen in the game starts now, and this program quits.
+        if (versions) {
+            if (auto request = versions->take_launch()) {
+                if (auto started = launch_program(request->program, request->arguments); started) {
+                    save_window();
+                    return {};
+                } else {
+                    std::cerr << "Game versions: " << started.error().message << '\n';
+                }
+            }
         }
         // All settings, replay offers and window actions above happen while Lua
         // is idle. Resource reads during presentation use immutable archive data

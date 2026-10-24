@@ -22,6 +22,8 @@ local function new_array(capacity)
     return {}
 end
 local network, network_time = openlf2_network, openlf2_network_time
+-- Game versions (OpenLF2 extension); runtimes before it have none.
+local versions = openlf2_versions
 local set_environment = setfenv
 local unpack_values = unpack or table.unpack
 local traceback = debug.traceback
@@ -62,7 +64,7 @@ local function evaluate(declaration, previous, require_module)
             take_recording = take_recording, local_time = local_time, build_label = build_label,
             network = network, network_time = network_time, scripts = script_declarations,
             -- The most commands one frame may hold (MAX_FRAME_COMMANDS below; older runtimes allow 4096).
-            frame_command_limit = 1048576,
+            frame_command_limit = 1048576, versions = versions,
             replace_scripts = function(list, changes) return replace_scripts(list, changes) end},
     }
     environment.math.random = nil

@@ -21,6 +21,8 @@ public:
                                 const DownloadProgress& progress) const = 0;
 };
 // Call it on the main thread. Fails with ErrorCode::dependency when the build has no
-// download support.
-Result<std::unique_ptr<Downloader>> make_downloader();
+// download support. By default the server is not authenticated (the installer is checked
+// against known SHA-256 values); `verify_server` authenticates it, for downloads whose
+// checksums come from the same server (game versions).
+Result<std::unique_ptr<Downloader>> make_downloader(bool verify_server = false);
 }
