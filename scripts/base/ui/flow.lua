@@ -307,8 +307,25 @@ local function budgeted(context)
     end
     return limited
 end
+-- The mouse pointer (OpenLF2 extension): every screen's pointer image (pe/lf2_cursor) shows where this computer's
+-- mouse really is, also in a network game, whose exchanged input has no pointer. Screens without a pointer of their
+-- own (the character selection, the fight) show it for three seconds after the mouse moves. Drawing only: the
+-- screens' own logic keeps the pointer it always had.
+local pointer_shown_ms = 3000
+local function pointer_position(state)
+    return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
+end
 function flow.draw(state, context)
     context = budgeted(context)
+    local pointer_drawn = false
+    local draw_image = context.image
+    context.image = function(resource, x, y, keyed)
+        if resource == "pe/lf2_cursor" then
+            pointer_drawn = true
+            if state.local_pointer_x then x, y = pointer_position(state) end
+        end
+        return draw_image(resource, x, y, keyed)
+    end
     context.replay_drop(can_drop_replay(state))
     local shown_options = user_options.current()
     context.render_filter(shown_options.upscaling_filter)
@@ -339,6 +356,11 @@ function flow.draw(state, context)
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
+    if not pointer_drawn and state.local_pointer_x
+       and engine.network_time() - (state.pointer_moved_at or -pointer_shown_ms) < pointer_shown_ms then
+        local x, y = pointer_position(state)
+        draw_image("pe/lf2_cursor", x, y, true)
+    end
 end
 local function disconnect(state, message)
     network.close(state.session)
@@ -513,6 +535,13 @@ function flow.update(state, raw, context)
         if touched:find(letter, 1, true) and not input[0]:find(letter, 1, true) then input[0] = input[0] .. letter end
     end
     local local_keys = input.keys
+    -- This computer's mouse, for drawing the pointer (see flow.draw).
+    if input.pointer_x and input.pointer_x >= 0 and input.pointer_y and input.pointer_y >= 0 then
+        if input.pointer_x ~= state.local_pointer_x or input.pointer_y ~= state.local_pointer_y then
+            state.pointer_moved_at = engine.network_time()
+        end
+        state.local_pointer_x, state.local_pointer_y = input.pointer_x, input.pointer_y
+    end
     -- The damage share chart follows the local mouse, before a network game exchanges input.
     if state.active == "match" then
         damage_chart.pointer(state.chart, input)
