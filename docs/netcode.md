@@ -111,9 +111,24 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 | Jitter | The client lead and the input delay grow to cover it. More rollback, no stop. |
 | A slow player | The server uses the predictions for that player. The others see that fighter hold its keys. The slow player sees corrections. |
 | A short drop (under about 2 seconds) | The server predicts the keys of the player. After 500 ms without input, it predicts no keys, so that the fighter does not run off. When the player comes back, the client gets the confirmed ticks it missed and runs them to catch up. |
-| A long drop | The lobby setting decides: the server pauses the match with a command, or gives the fighter to the AI (`set_control`). The other players see who dropped. |
-| A return | The client connects again with its session token. The server sends a snapshot of the current state and the ticks since then. The client takes the snapshot and joins at the current tick. |
+| A long drop (over about 2 seconds) | The server pauses the match and makes an autosave. The other players choose what happens next (see "A dropped player"). |
+| A return | The client connects again with its player key. The server sends a snapshot of the current state and the ticks since then. The client takes the snapshot and joins at the current tick. If the match is paused, it goes on after a countdown. |
 | A server stop | The server writes the confirmed ticks as it goes. After a restart, it runs them up to the last tick and the clients join again. |
+
+## A dropped player
+
+When a player drops for more than about 2 seconds:
+
+1. The server pauses the match for everybody and shows who dropped and for how long.
+2. The server makes an autosave: a snapshot of the match state and the confirmed ticks, with the setup of the room. The autosave lets the match go on later, also after a server restart or after everybody left.
+3. The players who are still there choose one of these:
+   - Wait for the player. A timer shows how long they waited. When the player returns, the match goes on after a countdown of 3 seconds.
+   - Let the AI take over the fighter. The match goes on after the countdown. When the player returns, they take the fighter back without a pause.
+   - Give the fighter to another person in the room, for example a spectator. That person controls the fighter until the player returns and takes it back.
+   - Stop and resume later. The match ends now, and the autosave stays. A player can open it again from the room, and the match goes on from the paused tick when the players are back.
+4. Who decides: the player with the room role chooses, and the others see the choice. A room setting can choose without a question (for example "always wait 60 seconds, then let the AI take over").
+
+Every pause, for a drop or for the pause key, ends with the same countdown, so that nobody loses a fighter to a sudden start.
 
 ## What players see
 
@@ -170,8 +185,8 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 6. Rooms, spectators, chat, presence, ready check and invites.
 7. Tuning: the automatic input delay, the clock lead, the connection line and the logs.
 
-## Decisions for the owner
+## Decisions
 
-1. Input delay: the default proposed here is automatic, from 0 to 2 ticks. A fixed delay is simpler and more even. Which one?
-2. A long drop: pause the match, or give the fighter to the AI at once? The design allows a lobby setting for both. Which one is the default?
-3. ENet as the UDP library: it adds one dependency (built from source for Windows like the others). Is this all right?
+1. Input delay: automatic, from 0 to 2 ticks, from the RTT and the jitter. The player can fix it in the options (owner's decision).
+2. A long drop: the match pauses, the server makes an autosave, and the players choose to wait, let the AI take over, give the fighter to another person, or stop and resume later (owner's decision, with the last two options added).
+3. ENet is the UDP library (owner's decision).

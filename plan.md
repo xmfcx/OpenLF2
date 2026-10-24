@@ -45,6 +45,9 @@ This plan collects the requested features for network play with friends and puts
 - Every network game uses the server program as its authority, also when it runs on the computer of a player.
 - Each computer shows its own screen. Only commands change the shared state.
 - Key quirks of the original menus (release before a key acts again, repeat while held) belong to the local controllers. Rules that change a result stay in the models.
+- The input delay is automatic (0 to 2 ticks). The player can fix it.
+- A long drop pauses the match and makes an autosave. Then the players choose what happens (docs/netcode.md, "A dropped player").
+- ENet is the UDP library.
 
 ## Phase 0: Quit (done)
 
@@ -111,7 +114,7 @@ Step 5 of docs/netcode.md:
 
 - AI control: each human item (0 to 7) gets a control mode, player or AI. `read_input` skips an item in AI mode, and `ai.control` runs for it before the computer fighters. The item stays human for the camera, the results, the recording and the end of a stage. The command `set_control(slot, mode)` changes it on the same tick for everyone.
 - Short drops: after 500 ms without input, the server predicts no keys for that player.
-- Long drops: pause the match, or give the fighter to the AI (a lobby setting).
+- Long drops: the match pauses and the server makes an autosave. The players choose to wait, let the AI take over, give the fighter to another person, or stop and resume later from the autosave. Every pause ends with a countdown of 3 seconds.
 - Returns: the player key gives the slots back, and a snapshot with the ticks since then brings the client to the current tick.
 - The server writes the confirmed ticks, so that it can go on after a restart.
 
