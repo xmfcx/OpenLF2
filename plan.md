@@ -1,6 +1,6 @@
 # Plan for OpenLF2 network play
 
-This plan collects the requested features for network play with friends and puts them in an order. The design is in docs/ui-network-architecture.md: a shared session model that changes only through commands, a local UI on each computer, and a server program that is always the authority of a network game. docs/network.md describes the network code as it is today.
+This plan collects the requested features for network play with friends and puts them in an order. The design is in two documents. docs/ui-network-architecture.md describes a shared session model that changes only through commands, a local UI on each computer, and a server program that is always the authority of a network game. docs/netcode.md describes the fight over UDP with prediction and rollback, the handling of bad connections, rooms, spectators and chat. docs/network.md describes the network code as it is today.
 
 ## Where the game is now
 
@@ -37,6 +37,8 @@ This plan collects the requested features for network play with friends and puts
 6. The other players can give the fighter of a dropped player to the AI. The player takes the fighter back when they return.
 7. Key presses reach the fight with less delay. The client merges key changes like lf2-arena did, and the server gets cleaner input.
 8. The delay between a key press and its action is measured and logged, so that it can be reduced. Differences between the computers are logged too.
+9. Network play is as smooth as possible: responsive at any ping, resilient against slow and dropping connections, and true to the real result.
+10. A server holds many clients at the same time, with modern multiplayer features such as chat.
 
 ## Decisions
 
@@ -46,7 +48,7 @@ This plan collects the requested features for network play with friends and puts
 
 ## Phase 0: Quit (done)
 
-The title Quit ends the session and opens the launch menu (81bf33c). With the server program, Quit sends `leave` instead, and the other players stay (Phase 3).
+The title Quit ends the session and opens the launch menu (81bf33c). With the server program, Quit sends `leave` instead, and the other players stay (Phase 5).
 
 ## Phase 1: measure
 
@@ -77,36 +79,51 @@ Split each menu into a shared model and a local UI (see docs/ui-network-architec
 
 Make sure that headless traces of the menus give the same results as before the split.
 
-## Phase 3: the server program
+## Phase 3: rollback foundation (scripts only)
 
-1. Engine: a listener with many connections and a poll per connection (the transport has one connection today), and a headless mode that follows the frame clock and the network (the headless mode runs only a trace today).
-2. The framed protocol: a length, a type and a body for each message. Types: hello (profile and version), lobby, command, tick input, acknowledgment, state hash, snapshot.
-3. The lobby: players with names, game versions and owned slots, the settings, and the role that starts games. The role goes to another player when its owner leaves.
-4. The game: Host starts `openlf2 --server` on the same computer and joins it at 127.0.0.1. Join connects to a server. The server list of the network screen stays.
-5. The menus run on commands through the server. Each computer shows its own screen.
+Step 1 of docs/netcode.md:
+
+- A hash of the match state.
+- Save and restore of the match state, including the random generator of the engine and the module state that the fight changes. The fixed game data is shared and not copied.
+- The rollback test: save at tick N, run M ticks, restore, run them again, compare the hashes. Run it over many seeds and every mode.
+- Measure the cost of a tick and of a save in each mode, battle mode included.
+
+## Phase 4: local rollback
+
+Step 2 of docs/netcode.md: two simulated clients in one program, with a network simulator between them (delay, jitter, loss). The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here, without a real network.
+
+## Phase 5: the server program
+
+Steps 3 and 4 of docs/netcode.md, with the session model of docs/ui-network-architecture.md:
+
+1. Engine: ENet (UDP with a reliable and an unreliable channel) behind the transport interface, many connections, and a headless server mode that follows the clock (`openlf2 --server`).
+2. The framed messages: hello (profile and version), lobby, command, input, confirmed tick, acknowledgment, hash, snapshot.
+3. The lobby and the menus on commands. Host starts the server program on the same computer and joins it at 127.0.0.1. Each computer shows its own screen.
+4. The fight: the clock lead, the input delay, the redundant inputs, the deadlines of the server, the rollback client, the hash checks and the snapshots. Pause, game speed and AI control are commands.
+5. The merge rule with real times on the client (the key times of Phase 1).
 6. The current two-computer protocol goes away.
 
-Make sure that three clients on one machine join one server, choose fighters on their own screens, and get the same model.
+Make sure that three clients and a server on one machine, with the network simulator on, end a fight with the same state hash as a run without the simulator.
 
-## Phase 4: the fight through the server
+## Phase 6: drops, returns and AI control
 
-1. The tick stream: each client sends its key states for a tick a few ticks ahead. The server combines the key states of all players for each tick and sends them with the commands of that tick to all clients.
-2. If the keys of a client are late, the server waits until a short limit, then uses the last key states of that player, so that one slow client does not stop the others.
-3. Pause and game speed become commands.
-4. The merge rule with real times: with the key times of Phase 1, a change less than 50 ms after the previous one merges into the same state, as in lf2-arena. Each client applies it before it sends a tick.
-5. Hashes: every few ticks, each client and the server compare a hash of the match state. On the first difference, each one writes the state and the last inputs to the log.
-6. Decision for the owner later: the original reads keys on every second frame. A server setting can read them on every frame, which halves the largest delay but changes how the game feels.
+Step 5 of docs/netcode.md:
 
-Make sure that a fight with three clients stays the same on all of them, and that a client that leaves does not stop the others.
-
-## Phase 5: AI control, drops and returns
-
-- AI control: each human item (0 to 7) gets a control mode, player or AI. `read_input` skips an item in AI mode, and `ai.control` runs for it before the computer fighters. The item stays human for the camera, the results, the recording and the end of a stage. The command `set_control(slot, mode)` changes the mode on the same tick for everyone.
-- Drops: the server finds a drop when a client sends nothing for a short time (for example 2 seconds). It pauses the match with a command and shows who dropped. The players choose to wait or to give the fighter to the AI.
-- Returns: a client that connects again with the same player name and session gets its slots back. It gets the match setup and the stream of ticks since the start, then runs them without drawing. Measure the speed of this replay first. Snapshots can make it shorter later.
-- Saved matches: the server writes the tick stream as it goes. After a restart, it runs the match up to the last tick and goes on.
+- AI control: each human item (0 to 7) gets a control mode, player or AI. `read_input` skips an item in AI mode, and `ai.control` runs for it before the computer fighters. The item stays human for the camera, the results, the recording and the end of a stage. The command `set_control(slot, mode)` changes it on the same tick for everyone.
+- Short drops: after 500 ms without input, the server predicts no keys for that player.
+- Long drops: pause the match, or give the fighter to the AI (a lobby setting).
+- Returns: the player key gives the slots back, and a snapshot with the ticks since then brings the client to the current tick.
+- The server writes the confirmed ticks, so that it can go on after a restart.
 
 Make sure that a client that quits during a survival stage and starts again returns to the same stage, at the same frame, with the same HP for all fighters.
+
+## Phase 7: rooms, spectators and chat
+
+Step 6 of docs/netcode.md: many rooms on one server, spectators with a delayed stream, text chat and short signals, presence, the ready check, invites with a room code.
+
+## Phase 8: tuning
+
+Step 7 of docs/netcode.md: the automatic input delay, the clock lead, the connection line and the logs.
 
 ## Order and size
 
@@ -115,11 +132,14 @@ Make sure that a client that quits during a survival stage and starts again retu
 | 0 Quit to the launch menu | small, done | no |
 | 1 Delay log | medium | yes (key times, log files) |
 | 2 Models, commands, local UI | large | no |
-| 3 Server program | large | yes |
-| 4 Fight through the server | large | yes |
-| 5 AI control, drops, returns | large | no for AI control, yes for the rest |
+| 3 Rollback foundation | medium | no |
+| 4 Local rollback | large | no |
+| 5 Server program | large | yes |
+| 6 Drops, returns, AI control | large | no for AI control, yes for the rest |
+| 7 Rooms, spectators, chat | large | yes |
+| 8 Tuning | medium | maybe |
 
-The versions feature delivers engine changes, so each phase can ship when it is ready.
+Phases 2 and 3 do not depend on each other. The versions feature delivers engine changes, so each phase can ship when it is ready.
 
 ## Open work from the versions feature
 
