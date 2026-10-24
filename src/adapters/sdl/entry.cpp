@@ -13,8 +13,12 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #ifdef OPENLF2_GUI_SUBSYSTEM
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 #ifdef __SWITCH__
