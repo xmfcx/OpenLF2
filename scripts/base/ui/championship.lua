@@ -569,57 +569,10 @@ function screen.round_over(state, match)
     state.taken, state.computers = {}, {}
 end
 
--- Mouse clicks (OpenLF2 extension) act as keys. On the fighter picture, the left and right parts step the choice and
--- the middle confirms. A click on a choice or an option row chooses it, and a click on the champion screen goes on.
--- To claim an entrant, a click presses attack for the first player of the computer that clicked who has none (in a
--- network game, held.click_host names that computer).
-local function clicked_key(state, held, key)
-    if not held.click then return key, held end
-    local x, y = held.pointer_x, held.pointer_y
-    local function hit(left, top, width, height) return x >= left and x < left + width and y >= top and y < top + height end
-    local function choice()
-        if hit(322, 232, 52, 19) then state.row = choice_rows.first; return "c" end
-        if hit(426, 232, 47, 20) then state.row = choice_rows.second; return "c" end
-        return key
-    end
-    if state.state == championship_states.selecting and state.slot < 8 then
-        if hit(52, 159, 120, 220) then
-            if x < 92 then return "l", held end
-            if x >= 132 then return "r", held end
-            return "c", held
-        end
-    elseif state.state == championship_states.confirming then
-        return choice(), held
-    elseif state.state == championship_states.options then
-        for row, highlight in pairs(option_highlights) do
-            if hit(highlight[2], highlight[3], highlight[1][3], highlight[1][4]) then
-                state.row = row
-                return "c", held
-            end
-        end
-    elseif state.state == championship_states.claiming then
-        local members = state.team and 4 or 2
-        if state.counter == members then return choice(), held end
-        for player = 0, 7 do
-            if state.counter < members and not state.taken[player]
-               and (held.click_host == nil or (player < 4) == held.click_host) then
-                local copy = {}
-                for name, value in pairs(held) do copy[name] = value end
-                copy[player] = "c"
-                return key, copy
-            end
-        end
-    elseif state.state == championship_states.finished then
-        return "c", held
-    end
-    return key, held
-end
-
 function screen.update(state, held, context)
     state.display = {}
     state.leave = nil
     local key = navigation.sample(state.input, held)
-    key, held = clicked_key(state, held, key)
     if state.state == championship_states.setup then setup(state) end
     state.blink = (state.blink + 1) % 30
     if state.state > championship_states.setup then key = selection(state, key) end

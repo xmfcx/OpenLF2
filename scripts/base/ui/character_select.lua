@@ -303,14 +303,6 @@ local function computer_count_menu(state, previous_menu)
         state.computers = minimum
     end
     local accept = previous_menu == menus.computer_count
-    local number = state.clicked_count
-    if number and state.clicked_by and number >= minimum and number <= free then
-        state.computers = number
-        local copy = {}
-        for name, value in pairs(state.held) do copy[name] = value end
-        copy[state.clicked_by] = "c"
-        state.held = copy
-    end
     for index = 0, 7 do
         local slot = state.slots[index]
         if slot.ready then
@@ -542,7 +534,6 @@ local function options_menu(state, previous_menu, context)
     end
     text(state, difficulties[options.difficulty] or "", 174, 115, option_blue)
 
-    if state.clicked_row then options.row = state.clicked_row end
     local keys = {}
     local accept = previous_menu == menus.options
     for index = 0, 7 do
@@ -651,80 +642,8 @@ function selection.match_options(state)
         fighters = state.fighters, backgrounds = state.backgrounds, slots = slots}
 end
 
--- Mouse clicks (OpenLF2 extension) act as one frame of a player's keys. In a slot's picture and the rows below it,
--- the left and right parts step the choice and the middle confirms. In the menus, the first ready player of the
--- computer that clicked acts. A network game's click comes from the exchanged input, with the computer that made
--- it (held.click_host), so both computers run it the same way.
-local slot_box = {left = 147, top = 94, width = 120, height = 188, step = 40}
-local function inside(x, y, left, top, width, height)
-    return x >= left and x < left + width and y >= top and y < top + height
-end
-local function owned(held, index)
-    if held.click_host == nil then return true end
-    return (index < 4) == held.click_host
-end
-local function first_ready(state, held)
-    for index = 0, 7 do
-        if state.slots[index].ready and owned(held, index) then return index end
-    end
-    return nil
-end
--- The key of a click at x in the slot box at column `col`.
-local function slot_key(slot, x, col)
-    if slot.phase == slot_phases.empty then return "c" end
-    if x < col + slot_box.left + slot_box.step then return "l" end
-    if x >= col + slot_box.left + slot_box.width - slot_box.step then return "r" end
-    return "c"
-end
-local function in_slot_box(x, y, index)
-    local col, row = origin(index)
-    return inside(x, y, col + slot_box.left, row + slot_box.top, slot_box.width, slot_box.height), col
-end
-local function clicked_keys(state, held)
-    state.clicked_count, state.clicked_row = nil, nil
-    if not held.click then return held end
-    local x, y = held.pointer_x, held.pointer_y
-    local index, key
-    if state.menu == menus.human_slots then
-        for slot = 0, 7 do
-            local phase = state.slots[slot].phase
-            local hit, col = in_slot_box(x, y, slot)
-            if hit and owned(held, slot) and (phase == slot_phases.empty or phase == slot_phases.choosing_fighter
-               or phase == slot_phases.choosing_team) then
-                index, key = slot, slot_key(state.slots[slot], x, col)
-            end
-        end
-    elseif state.menu == menus.computer_count then
-        -- The digits: computer_count_menu sets the number and confirms it if the number is available.
-        for number = 0, 7 do
-            if inside(x, y, 280 + number * 30, 283, 21, 21) then state.clicked_count = number end
-        end
-        state.clicked_by = first_ready(state, held)
-    elseif state.menu == menus.computer_slots then
-        local current = state.order[state.cursor + 1]
-        local hit, col = false, 0
-        if current then hit, col = in_slot_box(x, y, current) end
-        if hit then index, key = first_ready(state, held), slot_key(state.slots[current], x, col) end
-    elseif state.menu == menus.options then
-        for row, highlight in pairs(option_highlights) do
-            local by = first_ready(state, held)
-            if by and inside(x, y, highlight[2], highlight[3], highlight[1][3], highlight[1][4]) then
-                state.clicked_row = row
-                index, key = by, "c"
-            end
-        end
-        if inside(x, y, 603, 3, 190, 34) then index, key = first_ready(state, held), "r" end
-    end
-    if not index then return held end
-    local copy = {}
-    for name, value in pairs(held) do copy[name] = value end
-    copy[index] = key
-    return copy
-end
-
 function selection.update(state, held, context)
     state.display = {}
-    held = clicked_keys(state, held)
     state.held = held
     state.leave = false
     state.blink = (state.blink + 1) % 30
@@ -754,22 +673,6 @@ function selection.draw(state, context)
         elseif command[1] == "text" then font.gdi(context, command[2], command[3], command[4], command[5], command[6], command[7])
         elseif command[1] == "fill" then
             context.fill(command[2], command[3], command[4], command[5], command[6], command[6], command[6])
-        end
-    end
-    -- Arrows show where a click steps the choice (see clicked_keys), while this computer's pointer shows.
-    local pointer = state.local_pointer
-    if not pointer then return end
-    for index = 0, 7 do
-        local phase = state.slots[index].phase
-        local stepping = (state.menu == menus.human_slots and (phase == slot_phases.choosing_fighter
-            or phase == slot_phases.choosing_team)) or (state.menu == menus.computer_slots and state.order
-            and index == state.order[state.cursor + 1])
-        local hit, col = in_slot_box(pointer[1], pointer[2], index)
-        if stepping and hit then
-            local _, row = origin(index)
-            local y = row + slot_box.top + 52
-            font.gdi(context, "<", col + slot_box.left + 4, y, white, 0)
-            font.gdi(context, ">", col + slot_box.left + slot_box.width - 12, y, white, 0)
         end
     end
 end

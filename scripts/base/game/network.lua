@@ -302,15 +302,6 @@ function network.poll(state)
     return state.phase == "ready"
 end
 local function has(value, bit) return math.floor(value / bit) % 2 == 1 end
--- Bytes 17 to 20 (OpenLF2 extension, the original sends 1 1 1 1): a click of this computer's mouse, so that the menus
--- run it on both computers. 1 1 1 1 is no click, else x and y, each as its high byte plus 2 and its low byte.
-local function packet_click(packet)
-    local high_x, low_x, high_y, low_y = packet:byte(17, 20)
-    if high_x == 1 and low_x == 1 and high_y == 1 and low_y == 1 then return nil end
-    local x, y = (high_x - 2) * 256 + low_x, (high_y - 2) * 256 + low_y
-    if high_x < 2 or high_y < 2 or x >= constants.screen.width or y >= constants.screen.height then return false end
-    return {x, y}
-end
 -- Packet offsets 10 and 12, unlike recording flags. Bit zero starts set in the original.
 local function_bits = {{10, 2}, {10, 64}, {12, 2}, {10, 4}, {10, 8}, {10, 16}, {10, 32}, {12, 4}, {10, 128}}
 function network.packet(state, input, hp)
@@ -328,11 +319,6 @@ function network.packet(state, input, hp)
     for key, field in ipairs(function_bits) do
         if input.functions:find(tostring(key), 1, true) then bytes[field[1] + 1] = bytes[field[1] + 1] + field[2] end
     end
-    local click = input.click_at
-    if click then
-        bytes[17], bytes[18] = math.floor(click[1] / 256) + 2, click[1] % 256
-        bytes[19], bytes[20] = math.floor(click[2] / 256) + 2, click[2] % 256
-    end
     local marks = input.unlock_bits or 0
     if marks % 2 == 1 then bytes[13] = bytes[13] + 8 end
     if math.floor(marks / 2) % 2 == 1 then bytes[13] = bytes[13] + 16 end
@@ -342,7 +328,6 @@ function network.exchange(state, input, hp)
     if not state.pending then
         state.sequence = (state.sequence + 1) % 50
         state.pending = network.packet(state, input, hp)
-        state.sent_click = input.click_at
         state.deadline = engine.network_time() + timeout
         if not send(state, state.pending) then return nil, state.error end
     end
@@ -365,19 +350,10 @@ function network.exchange(state, input, hp)
         end
     end
     if remote:byte(11) % 2 ~= 1 or remote:byte(13) % 2 ~= 1 or remote:byte(13) > 31
-       or remote:byte(9) < 1 or remote:byte(9) > (state.host and 1 or 11) or remote:sub(21) ~= "\0\0" or packet_click(remote) == false then
+       or remote:byte(9) < 1 or remote:byte(9) > (state.host and 1 or 11) or remote:sub(17) ~= string.rep("\1", 4) .. "\0\0" then
         return failed(state, "Invalid network packet padding")
     end
-    local combined = {functions = "", keys = {}, pointer_x = -1, pointer_y = -1, button = false, network = true}
-    -- One click a frame, the host's first: a click of the joining computer on the same frame waits for the next
-    -- packet (`applied_click` tells the computer whose click ran).
-    local host_click, join_click = packet_click(state.host and own or remote), packet_click(state.host and remote or own)
-    local click = host_click or join_click
-    if click then
-        combined.pointer_x, combined.pointer_y, combined.button = click[1], click[2], true
-        combined.click_host = host_click ~= nil
-        if (host_click and state.host) or (not host_click and not state.host) then combined.applied_click = state.sent_click end
-    end
+    local combined = {functions = "", keys = {}, pointer_x = 0, pointer_y = 0, button = false, network = true}
     for slot = 0, 7 do
         local local_slot = state.host and slot < 4 or not state.host and slot >= 4
         combined[slot] = recording.unpack_keys((local_slot and own or remote):byte(slot + 1))

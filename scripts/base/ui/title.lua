@@ -37,18 +37,6 @@ function title.latch_input(state, held)
     end
 end
 
--- The entry (0-based) under a pointer position, nil outside the entries and on a disabled Replay.
-local function pointed_entry(state, x, y)
-    for index, frame in ipairs(highlighted) do
-        if x >= frame[5] and x < frame[5] + frame[3] and y >= frame[6] and y < frame[6] + frame[4] then
-            local entry = index - 1
-            if state.replay_disabled and entry == constants.title_entries.replay then return nil end
-            return entry
-        end
-    end
-    return nil
-end
-
 function title.update(state, held, context)
     state.pointer_x, state.pointer_y = held.pointer_x, held.pointer_y
     local input = navigation.sample(state.input, held)
@@ -62,25 +50,16 @@ function title.update(state, held, context)
         state.selection = (state.selection + 1) % 8
         if state.replay_disabled and state.selection == constants.title_entries.replay then state.selection = constants.title_entries.quit end
     end
-    -- A click on an entry chooses it (OpenLF2 extension). In a network game the click comes from the exchanged input,
-    -- so both computers choose the same entry.
-    local x, y = held.pointer_x, held.pointer_y - state.vertical_offset
-    local clicked = held.click and pointed_entry(state, x, y)
-    if clicked then
-        state.selection = clicked
-        input = input .. "c"
-    end
     if input:find("c", 1, true) then
         if state.selection < constants.title_entries.quit then sounds.direct(state, "ok") end
         context.action(destinations[state.selection + 1])
     end
     for _, sound in ipairs(sounds.flush(state)) do context.sound(sound.resource, sound.volume, sound.pan) end
-    -- The key list counts down while shown; a click on the menu area (outside the entries) shows it for 450 frames.
+    -- The key list counts down while shown; a click on the menu area shows it for 450 frames.
     state.showing_keys = state.key_list > 0
     if state.key_list > 0 then state.key_list = state.key_list - 1 end
-    if held.click and not clicked and x >= 0xdf and x < 0x23e and y > 0xc2 and y < 0x1b0 and x ~= 0 then
-        state.key_list = 450
-    end
+    local x, y = held.pointer_x, held.pointer_y - state.vertical_offset
+    if held.click and x >= 0xdf and x < 0x23e and y > 0xc2 and y < 0x1b0 and x ~= 0 then state.key_list = 450 end
 end
 
 function title.draw(state, context)
