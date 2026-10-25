@@ -13,8 +13,10 @@ local rumble = require("base/game/rumble")
 local controls = require("base/ui/controls")
 local options = require("base/game/options")
 local fight_effects = require("base/ui/fight_effects")
+local rollback_client = require("base/game/rollback_client")
 local rollback = require("base/game/rollback")
 local netsim = require("base/game/netsim")
+local online = require("base/game/online")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
@@ -29,18 +31,26 @@ local function make_capture()
     end
 end
 
--- options: see base/game/match create().
-function screen.create(options)
+screen.make_capture = make_capture
+
+-- options: see base/game/match create(). connection, start: a fight of a server program (base/game/online), with
+-- options from online.fight_options.
+function screen.create(options, connection, start)
     -- --net-sim (developer, base/game/netsim): the fight runs through a simulated network; recording is off, because
     -- the screen's fight runs predicted ticks.
     local start_random
-    if netsim.params then
+    if netsim.params or connection then
         options.record = nil
         start_random = {engine.random_position()}
     end
     local state = {match = match.create(options), effects = fight_effects.create()}
     state.match.capture = make_capture()
-    if netsim.params then state.netsim = netsim.create(state.match, options, start_random, make_capture) end
+    if connection then
+        online.begin_fight(connection, start, state.match)
+        state.online = connection
+    elseif netsim.params then
+        state.netsim = netsim.create(state.match, options, start_random, make_capture)
+    end
     return state
 end
 
@@ -163,11 +173,26 @@ local function rollback_compare(state)
     check.saved, check.inputs = nil, nil
 end
 
--- A frame of the simulated network: its sounds play here, and a result counts once its tick is final.
-local function netsim_update(state, held, context)
-    local played, results, stepped = netsim.frame(state.netsim, held)
+-- A frame of a fight with rollback, through the simulated network or a server program: its sounds play here, and a
+-- result counts once its tick is final. Escape leaves a server's fight.
+local function rollback_update(state, held, context)
+    local played, results, stepped
+    if state.online then
+        local escape = held.keys[constants.virtual_keys.escape] == true
+        if escape and not state.escape_held then
+            online.close(state.online)
+            context.action("launch")
+            return
+        end
+        state.escape_held = escape
+        played, results, stepped = online.frame(state.online, held)
+        if state.online.client then state.overlay_match = rollback_client.confirmed_view(state.online.client) end
+        if state.online.phase == "failed" then results = {"finished"} end
+    else
+        played, results, stepped = netsim.frame(state.netsim, held)
+        state.overlay_match = netsim.confirmed(state.netsim)
+    end
     for _, sound in ipairs(played) do context.sound(sound.resource, sound.volume, sound.pan) end
-    state.overlay_match = netsim.confirmed(state.netsim)
     fight_effects.observe(state.effects, state.overlay_match)
     for _ = 1, stepped do follow_step(state, state.match) end
     state.view = state.match.last_snapshot
@@ -178,7 +203,7 @@ local function netsim_update(state, held, context)
 end
 
 function screen.update(state, held, context)
-    if state.netsim then return netsim_update(state, held, context) end
+    if state.netsim or state.online then return rollback_update(state, held, context) end
     if rollback.check then rollback_check(state, held) end
     local result = match.step(state.match, held)
     if rollback.check and result == nil then rollback_compare(state) end
@@ -492,6 +517,7 @@ function screen.describe(state)
             run.phase, run.go, run.shutter, run.result, current.stage_bound, current.stage.width or constants.screen.width)
     end
     if state.netsim then parts[#parts + 1] = netsim.describe(state.netsim) end
+    if state.online and state.online.client then parts[#parts + 1] = "online=" .. rollback_client.describe(state.online.client) end
     local check = state.rollback_check
     if check then
         -- Times are averages per check, in milliseconds; `differ` names the fields of the first failed check.

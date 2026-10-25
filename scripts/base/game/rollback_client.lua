@@ -187,6 +187,31 @@ function client.message(state, now)
     return {from = state.id, sent_at = now, acknowledged = state.confirmed, inputs = inputs}
 end
 
+-- The overlays (damage chart, fight effects) read the newest final state, so that they never show a hit that a
+-- rollback takes back. The view is one table that points at the fields of that saved state; before the first final
+-- tick it is the fight itself.
+function client.confirmed_view(state)
+    local saved = state.saved[math.min(state.confirmed, state.tick - 1) + 1]
+    if not saved then return state.match end
+    local view = state.view or {}
+    state.view = view
+    if view.source ~= saved then
+        for key in pairs(view) do view[key] = nil end
+        for key, value in pairs(saved.match) do view[key] = value end
+        view.source = saved
+    end
+    return view
+end
+
+-- For headless descriptions: the tick, the newest final tick, the rollbacks (count, ticks, longest), the waits, the
+-- hash checks (count, failures), the input delay and the round trip.
+function client.describe(state)
+    local stats = state.stats
+    return string.format("tick=%d,final=%d,rollbacks=%d/%d/%d,stalls=%d,hashes=%d/%d,delay=%d,rtt=%.0f", state.tick,
+        state.confirmed, stats.rollbacks, stats.rolled_ticks, stats.longest, stats.stalls, stats.hash_checks,
+        stats.hash_failures, state.delay, state.rtt or -1)
+end
+
 -- Takes the sounds and results collected since the last call.
 function client.take(state)
     local played, results = state.sounds_out, state.results_out

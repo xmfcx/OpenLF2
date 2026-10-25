@@ -32,6 +32,7 @@ local function screen_module(name)
     if name == "network" then return require("base/ui/network") end
     if name == "launch" then return require("base/ui/launch") end
     if name == "versions" then return require("base/ui/versions") end
+    if name == "online_lobby" then return require("base/ui/online_lobby") end
     return title
 end
 -- Whether the current screen reads key sets directly (not mouse/touch via base/ui/navigation);
@@ -80,10 +81,23 @@ function flow.create(options)
         state.backgrounds = require("base/ui/background_preview").create()
         state.active = "backgrounds"
     end
+    -- The server program (`--server`): no screens, only the server (base/game/server).
+    if options.server_port then
+        state.server = require("base/game/server").create(options)
+        state.active = "server"
+        return state
+    end
+    -- A client of a server program (`--connect`): the lobby first.
+    if options.connect_address then
+        state.online_lobby = require("base/ui/online_lobby").create(options, options.connect_address, options.connect_port)
+        state.active = "online_lobby"
+    end
     if options.network_role then
         state.network = require("base/ui/network").create(options)
         state.active = "network"
         state.network_cli = options.network_trace
+        -- --host and --join keep the two-computer TCP game.
+        state.network.cli = true
         require("base/ui/network").begin(state.network, options.network_role == "host", options.network_address)
     end
     return state
@@ -200,6 +214,24 @@ local function route(state, input, context)
         music.enabled, music.selected = true, nil
         speed.fast = false
         music.play("bgm/main.wma")
+    elseif requested == "online_connect" then
+        -- Host or Join on the network screen: hosting starts the server program on this computer first, so the lobby
+        -- tries to connect for a while (the server needs a moment to load the game data).
+        local request = state.network.online_request
+        state.network.online_request = nil
+        if request.host then context.action("start_server") end
+        state.online_lobby = require("base/ui/online_lobby").create(state.options, request.address,
+            state.options.network_port or constants.network.default_port, request.host and 20000 or nil)
+        state.active = "online_lobby"
+    elseif requested == "online_fight" then
+        -- A server program started a fight: the server's random state and setup make the same fight here.
+        local lobby = state.online_lobby
+        local options = require("base/game/online").fight_options(lobby.online, lobby.start)
+        state.match = require("base/ui/match_screen").create(options, lobby.online, lobby.start)
+        state.active, state.wait_release = "match", false
+    elseif requested == "round_over" and state.match.online then
+        state.active = "online_lobby"
+        state.wait_release = true
     elseif requested == "launch" then
         state.active = "launch"
         state.session = nil
@@ -301,6 +333,7 @@ local function route(state, input, context)
     elseif requested then context.action(requested) end
 end
 function flow.describe(state)
+    if state.server then return require("base/game/server").describe(state.server) end
     local module = screen_module(state.active)
     local detail = module.describe and module.describe(screen_state(state)) or ""
     local status = recording.status_text()
@@ -340,6 +373,8 @@ local function pointer_position(state)
     return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
 end
 function flow.draw(state, context)
+    -- The server draws nothing, but the runtime expects a viewport on every frame.
+    if state.server then return context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0) end
     context = budgeted(context)
     local pointer_drawn = false
     local draw_image = context.image
@@ -390,7 +425,10 @@ end
 -- the game: not in a network game, where it disconnects, not on the network and versions screens, where it goes back,
 -- and not on the launch screen's pages that use it.
 local function escape_free(state)
-    if state.session or state.active == "network" or state.active == "versions" then return false end
+    if state.session or state.active == "network" or state.active == "versions" or state.active == "online_lobby" then
+        return false
+    end
+    if state.active == "match" and state.match.online then return false end
     if state.active == "launch" then return state.launch.page == "menu" end
     return true
 end
@@ -426,7 +464,8 @@ local function fight_due(state, input)
     local tenths = state.session and (input.speed_tenths or 10) or speed.tenths
     -- While the flow waits for the keys to be let go (a screen has just changed), the fight does not run: the keys
     -- pass through as they are, so the wait can end, and the buffer starts afresh after it.
-    if state.active ~= "match" or tenths >= 10 or state.wait_release then
+    -- A fight of a server program runs on the server's ticks (base/game/online), not on this computer's speed.
+    if state.active ~= "match" or tenths >= 10 or state.wait_release or state.match.online then
         state.speed_progress, state.speed_held, state.speed_input = 0, nil, nil
         return true
     end
@@ -478,6 +517,10 @@ end
 -- raw: the host's input; screens get it per player slot, with the last known pointer position
 -- and `click`, a fresh press of the left button.
 function flow.update(state, raw, context)
+    if state.server then
+        for _, line in ipairs(require("base/game/server").update(state.server)) do context.action("log " .. line) end
+        return
+    end
     local input = controls.read(controls.current(), raw)
     i18n.host(input.filters and input.filters.text)
     -- Alt+Enter, from any screen: the fullscreen option flips (and is saved like the options page does).
@@ -564,6 +607,7 @@ function flow.update(state, raw, context)
     if state.active == "match" then
         local follow = nil
         if state.session then follow = state.session.host and {0, 1, 2, 3} or {4, 5, 6, 7} end
+        if state.match.online and state.match.online.slot then follow = {state.match.online.slot} end
         state.match.follow = follow
         local tab = input.keys[virtual_keys.tab] == true
         if tab and not state.tab_held then state.match.follow_next = (state.match.follow_next or 0) + 1 end
@@ -635,7 +679,7 @@ function flow.update(state, raw, context)
         else bits, played = unlock.take_marks() end
         for _, sound in ipairs(played) do context.sound(sound.resource, sound.volume, sound.pan) end
         -- A fight through the simulated network (base/game/netsim) changes only in its ticks; it records nothing.
-        if current and not state.match.netsim then current.unlock_bits = bits end
+        if current and not (state.match.netsim or state.match.online) then current.unlock_bits = bits end
     end
     local escape_pressed = false
     for _, code in ipairs(input.presses or {}) do

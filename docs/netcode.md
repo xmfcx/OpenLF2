@@ -209,7 +209,7 @@ Two causes of differences showed up and are fixed: the flow wrote the unlock bit
 
 1. Foundation: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode. Done except the championship check and a faster hash (see Measurements).
 2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here. Built: base/game/rollback_client.lua, base/game/authority.lua, base/game/net_link.lua and base/game/netsim.lua (`--net-sim`), with the overlays on final ticks and a rollback window that follows the round trip. Open: tuning by play.
-3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines.
+3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines. Built: `engine.messages`, `--server`, `--connect`, base/game/server.lua, base/game/online.lua and the lobby screen. Versus fights work with rollback over UDP.
 4. The rollback client against the server, with the hash checks and the snapshots.
 5. Drops and returns: the 500 ms rule, pause or AI, the session token, the return with a snapshot.
 6. Rooms, spectators, chat, presence, ready check and invites.

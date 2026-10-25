@@ -148,6 +148,13 @@ end
 function screen.begin(state, host, address)
     stop_probe(state)
     state.message = nil
+    -- An engine with UDP messages plays through the server program (docs/netcode.md): hosting starts one on this
+    -- computer, joining connects to one. The flow opens the lobby (base/ui/online_lobby).
+    if engine.messages and not state.cli then
+        if not host then remember_server(state, address) end
+        state.online_request = {host = host, address = host and "127.0.0.1" or address}
+        return
+    end
     if transport.start(state.session, host, address) then state.page = "waiting"
     else state.message = state.session.error end
     state.started = engine.network_time()
@@ -322,6 +329,7 @@ function screen.update(state, flow_input, context)
         context.text_input(typing)
     end
     for _, sound in ipairs(sounds.flush(state)) do context.sound(sound.resource, sound.volume, sound.pan) end
+    if state.online_request then context.action("online_connect") end
 end
 function screen.draw(state, context)
     local function sprite(frame, x, y) context.sprite("pe/menu_clip", frames[frame], x, y, true) end

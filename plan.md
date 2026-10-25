@@ -110,6 +110,8 @@ Steps 3 and 4 of docs/netcode.md, with the session model of docs/ui-network-arch
 
 Make sure that three clients and a server on one machine, with the network simulator on, end a fight with the same state hash as a run without the simulator.
 
+Built so far: ENet in the engine (`engine.messages`), the server mode (`--server`), the client option `--connect`, the message encoding (base/game/wire.lua), the server with a lobby and the authority (base/game/server.lua), the client (base/game/online.lua), a keyboard lobby screen (base/ui/online_lobby.lua), and fights with rollback over UDP. Host on the network screen starts the server program on this computer, and join connects to it. Two clients on one machine passed every hash check. Open: versus only (no stage or battle setup yet), no mouse in the lobby, chat and taunts, the server stops only when its host program quits normally, and UDP port forwarding (the UPnP script maps TCP).
+
 ## Phase 6: drops, returns and AI control
 
 Step 5 of docs/netcode.md:
