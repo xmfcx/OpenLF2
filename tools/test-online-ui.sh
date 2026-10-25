@@ -108,6 +108,7 @@ expect "host: connected to its own server" host "online=lobby"
 focus 96; click 96 "$(gx 398)" "$(gy 259)"; click 96 "$(gx 352)" "$(gy 352)"
 xdo 96 type --delay 80 "127.0.0.1"; press 96 Return
 expect "join: connected to the server" join "online=lobby"
+shot 96 lobby
 
 # Both ready (attack), the host starts (defend): the title menu of the session.
 focus 96; press 96 "$ATTACK"; focus 95; press 95 "$ATTACK"; sleep 1; press 95 "$DEFEND"

@@ -194,11 +194,13 @@ Two causes of differences showed up and are fixed: the flow wrote the unlock bit
 - A match has at most 8 fighters, as the original. A room can hold more people than that: the others are spectators, and the room can rotate players between matches (for example, the winner stays).
 - Each room runs its own sandboxed script runtime (its own Lua state), so that rooms cannot change each other. The server runs the rooms on a few worker threads. A two-fighter tick costs about 0.15 ms, so one computer can run hundreds of rooms. Busy modes cost more, and the measurements of step 1 set the limit.
 - Network use is small: a confirmed tick with 8 players is about 8 bytes of keys. With the repeats and the packet headers, a player needs about 3 to 6 KB per second in each direction.
+- Built: the server holds a main room and private rooms (base/game/server). A player makes a private room in the lobby and gets a code of four letters and digits; friends join it with the code. The lobby lists the open rooms with "Join" or "Watch". The server does not run the games (see "What is built" under "A dropped player"), so the rooms need no Lua state of their own: each room is a lobby, an authority and a log of final ticks. The players' computers run the games.
 
 ### Spectators
 
 - A spectator gets the confirmed tick stream, a short time behind (for example 1 second). It needs no prediction and no rollback, and it never sees a correction.
 - A spectator who joins late gets a snapshot and the ticks since then, the same as a returning player.
+- Built: a player who joins a running session with a new name watches it. It gets the session's start and all final ticks, catches up, and then runs the final ticks 30 ticks (a second) behind the newest one, without prediction. Spectators chat; their keys and clicks do not count; the server compares their state hashes with the players'.
 - The delay also keeps spectators from telling players what the others do.
 
 ### Chat and presence

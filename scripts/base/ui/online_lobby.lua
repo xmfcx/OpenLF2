@@ -62,6 +62,16 @@ function screen.update(state, input, context)
     end
     state.escape_held = escape
     if events.changed.chat then state.chat_text = events.changed.chat end
+    -- Rooms (base/game/server): a private room with a new code, a room by its code, or an open room of the list.
+    if events.changed.room_code then state.room_code = events.changed.room_code:upper():gsub("[^%w]", ""):sub(1, 4) end
+    if events.clicked.create_room then online.send(connection, {type = "create_room", private = true}) end
+    if (events.clicked.join_code or events.submitted.room_code) and (state.room_code or "") ~= "" then
+        online.send(connection, {type = "join_room", code = state.room_code})
+        state.room_code = ""
+    end
+    for _, room in ipairs(connection.lobby and connection.lobby.rooms or {}) do
+        if events.clicked["room_" .. room.code] then online.send(connection, {type = "join_room", code = room.code}) end
+    end
     if (events.submitted.chat or events.clicked.send) and state.chat_text:match("%S") then
         online.send(connection, {type = "chat", text = state.chat_text})
         state.chat_text = ""
@@ -82,8 +92,10 @@ function screen.draw(state, context)
     context.viewport(constants.screen.width, constants.screen.height, 16, 32, 108)
     context.image("pe/menu_back" .. state.background, 0, 0, true)
     local connection = state.online
-    imgui.window(context, "lobby", "Lobby   " .. connection.address .. ":" .. connection.port, 120, 0, 554, 0)
     local lobby = connection.lobby
+    local room = lobby and lobby.room or "main"
+    imgui.window(context, "lobby", (room == "main" and "Lobby" or "Room " .. room) .. "   " .. connection.address .. ":"
+        .. connection.port, 120, 0, 554, 0)
     if connection.phase == "connecting" then
         imgui.text(context, "Connecting to the server...")
     elseif connection.phase == "failed" or connection.phase == "closed" then
@@ -99,8 +111,11 @@ function screen.draw(state, context)
             imgui.text(context, "The router did not open the port (UPnP): friends on the internet cannot join unless "
                 .. "UDP port " .. connection.port .. " is forwarded to this computer.", 0xff9b9b, imgui.wrap)
         end
+        if lobby.private then
+            imgui.text(context, "A private room: friends join it with the code " .. room .. ".", 0xffd24a)
+        end
         imgui.text(context, "Players", 0xa8b8e8)
-        imgui.child(context, "players", -1, 170, true)
+        imgui.child(context, "players", -1, 118, true)
         for _, player in ipairs(lobby.players) do
             imgui.text(context, string.format("%d.", player.slot + 1), 0x8090c0)
             imgui.same_line(context, 30)
@@ -114,7 +129,6 @@ function screen.draw(state, context)
             end
         end
         imgui.end_child(context)
-        imgui.text(context, "Everybody chooses a fighter in the game's own character selection.", 0x8090c0, imgui.wrap)
         imgui.button(context, "ready", me and me.ready and "I am not ready" or "I am ready", 250, 32)
         imgui.same_line(context)
         if me and me.role then
@@ -125,8 +139,24 @@ function screen.draw(state, context)
         end
         imgui.spacing(context, 4)
         imgui.separator(context)
+        -- The other open rooms, a private room, and a room by its code.
+        for _, other in ipairs(lobby.rooms or {}) do
+            if other.code ~= room then
+                local playing = other.phase == "session"
+                imgui.text(context, string.format("Room %s: %d players%s", other.code, other.players,
+                    playing and ", playing" or ""), 0xd0d8f0)
+                imgui.same_line(context, 380)
+                imgui.button(context, "room_" .. other.code, playing and "Watch" or "Join", -1, 0)
+            end
+        end
+        imgui.button(context, "create_room", "Make a private room", 200, 0)
+        imgui.same_line(context)
+        imgui.input(context, "room_code", state.room_code or "", "Room code", 120)
+        imgui.same_line(context)
+        imgui.button(context, "join_code", "Join the room", -1, 0)
+        imgui.separator(context)
         imgui.text(context, "Chat", 0xa8b8e8)
-        imgui.child(context, "chat_log", -1, 90, true)
+        imgui.child(context, "chat_log", -1, 74, true)
         for _, line in ipairs(connection.chat) do imgui.text(context, line.name .. ": " .. line.text, nil, imgui.wrap) end
         imgui.end_child(context)
         imgui.input(context, "chat", state.chat_text, "Message (a number from 1 to 42 plays a taunt)", 420)
@@ -140,7 +170,8 @@ end
 
 function screen.describe(state)
     local connection = state.online
-    local parts = {"online=" .. connection.phase .. (connection.lobby and connection.lobby.resume and " resume" or "")}
+    local parts = {"online=" .. connection.phase .. (connection.lobby and connection.lobby.resume and " resume" or "")
+        .. " room=" .. tostring(connection.lobby and connection.lobby.room)}
     if connection.problem then parts[#parts + 1] = "problem=" .. connection.problem end
     for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
         parts[#parts + 1] = string.format("player{slot=%d,name=%s,ready=%s,role=%s}", player.slot, player.name,

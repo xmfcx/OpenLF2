@@ -101,7 +101,8 @@ function handlers.welcome(state, message)
 end
 function handlers.refused(state, message)
     local reasons = {version = "The server runs another game version (" .. tostring(message.version) .. ")",
-        full = "The server is full", playing = "The server is in a game; try again after it"}
+        full = "The server is full", playing = "The server is in a game; try again after it",
+        room = "There is no room with this code"}
     fail(state, reasons[message.reason] or "The server refused the connection")
 end
 function handlers.lobby(state, message)

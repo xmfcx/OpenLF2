@@ -165,6 +165,13 @@ client_checks watch three "screen=match"
 ! grep -q "difference" "$WORK/watch.server"; check "watch: no state difference" $? "$(grep difference "$WORK/watch.server")"
 grep -c "hashes agree (1 checks" "$WORK/watch.server" | grep -q "^2$"; check "watch: the spectator's hashes agree" $? "$(grep 'hashes agree' "$WORK/watch.server")"
 
+# 11. Rooms: client one makes a private room, and each client starts a session alone in its room; both sessions run
+#     on the server at the same time.
+run_session rooms 23611 "$L=create_room$(wait_frames 30)c$(wait_frames 15)f$(wait_frames 70)$TITLE" "$L$(wait_frames 31)c$(wait_frames 15)f$(wait_frames 100)"
+grep -q "room created" "$WORK/rooms.server"; check "rooms: the server made a private room" $? "$(head -5 "$WORK/rooms.server")"
+grep -c "session started with 1 players" "$WORK/rooms.server" | grep -q "^2$"; check "rooms: two sessions run at once" $? "$(grep session "$WORK/rooms.server")"
+for side in one two; do client_checks rooms $side "screen=(title|characters|setup)"; done
+
 # 9. The match setup screen in a session: both join, choose a fighter and get ready with their keys, the room role
 #    starts (defend; the other player's defend does nothing), and the fight runs with rollback.
 SETUP="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"

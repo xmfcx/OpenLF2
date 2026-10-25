@@ -31,23 +31,34 @@ local drop_ms, decide_ms = 3000, 30000
 local log_chunk = 300
 local tick_ms = 33
 
+-- Rooms (docs/netcode.md "Rooms"): each room has its own lobby and session; the functions below take the room as
+-- `state`. The main room always exists; a player can make a private room, which others join with its code.
+local function new_room(top, code, private)
+    -- classic: the sessions use the classic character selection (--classic-menus, for the input traces of the
+    -- original menus); otherwise they use the match setup screen.
+    return {top = top, code = code, private = private, profile = top.profile, version = top.version, players = {},
+        order = {}, phase = "lobby", hashes = {}, saved = server.load_saved(), classic = top.classic, spectators = {}}
+end
 -- options: the runtime settings (server_port, network_profile).
 function server.create(options)
     local listening, problem = engine.messages("listen", "0.0.0.0", options.server_port, 64)
     assert(listening, problem)
-    -- classic: the sessions use the classic character selection (--classic-menus, for the input traces of the
-    -- original menus); otherwise they use the match setup screen.
-    return {profile = options.network_profile, version = network.own_version() or "", players = {}, order = {},
-        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved(), classic = options.classic_menus == true,
-        spectators = {}}
+    local top = {profile = options.network_profile, version = network.own_version() or "", classic = options.classic_menus == true,
+        rooms = {}, peers = {}, log = {}, next_code = engine.network_time() % 1000003 + 7}
+    top.rooms.main = new_room(top, "main", false)
+    return top
 end
 
-local function log(state, text) state.log[#state.log + 1] = text end
+local function log(state, text)
+    local top = state.top or state
+    top.log[#top.log + 1] = (state.code and state.code ~= "main" and "[" .. state.code .. "] " or "") .. text
+end
 local function send(peer, message, channel)
     engine.messages("send", peer, channel or reliable, wire.encode(message))
 end
 local function broadcast(state, message, channel)
     for _, peer in ipairs(state.order) do send(peer, message, channel) end
+    for peer in pairs(state.spectators or {}) do send(peer, message, channel) end
 end
 
 -- The lobby as every client sees it.
@@ -57,10 +68,24 @@ local function lobby_message(state)
         local player = state.players[peer]
         players[position] = {id = peer, name = player.name, slot = player.slot, ready = player.ready, role = position == 1}
     end
-    return {type = "lobby", players = players, phase = state.phase, public_address = state.public_address,
-        upnp = state.upnp, resume = server.can_resume(state)}
+    local top = state.top or state
+    local rooms = {}
+    for code, room in pairs(top.rooms or {}) do
+        if not room.private then
+            local watching = 0
+            for _ in pairs(room.spectators) do watching = watching + 1 end
+            rooms[#rooms + 1] = {code = code, players = #room.order, watching = watching, phase = room.phase}
+        end
+    end
+    table.sort(rooms, function(a, b) return a.code < b.code end)
+    return {type = "lobby", players = players, phase = state.phase, public_address = top.public_address,
+        upnp = top.upnp, resume = server.can_resume(state), room = state.code, private = state.private or nil, rooms = rooms}
 end
-local function broadcast_lobby(state) broadcast(state, lobby_message(state)) end
+-- Every room's lobby: the list of rooms changes for all of them.
+local function broadcast_lobby(state)
+    local top = state.top or state
+    for _, room in pairs(top.rooms or {[1] = state}) do broadcast(room, lobby_message(room)) end
+end
 
 local function free_slot(state)
     for slot = 0, max_players - 1 do
@@ -477,66 +502,142 @@ function server.watch(state, peer, name)
     log(state, "watching: " .. name)
 end
 
--- One frame: the messages of the clients, then the due ticks of a session. Returns the lines to log.
+-- One frame of a room's session: the due ticks, the log of final ticks and the dropped players.
+local function room_update(state, now)
+    if state.phase ~= "session" then return end
+    -- The program runs a frame on each message and every few milliseconds; the clients hear from the server
+    -- when a tick became final (and its message repeats the ticks they did not acknowledge yet).
+    local messages = authority.update(state.authority, now - state.start_at)
+    -- Every final tick stays in the session's log: a returning player and a resumed session run them again.
+    local session = state.session
+    for tick = session.logged + 1, state.authority.tick - 1 do session.log[tick] = state.authority.final[tick] end
+    session.logged = math.max(session.logged, state.authority.tick - 1)
+    -- A player without a message for a while has dropped; without a choice the computer plays it.
+    for peer, player in pairs(state.players) do
+        local client = state.authority.clients[peer]
+        if client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
+            drop_player(state, player.slot, now)
+        elseif client and client.heard > 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
+            -- Its messages arrive again (it was only slow).
+            session.slots[player.slot].peer = peer
+            end_drop(state, player.slot, player.name .. " is back")
+        end
+    end
+    for slot, drop in pairs(session.drops) do
+        if not drop.waiting and not drop.decided and now - drop.since > decide_ms then computer_plays(state, slot) end
+    end
+    if state.authority.tick ~= state.sent_tick then
+        state.sent_tick = state.authority.tick
+        for peer, message in pairs(messages) do
+            message.type = "ticks"
+            send(peer, message, unreliable)
+        end
+    end
+    for tick in pairs(state.hashes) do
+        if tick < state.authority.tick - 600 then state.hashes[tick] = nil end
+    end
+end
+
+-- A player moves to another room (in the lobby): it leaves its room and arrives in the other one as a new player,
+-- a returning one or a spectator, as with a hello.
+local function move(top, peer, target)
+    local room = top.peers[peer]
+    local player = room and (room.players[peer] or room.spectators[peer])
+    if not player or (room.phase == "session" and room.players[peer]) then return end
+    remove(room, peer)
+    if room ~= top.rooms.main and #room.order == 0 and next(room.spectators) == nil then top.rooms[room.code] = nil end
+    top.peers[peer] = target
+    handlers.hello(target, peer, {protocol = server.protocol, profile = target.profile, name = player.name})
+    broadcast_lobby(target)
+end
+-- A private room with a new code of four letters and digits (no 0, O, 1 or I).
+local code_letters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+local function new_code(top)
+    for _ = 1, 100 do
+        top.next_code = (top.next_code * 16807 + engine.network_time()) % 2147483647
+        local value, code = top.next_code, ""
+        for _ = 1, 4 do
+            local index = value % #code_letters + 1
+            code = code .. code_letters:sub(index, index)
+            value = math.floor(value / #code_letters)
+        end
+        if not top.rooms[code] then return code end
+    end
+    return nil
+end
+local room_handlers = {}
+function room_handlers.create_room(top, peer, message)
+    local code = new_code(top)
+    if not code then return end
+    top.rooms[code] = new_room(top, code, message.private ~= false)
+    log(top.rooms[code], "room created")
+    move(top, peer, top.rooms[code])
+end
+function room_handlers.join_room(top, peer, message)
+    local code = type(message.code) == "string" and message.code:upper():gsub("[^%w]", "") or ""
+    if code == "MAIN" then code = "main" end
+    local target = top.rooms[code]
+    if not target then
+        send(peer, {type = "notice", text = "There is no room " .. code})
+        return
+    end
+    if target ~= top.peers[peer] then move(top, peer, target) end
+end
+
+-- One frame: the messages of the clients, then the due ticks of every room's session. Returns the lines to log.
 -- raw: the program's input; "upnp:STATE[:ADDRESS]" while it opens the port on the home router (--upnp).
-function server.update(state, raw)
+function server.update(top, raw)
     local upnp, address = (raw or ""):match("^upnp:(%a+):?([%d.]*)")
-    if upnp and (upnp ~= state.upnp or address ~= (state.public_address or "")) then
-        state.upnp, state.public_address = upnp, address ~= "" and address or nil
-        broadcast_lobby(state)
+    if upnp and (upnp ~= top.upnp or address ~= (top.public_address or "")) then
+        top.upnp, top.public_address = upnp, address ~= "" and address or nil
+        broadcast_lobby(top.rooms.main)
     end
     local now = engine.network_time()
     local events = engine.messages("service") or {}
     for _, event in ipairs(events) do
+        local room = top.peers[event.peer]
         if event.kind == "disconnected" then
-            remove(state, event.peer)
+            if room then
+                remove(room, event.peer)
+                if room ~= top.rooms.main and #room.order == 0 and next(room.spectators) == nil and room.phase == "lobby" then
+                    top.rooms[room.code] = nil
+                    broadcast_lobby(top.rooms.main)
+                end
+            end
+            top.peers[event.peer] = nil
         elseif event.kind == "message" then
             local message = wire.decode(event.data)
-            local handler = type(message) == "table" and handlers[message.type]
-            if handler then handler(state, event.peer, message, now) end
-        end
-    end
-    if state.phase == "session" then
-        -- The program runs a frame on each message and every few milliseconds; the clients hear from the server
-        -- when a tick became final (and its message repeats the ticks they did not acknowledge yet).
-        local messages = authority.update(state.authority, now - state.start_at)
-        -- Every final tick stays in the session's log: a returning player and a resumed session run them again.
-        local session = state.session
-        for tick = session.logged + 1, state.authority.tick - 1 do session.log[tick] = state.authority.final[tick] end
-        session.logged = math.max(session.logged, state.authority.tick - 1)
-        -- A player without a message for a while has dropped; without a choice the computer plays it.
-        for peer, player in pairs(state.players) do
-            local client = state.authority.clients[peer]
-            if client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
-                drop_player(state, player.slot, now)
-            elseif client and client.heard > 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
-                -- Its messages arrive again (it was only slow).
-                session.slots[player.slot].peer = peer
-                end_drop(state, player.slot, player.name .. " is back")
+            local kind = type(message) == "table" and message.type
+            if kind == "hello" and not room then
+                -- A new connection: the room of its code, or the main room.
+                local code = type(message.room) == "string" and message.room:upper():gsub("[^%w]", "") or ""
+                room = top.rooms[code ~= "" and code ~= "MAIN" and code or "main"]
+                if not room then
+                    send(event.peer, {type = "refused", reason = "room"})
+                    engine.messages("disconnect", event.peer)
+                else
+                    top.peers[event.peer] = room
+                    handlers.hello(room, event.peer, message, now)
+                end
+            elseif room_handlers[kind] and room then
+                room_handlers[kind](top, event.peer, message, now)
+            elseif handlers[kind] and room then
+                handlers[kind](room, event.peer, message, now)
             end
         end
-        for slot, drop in pairs(session.drops) do
-            if not drop.waiting and not drop.decided and now - drop.since > decide_ms then computer_plays(state, slot) end
-        end
-        if state.authority.tick ~= state.sent_tick then
-            state.sent_tick = state.authority.tick
-            for peer, message in pairs(messages) do
-                message.type = "ticks"
-                send(peer, message, unreliable)
-            end
-        end
-        for tick in pairs(state.hashes) do
-            if tick < state.authority.tick - 600 then state.hashes[tick] = nil end
-        end
     end
-    local lines = state.log
-    state.log = {}
+    for _, room in pairs(top.rooms) do room_update(room, now) end
+    local lines = top.log
+    top.log = {}
     return lines
 end
 
-function server.describe(state)
-    return string.format("server phase=%s players=%d tick=%d", state.phase, #state.order,
-        state.authority and state.authority.tick or -1)
+function server.describe(top)
+    local main = top.rooms.main
+    local count = 0
+    for _ in pairs(top.rooms) do count = count + 1 end
+    return string.format("server phase=%s players=%d tick=%d rooms=%d", main.phase, #main.order,
+        main.authority and main.authority.tick or -1, count)
 end
 
 return server
