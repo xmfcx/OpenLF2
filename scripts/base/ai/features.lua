@@ -71,7 +71,8 @@ function features.keys_of(action, right)
 end
 
 local scratch = {}
--- One `ev=obs` line for each fighter on the ticks where human keys change (`--ai-log observe`).
+-- One `ev=obs` line for each fighter on the ticks where human keys change (`--ai-log observe`): `f=` the features,
+-- `a=` the action, then the raw state of the fighter and its nearest enemy.
 function features.observe(state, scan, log)
     if state.input_phase ~= 0 then return end
     local world = perception.world(state, scan)
@@ -81,8 +82,18 @@ function features.observe(state, scan, log)
             local enemy = features.enemy_of(state, world, me)
             if enemy then
                 features.of(me, enemy, value.mp, scratch)
-                log(state, me.index, string.format("ev=obs f=%s a=%d", table.concat(scratch, ","),
-                    features.action(value.keys, enemy.x > me.x)))
+                -- After the features and the action, the raw state of the fighter and of its enemy (for richer learning
+                -- later): positions, speeds, frames, facings, hp, mp, the enemy's item index and record id, and the
+                -- held keys as a mask with left and right as they are (up 1, down 2, left 4, right 8, attack 16, jump 32,
+                -- defend 64).
+                local keys = value.keys
+                local raw = (keys.up and 1 or 0) + (keys.down and 2 or 0) + (keys.left and 4 or 0) + (keys.right and 8 or 0)
+                    + (keys.attack and 16 or 0) + (keys.jump and 32 or 0) + (keys.defend and 64 or 0)
+                log(state, me.index, string.format("ev=obs f=%s a=%d id=%d x=%d y=%d z=%d vx=%.2f vy=%.2f vz=%.2f fr=%d fc=%d hp=%d"
+                    .. " mp=%d k=%d ei=%d eid=%d ex=%d ey=%d ez=%d evx=%.2f evz=%.2f efr=%d efc=%d ehp=%d emp=%d",
+                    table.concat(scratch, ","), features.action(keys, enemy.x > me.x), me.id, me.x, me.y, me.z, me.vx, me.vy,
+                    me.vz, me.frame, me.facing, value.hp, value.mp, raw, enemy.index, enemy.id, enemy.x, enemy.y, enemy.z,
+                    enemy.vx, enemy.vz, enemy.frame, enemy.facing, enemy.hp, enemy.mp))
             end
         end
     end
