@@ -117,10 +117,13 @@ function handlers.session(state, message)
     engine.set_random_position(random.index, random.sequence, random.crt)
     state.phase, state.session_start = "session", message
     state.names, state.host = message.names, message.role == state.id
-    state.finals, state.next_tick, state.local_inputs, state.sent_tick, state.speed = {}, 0, {}, -1, nil
+    state.finals, state.next_tick, state.local_inputs, state.sent_tick = {}, 0, {}, -1
     state.input_acknowledged, state.frames, state.client, state.base = -1, 0, nil, nil
     state.drops, state.slots, state.rejoin = {}, nil, message.rejoin == true
     state.catching, state.newest_final = nil, nil
+    -- The values of the last match on this server, and its game speed.
+    state.last_setup = type(message.last_setup) == "table" and message.last_setup or nil
+    state.speed = state.last_setup and tonumber(state.last_setup.speed) or nil
     state.classic = message.classic == true
     state.events[#state.events + 1] = message
 end

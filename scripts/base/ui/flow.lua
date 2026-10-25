@@ -62,6 +62,27 @@ local function setup_screen_used(state)
     if state.session and state.session.online then return not state.session.classic end
     return not state.session and not state.options.classic_menus and not user_options.current().classic_menus
 end
+-- The match setup screen in `mode` (the values of the last visit stay); in a server's session its clicks go to the
+-- server as commands.
+local function open_setup(state, mode)
+    local session = state.session and state.session.online and state.session
+    local last = session and not state.setup and session.last_setup
+    state.setup = require("base/ui/setup_screen").create(mode or (state.setup and state.setup.setup.mode)
+        or (last and tonumber(last.mode)) or constants.modes.versus, state.setup, session and {
+            last_setup = last,
+            send = function(command) online.send(session, {type = "command", command = command}) end,
+            slot = session.slot, names = session.names, set_speed = function(tenths)
+                online.send(session, {type = "set_speed", tenths = tenths}) end,
+            -- The session's speed as the server announced it to every client (base/game/online "notice").
+            get_speed = function() return session.speed or 10 end})
+    state.active = "setup"
+    state.wait_release = true
+end
+-- The title menu, or the match setup screen in its place (it has the modes, the championships, the demo and the
+-- replays as buttons).
+local function open_title(state)
+    if setup_screen_used(state) then open_setup(state) else state.active = "title" end
+end
 local function screen_state(state)
     return state[state.active]
 end
@@ -150,7 +171,7 @@ local function leave_replay(state)
     unlock.end_replay()
     music.play("bgm/main.wma")
     speed.fast = false
-    state.active = "title"
+    open_title(state)
     state.wait_release = true
 end
 
@@ -228,6 +249,12 @@ local function route(state, input, context)
     -- The setup screen hands its choices to the classic selection, which the fight, the Stage progression and
     -- Battle mode's troop panel read.
     if state.active == "setup" and (requested == "start_match" or requested == "battle_setup") then
+        -- A server keeps the values of the match for the next session of these players.
+        local model = state.setup.setup
+        if state.session and state.session.online then
+            online.send(state.session, {type = "setup_used", mode = model.mode, difficulty = model.difficulty,
+                background = model.background, stage_level = model.stage_level})
+        end
         state.characters = require("base/ui/setup_screen").selection(state.setup)
         if state.characters.mode == constants.modes.versus then music.play_selected() end
     end
@@ -255,7 +282,7 @@ local function route(state, input, context)
         controls.replace_names(state.session.names)
         state.title = title.create(state.options)
         if title.set_replay_disabled then title.set_replay_disabled(state.title, true) end
-        state.active = "title"
+        open_title(state)
         state.wait_release = true
         -- A new connection starts a new deterministic menu session on both peers.
         state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
@@ -283,16 +310,7 @@ local function route(state, input, context)
         state.session = nil
         controls.replace_names(nil)
     elseif (requested == "versus" or requested == "stage" or requested == "battle") and setup_screen_used(state) then
-        -- The match setup screen (base/ui/setup_screen); the values of the last visit stay.
-        local session = state.session and state.session.online and state.session
-        state.setup = require("base/ui/setup_screen").create(constants.modes[requested], state.setup, session and {
-            send = function(command) online.send(session, {type = "command", command = command}) end,
-            slot = session.slot, names = session.names, set_speed = function(tenths)
-                online.send(session, {type = "set_speed", tenths = tenths}) end,
-            -- The session's speed as the server announced it to every client (base/game/online "notice").
-            get_speed = function() return session.speed or 10 end})
-        state.active = "setup"
-        state.wait_release = true
+        open_setup(state, constants.modes[requested])
     elseif requested == "versus" or requested == "stage" or requested == "battle" then
         -- The previous visit's state carries the values the original keeps in globals.
         state.characters = require("base/ui/character_select").create({mode = requested,
@@ -344,7 +362,7 @@ local function route(state, input, context)
         if requested == "round_over" and not state.match.match.random_game then
             speed.fast = false
             music.play("bgm/main.wma")
-            state.active = "title"
+            open_title(state)
         else
             music.play_selected()
             state.match = require("base/ui/match_screen").create(require("base/ui/demo").match_options(state.characters))
@@ -381,17 +399,17 @@ local function route(state, input, context)
         state.wait_release = true
     elseif requested == "game_start" then
         music.play("bgm/main.wma")
-        state.active = "title"
-        if title.latch_input then title.latch_input(state.title, input)
+        open_title(state)
+        if state.active == "title" and title.latch_input then title.latch_input(state.title, input)
         else state.wait_release = true end
     elseif requested == "title" then
         if not state.session then controls.replace_names(nil) end
         unlock.end_replay()
         music.play("bgm/main.wma")
-        state.active = "title"
+        open_title(state)
         -- Do not turn the key returning to the title into a new title action.
         state.wait_release = true
-    elseif requested == "quit" and state.active == "title" then
+    elseif requested == "quit" and (state.active == "title" or state.active == "setup") then
         -- The title's Quit (OpenLF2 change): the original closes the program here, OpenLF2 goes back to the launch
         -- menu, whose Exit closes it. In a network game both computers choose it on the same frame and each closes
         -- its side of the connection. In a server's session every client chooses it on the same tick and goes back to

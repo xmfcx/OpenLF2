@@ -43,7 +43,7 @@ function screen.create(mode, previous, network)
         if catalog.selectable(fighter) then grid[#grid + 1] = index end
     end
     local state = {fighters = fighters, backgrounds = catalog.backgrounds(), grid = grid,
-        setup = setup.create(mode, previous and previous.setup), cursors = {}, held = {}, focus = 0,
+        setup = setup.create(mode, previous and previous.setup, network and network.last_setup), cursors = {}, held = {}, focus = 0,
         results = previous and previous.results, network = network}
     state.arenas = {constants.background_rows.random, constants.background_rows.lee_on_road}
     for row = 0, #state.backgrounds - 1 do state.arenas[#state.arenas + 1] = row end
@@ -276,10 +276,24 @@ local function clicks(state, events, context)
     if clicked.wait then apply(state, {type = "wait"}) end
     -- The settings menu (base/ui/fight_menu) on its Sound page: music, volumes, and the speed on the Game page.
     if clicked.settings then context.action("settings") return true end
-    if clicked.exit or clicked.result_title then
+    if clicked.exit then
         if state.network then state.network.send({type = "exit"}) return false end
-        context.action("title")
+        context.action("quit")
         return true
+    end
+    -- The other modes of the original's title menu.
+    for _, mode in ipairs({"championship", "team_championship"}) do
+        if clicked[mode] then
+            if state.network then state.network.send({type = mode}) return false end
+            context.action(mode)
+            return true
+        end
+    end
+    if not state.network and clicked.demo then context.action("demo") return true end
+    if not state.network and clicked.replay then context.action("replay") return true end
+    if clicked.result_title then
+        state.results = nil
+        return false
     end
     if clicked.result_rematch then apply(state, {type = "rematch"}) end
     if clicked.result_fighters then apply(state, {type = "change_fighters"}) end
@@ -291,7 +305,12 @@ end
 -- the command acted.
 local function screen_command(state, command, context)
     local model = state.setup
-    if command.type == "exit" then context.action("title") return true, true end
+    -- Exit: the launch menu (a local game), or the lobby (a server's session, every client on this tick).
+    if command.type == "exit" then context.action("quit") return true, true end
+    if command.type == "championship" or command.type == "team_championship" then
+        context.action(command.type)
+        return true, true
+    end
     if command.type == "rematch" then
         state.results = nil
         apply(state, {type = "start"})
@@ -352,11 +371,11 @@ function screen.update(state, input, context)
         if screen_command(state, command, context) then return end
     end
     local events = imgui.events(input)
-    -- Escape (and Android's back button) leaves to the title, unless a countdown runs (jump stops it).
+    -- Escape (and Android's back button) leaves to the launch menu, unless a countdown runs (jump stops it).
     local escape = input.keys and input.keys[constants.virtual_keys.escape] == true
     if escape and not state.escape_held and not state.setup.countdown then
         state.escape_held = true
-        context.action("title")
+        context.action("quit")
         return
     end
     state.escape_held = escape
@@ -573,8 +592,18 @@ function screen.draw(state, context)
         imgui.selectable(context, "mode_" .. mode, i18n.tr(setup.mode_names[mode]), model.mode == mode, 70, 22)
         imgui.same_line(context)
     end
-    imgui.same_line(context, 600)
-    imgui.button(context, "settings", i18n.tr("Settings"), 90, 22)
+    imgui.same_line(context, 250)
+    imgui.button(context, "championship", i18n.tr("Championship"), 110, 22)
+    imgui.same_line(context)
+    imgui.button(context, "team_championship", i18n.tr("Team champ."), 100, 22)
+    if not state.network then
+        imgui.same_line(context)
+        imgui.button(context, "demo", i18n.tr("Demo"), 60, 22)
+        imgui.same_line(context)
+        imgui.button(context, "replay", i18n.tr("Replay"), 70, 22)
+    end
+    imgui.same_line(context, 610)
+    imgui.button(context, "settings", i18n.tr("Settings"), 80, 22)
     imgui.same_line(context)
     imgui.button(context, "exit", i18n.tr("Exit"), -1, 22)
     if state.results then
@@ -585,7 +614,7 @@ function screen.draw(state, context)
         imgui.same_line(context)
         imgui.button(context, "result_setup", i18n.tr("Setup"), 180, 28)
         imgui.same_line(context)
-        imgui.button(context, "result_title", i18n.tr("Title"), -1, 28)
+        imgui.button(context, "result_title", i18n.tr("Close"), -1, 28)
     end
     imgui.separator(context)
     imgui.child(context, "grid", 372, 220, false)

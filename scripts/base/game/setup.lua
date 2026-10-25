@@ -17,8 +17,9 @@ setup.stage_groups = 6
 setup.mode_names = {[modes.versus] = "VS", [modes.stage] = "Stage", [modes.battle] = "Battle"}
 setup.difficulty_order = {difficulties.easy, difficulties.normal, difficulties.difficult, difficulties.crazy}
 
--- mode: constants.modes.versus, stage or battle; previous: the setup of the last visit, whose values stay.
-function setup.create(mode, previous)
+-- mode: constants.modes.versus, stage or battle; previous: the setup of the last visit, whose values stay; last: the
+-- values of the server's last match ({difficulty, background, stage_level}) for a first visit.
+function setup.create(mode, previous, last)
     local state = {mode = mode, slots = {}, background = constants.background_rows.random, stage_level = 0,
         difficulty = difficulties.difficult, countdown = nil, changed_by = nil}
     for slot = 0, 7 do state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false} end
@@ -28,6 +29,10 @@ function setup.create(mode, previous)
             state.slots[slot] = {kind = before.kind, fighter = before.fighter, team = before.team, ready = before.ready}
         end
         state.background, state.stage_level, state.difficulty = previous.background, previous.stage_level, previous.difficulty
+    elseif last then
+        state.difficulty = tonumber(last.difficulty) or state.difficulty
+        state.background = tonumber(last.background) or state.background
+        state.stage_level = tonumber(last.stage_level) or state.stage_level
     end
     setup.apply(state, {type = "mode", value = mode})
     return state

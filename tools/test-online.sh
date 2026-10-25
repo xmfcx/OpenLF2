@@ -181,12 +181,14 @@ grep -q "room created" "$WORK/rooms.server"; check "rooms: the server made a pri
 grep -c "session started with 1 players" "$WORK/rooms.server" | grep -q "^2$"; check "rooms: two sessions run at once" $? "$(grep session "$WORK/rooms.server")"
 for side in one two; do client_checks rooms $side "screen=(title|characters|setup)"; done
 
-# 9. The match setup screen in a session: both join, choose a fighter and get ready with their keys, the room role
-#    starts (defend; the other player's defend does nothing), and the fight runs with rollback.
+# 9. The match setup screen in a session (it replaces the title menu): both join, choose a fighter and get ready with
+#    their keys, a player starts (defend), and the fight runs with rollback.
 #    Client one first clicks the Stage tab: the click goes through the server, so both clients play a stage fight.
 SETUP="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"
-SERVER_FLAGS= run_session setup 23609 "$START$TITLE=mode_1$(wait_frames 10)$SETUP$FIGHT" "$START$(wait_frames 42)$SETUP$FIGHT"
+SERVER_FLAGS= run_session setup 23609 "$START=mode_1$(wait_frames 10)$SETUP$FIGHT" "$START$(wait_frames 11)$SETUP$FIGHT"
 for side in one two; do client_checks setup $side "screen=match.*stage="; done
+python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])).get("last_setup") or {}; sys.exit(0 if s.get("mode") == 1 else 1)' \
+    "$WORK/server-config/config.json"; check "setup: the server keeps the values of the last match (Stage)" $? "$(grep -o '"last_setup"[^}]*' "$WORK/server-config/config.json")"
 server_checks setup 1
 
 exit $FAILED

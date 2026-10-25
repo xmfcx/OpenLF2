@@ -112,8 +112,8 @@ shot 96 lobby
 
 # Both ready (attack), the host starts (defend): the title menu of the session.
 focus 96; press 96 "$ATTACK"; focus 95; press 95 "$ATTACK"; sleep 1; press 95 "$DEFEND"
-expect "host: the session starts at the title" host "screen=title online=session"
-expect "join: the session starts at the title" join "screen=title online=session"
+expect "host: the session starts at the match setup screen" host "screen=setup online=session"
+expect "join: the session starts at the match setup screen" join "screen=setup online=session"
 
 # The chat in the menus: Enter (or T) opens it, it stays open, Enter sends and closes it, it does not open again.
 focus 96; press 96 "$CHAT"
@@ -133,14 +133,9 @@ expect_not "host: Escape in the chat does not open the settings" host "settings=
 
 # To a fight: Versus opens the match setup screen; both join, choose a fighter and get ready with attack (three
 # times), and the host (the room role) starts with defend; the countdown takes three seconds.
-press 95 "$ATTACK"; sleep 1.5
-expect "both: the match setup screen" host "screen=setup"
-expect "join: the match setup screen" join "screen=setup"
 for round in 1 2 3; do focus 96; press 96 "$ATTACK"; focus 95; press 95 "$ATTACK"; sleep 0.6; done
 sleep 1; shot 95 setup
-focus 96; press 96 "$DEFEND"; sleep 1
-expect "join: the other player's defend does not start" join "screen=setup"
-focus 95; press 95 "$DEFEND"; sleep 4.5
+focus 96; press 96 "$DEFEND"; sleep 4.5
 expect "host: the fight starts" host "screen=match online=session"
 expect "join: the fight starts" join "screen=match online=session"
 

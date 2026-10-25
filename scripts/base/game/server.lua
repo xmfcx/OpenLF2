@@ -37,7 +37,8 @@ local function new_room(top, code, private)
     -- classic: the sessions use the classic character selection (--classic-menus, for the input traces of the
     -- original menus); otherwise they use the match setup screen.
     return {top = top, code = code, private = private, profile = top.profile, version = top.version, players = {},
-        order = {}, phase = "lobby", hashes = {}, saved = server.load_saved(), classic = top.classic, spectators = {}}
+        order = {}, phase = "lobby", hashes = {}, saved = server.load_saved(), classic = top.classic, spectators = {},
+        last_setup = server.load_last_setup()}
 end
 -- options: the runtime settings (server_port, network_profile).
 function server.create(options)
@@ -148,7 +149,7 @@ local function session_message(state, rejoin)
     local owners = {}
     for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
     return {type = "session", owners = owners, names = session.names, role = state.order[1], role_slot = session.role_slot,
-        random = session.random,
+        random = session.random, last_setup = state.last_setup,
         rejoin = rejoin or nil, classic = state.classic or nil}
 end
 -- The final ticks so far, to a player who must run them to catch up (a return, or a resumed session).
@@ -194,7 +195,7 @@ local function start_session(state, now, saved)
     end
     local first = saved and saved.length or 0
     state.authority = authority.create({owners = owners, clients = clients, all_functions = true, first_tick = first})
-    state.authority.speed = saved and saved.speed or nil
+    state.authority.speed = saved and saved.speed or (state.last_setup and state.last_setup.speed)
     state.phase, state.hashes = "session", {}
     -- A resumed session goes on with its next tick, after the start delay.
     state.start_at = now + start_delay_ms - first * tick_ms
@@ -209,12 +210,35 @@ local function start_session(state, now, saved)
     log(state, (saved and "session resumed with " or "session started with ") .. #state.order .. " players")
 end
 
+-- The values of the last match of this server (the players who meet here again find them on the setup screen):
+-- the mode, the difficulty, the arena, the stage group and the game speed, from config.json's "last_setup".
+local setup_fields = {mode = {0, 4}, difficulty = {-1, 2}, background = {0, 100}, stage_level = {0, 50}, speed = {1, 10}}
+local function clean_setup(values)
+    if type(values) ~= "table" then return nil end
+    local clean = {}
+    for key, range in pairs(setup_fields) do
+        local value = tonumber(values[key])
+        if value then clean[key] = math.max(range[1], math.min(range[2], math.floor(value))) end
+    end
+    return clean
+end
+function server.load_last_setup()
+    local document = engine.read_settings()
+    return type(document) == "table" and clean_setup(document.last_setup) or nil
+end
+local function save_last_setup(state)
+    local document = engine.read_settings()
+    if type(document) ~= "table" then document = {} end
+    document.last_setup = state.last_setup
+    engine.write_settings(document)
+end
+
 -- The stopped session in the configuration of this computer, or nil.
 function server.load_saved()
     local document = engine.read_settings()
     local saved = type(document) == "table" and document.saved_session
-    if type(saved) ~= "table" or type(saved.data) ~= "string" then return nil end
-    local data = wire.decode(saved.data)
+    if type(saved) ~= "table" or type(saved.hex) ~= "string" or #saved.hex % 2 ~= 0 then return nil end
+    local data = wire.decode((saved.hex:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end)))
     if type(data) ~= "table" or type(data.slots) ~= "table" or type(data.runs) ~= "table" then return nil end
     -- The final ticks are stored in runs of equal ticks: each an encoded {count, encoded tick}.
     local log, tick = {}, 0
@@ -266,7 +290,9 @@ save_session = function(state)
     local data = {slots = slots, random = session.random, speed = state.authority and state.authority.speed, runs = runs}
     local document = engine.read_settings()
     if type(document) ~= "table" then document = {} end
-    document.saved_session = {data = wire.encode(data), ticks = session.logged + 1}
+    -- As hex text: the random state is binary, and config.json must stay valid UTF-8.
+    document.saved_session = {hex = (wire.encode(data):gsub(".", function(c) return string.format("%02x", c:byte()) end)),
+        ticks = session.logged + 1}
     local saved, problem = engine.write_settings(document)
     if saved then
         state.saved = server.load_saved()
@@ -425,6 +451,9 @@ function handlers.set_speed(state, peer, message)
     tenths = math.max(1, math.min(10, math.floor(tenths)))
     state.authority.speed = tenths
     local text = tenths == 10 and "1.0" or string.format("0.%d", tenths)
+    state.last_setup = state.last_setup or {}
+    state.last_setup.speed = tenths
+    save_last_setup(state)
     broadcast(state, {type = "notice", text = player.name .. " set the speed to " .. text, speed = tenths})
     log(state, player.name .. " set the speed to " .. text)
 end
@@ -432,7 +461,7 @@ end
 -- small values pass: a type, a slot and a number or a flag.
 local command_types = {join = true, leave = true, fighter = true, team = true, ready = true, add_computer = true,
     remove_computer = true, mode = true, arena = true, stage = true, difficulty = true, start = true, wait = true,
-    exit = true, rematch = true, change_fighters = true, results_setup = true}
+    exit = true, rematch = true, change_fighters = true, results_setup = true, championship = true, team_championship = true}
 function handlers.command(state, peer, message)
     local command = message.command
     if state.phase ~= "session" or not state.players[peer] or type(command) ~= "table" or not command_types[command.type] then
@@ -456,6 +485,17 @@ function handlers.caught_up(state, peer)
     local player = state.players[peer]
     local drop = player and state.phase == "session" and state.session.drops[player.slot]
     if drop and drop.catching then end_drop(state, player.slot, player.name .. " caught up") end
+end
+-- The values of a match that starts (every client sends them; they are the same): the next session begins with them.
+function handlers.setup_used(state, peer, message)
+    if state.phase ~= "session" or not state.players[peer] then return end
+    local values = clean_setup(message)
+    if not values then return end
+    values.speed = state.authority and state.authority.speed or (state.last_setup and state.last_setup.speed)
+    local same = state.last_setup and wire.encode(state.last_setup) == wire.encode(values)
+    if same then return end
+    state.last_setup = values
+    save_last_setup(state)
 end
 function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end
