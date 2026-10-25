@@ -1169,6 +1169,8 @@ Result<void> run(const Configuration& config) {
     std::optional<std::uint32_t> last_frame_time_ms;
     // Key-down events gathered across polls until the next script frame (bounded).
     std::vector<int> key_downs;
+    // The menu events (Dear ImGui) gathered across polls until the next script frame (bounded).
+    std::vector<UiEvent> ui_events;
     // The dialog answers on a poll between two script frames; keep the file until a frame runs.
     std::optional<std::string> chosen_file;
     std::optional<std::filesystem::path> dropped_file;
@@ -1201,6 +1203,9 @@ Result<void> run(const Configuration& config) {
         }
         for (const int code : input.key_downs) {
             if (key_downs.size() < 256) key_downs.push_back(code);
+        }
+        for (auto& event : input.ui_events) {
+            if (ui_events.size() < 64) ui_events.push_back(std::move(event));
         }
         pressed = pressed || input.pressed;
         toggle_fullscreen = toggle_fullscreen || input.toggle_fullscreen;
@@ -1250,13 +1255,20 @@ Result<void> run(const Configuration& config) {
         for (const int code : key_downs) {
             if (code > 0 && static_cast<std::size_t>(code) < down.size()) down[static_cast<std::size_t>(code)] = true;
         }
+        // A menu's text field takes the keyboard: the keys and the typed text go to it, not to the scripts.
+        if (input.ui_keyboard) {
+            down.fill(false);
+            key_downs.clear();
+            typed.clear();
+        }
         for (std::size_t code = 0; code < down.size(); ++code) {
             if (!down[code]) continue;
             if (held.size() > 1) held += ',';
             held += std::to_string(code);
         }
+        // A press on a menu belongs to the menu.
         held += " m" + std::to_string(input.pointer_x) + ',' + std::to_string(input.pointer_y) + ','
-            + (input.button || pressed ? '1' : '0');
+            + ((input.button || pressed) && !input.ui_mouse ? '1' : '0');
         if (!draining) pressed = false;
         // Then " p" and the key-down codes since the last script frame, in order.
         if (!key_downs.empty()) {
@@ -1267,6 +1279,29 @@ Result<void> run(const Configuration& config) {
             }
             if (!draining) key_downs.clear();
         }
+        // Then " u" and the menu events (Dear ImGui): c:ID (clicked), x:ID:HEX (changed) or s:ID:HEX (submitted),
+        // with the text as hex digits, comma separated.
+        if (!ui_events.empty()) {
+            held += " u";
+            static constexpr char digits[] = "0123456789abcdef";
+            for (std::size_t index = 0; index < ui_events.size(); ++index) {
+                const auto& event = ui_events[index];
+                if (index > 0) held += ',';
+                held += event.kind == UiEvent::Kind::clicked ? "c:" : event.kind == UiEvent::Kind::changed ? "x:" : "s:";
+                held += event.id;
+                if (event.kind != UiEvent::Kind::clicked) {
+                    held += ':';
+                    for (const char character : event.text) {
+                        const auto byte = static_cast<unsigned char>(character);
+                        held += digits[byte >> 4];
+                        held += digits[byte & 15];
+                    }
+                }
+            }
+            if (!draining) ui_events.clear();
+        }
+        // Then " U" while a menu's text field has the keyboard.
+        if (input.ui_keyboard) held += " U";
         // Then " w" when Alt+Enter asked to switch between fullscreen and window.
         if (toggle_fullscreen) {
             held += " w";
@@ -1449,6 +1484,7 @@ Result<void> run(const Configuration& config) {
         // and independent decompression streams.
         const bool overlapping = pipeline.active() && !draining;
         if (overlapping) simulation.start(std::move(held));
+        platform->set_ui(std::move(frame->ui));
         auto presented = platform->present(frame->commands, frame->viewport);
         if (!presented) return std::unexpected(presented.error());
         auto music = platform->music(frame->music);

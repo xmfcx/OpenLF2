@@ -11,6 +11,7 @@
 #include "window_icon.hpp" // generated from the SVG icon by tools/icons/make_icons.py
 #endif
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -22,6 +23,11 @@
 #include <set>
 #include <vector>
 #include <SDL3/SDL.h>
+#ifdef OPENLF2_IMGUI
+#include <imgui.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_sdlrenderer3.h>
+#endif
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
@@ -162,6 +168,14 @@ class SdlPlatform final : public Platform {
 public:
     SdlPlatform(const ResourceSource& resources, const MusicDecoder& decoder)
         : resources_(resources), decoder_(decoder), text_(resources) {}
+#ifdef OPENLF2_IMGUI
+    // Dear ImGui borrows the window and the renderer, so it ends first.
+    ~SdlPlatform() override {
+        shutdown_ui_backend();
+        if (imgui_context_) ImGui::DestroyContext();
+    }
+    void set_ui(std::vector<UiCommand> commands) override { ui_ = std::move(commands); }
+#endif
     Result<void> initialize(const Viewport& viewport, const std::string& renderer,
                             const std::optional<WindowPlacement>& placement) {
 #ifdef __vita__
@@ -376,6 +390,9 @@ public:
         int typed_keys = 0; // key-downs of this poll that the text events below repeat
         bool back_to_original = false;
         while (SDL_PollEvent(&event)) {
+#ifdef OPENLF2_IMGUI
+            if (imgui_backend_) ImGui_ImplSDL3_ProcessEvent(&event);
+#endif
             observe(event);
             switch (event.type) {
             case SDL_EVENT_RENDER_TARGETS_RESET:
@@ -515,10 +532,19 @@ public:
         input.touches.reserve(touches_.size());
         for (const auto& [finger, point] : touches_) input.touches.push_back(point);
         window_placement();
+#ifdef OPENLF2_IMGUI
+        input.ui_events = std::move(ui_events_);
+        ui_events_.clear();
+        input.ui_keyboard = ui_keyboard_;
+        input.ui_mouse = ui_mouse_;
+#endif
         return input;
     }
     // Opens the renderer `name` (nullptr: SDL's default) on the window, with the frame's xBRZ program when it can.
     bool open_renderer(const char* name) {
+#ifdef OPENLF2_IMGUI
+        shutdown_ui_backend(); // its textures belong to the renderer; it starts again on the next menu
+#endif
         upscaler_.reset();
         renderer_.reset(SDL_CreateRenderer(window_.get(), name));
         if (!renderer_) return false;
@@ -782,12 +808,248 @@ public:
         // finished frame, erasing the viewport colour and the overlay drawn in the bars. Present without it, then
         // restore it: input coordinates are converted with it between frames.
         if (!SDL_SetRenderLogicalPresentation(renderer_.get(), 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED)) return error();
+#ifdef OPENLF2_IMGUI
+        draw_ui(viewport);
+#endif
         if (!SDL_RenderPresent(renderer_.get())) return error();
         if (!SDL_SetRenderLogicalPresentation(renderer_.get(), viewport.width, viewport.height,
                                               SDL_LOGICAL_PRESENTATION_LETTERBOX)) return error();
         return {};
     }
 private:
+#ifdef OPENLF2_IMGUI
+    // The network menus (UiCommand), drawn with Dear ImGui over the finished picture at the window's resolution.
+    void shutdown_ui_backend() {
+        if (!imgui_backend_) return;
+        ImGui_ImplSDLRenderer3_Shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        imgui_backend_ = false;
+    }
+    static ImVec4 shade(int red, int green, int blue, float alpha = 1.0f) {
+        return {static_cast<float>(red) / 255.0f, static_cast<float>(green) / 255.0f, static_cast<float>(blue) / 255.0f,
+                alpha};
+    }
+    // Rounded panels in the blues of the original's menus.
+    void apply_ui_theme() {
+        ImGuiStyle& style = ImGui::GetStyle();
+        ImGui::StyleColorsDark(&style);
+        style.WindowRounding = 10.0f;
+        style.ChildRounding = 8.0f;
+        style.FrameRounding = 6.0f;
+        style.PopupRounding = 8.0f;
+        style.GrabRounding = 6.0f;
+        style.ScrollbarRounding = 8.0f;
+        style.WindowPadding = {16.0f, 14.0f};
+        style.FramePadding = {10.0f, 6.0f};
+        style.ItemSpacing = {10.0f, 8.0f};
+        style.WindowBorderSize = 1.0f;
+        style.WindowTitleAlign = {0.5f, 0.5f};
+        auto* colors = style.Colors;
+        colors[ImGuiCol_Text] = shade(235, 240, 255);
+        colors[ImGuiCol_TextDisabled] = shade(130, 140, 175);
+        colors[ImGuiCol_WindowBg] = shade(14, 22, 52, 0.94f);
+        colors[ImGuiCol_ChildBg] = shade(8, 14, 36, 0.65f);
+        colors[ImGuiCol_PopupBg] = shade(14, 22, 52, 0.98f);
+        colors[ImGuiCol_Border] = shade(90, 120, 220, 0.5f);
+        colors[ImGuiCol_FrameBg] = shade(28, 42, 92);
+        colors[ImGuiCol_FrameBgHovered] = shade(42, 62, 132);
+        colors[ImGuiCol_FrameBgActive] = shade(56, 84, 170);
+        colors[ImGuiCol_TitleBg] = shade(22, 34, 80);
+        colors[ImGuiCol_TitleBgActive] = shade(32, 50, 116);
+        colors[ImGuiCol_Button] = shade(50, 77, 154);
+        colors[ImGuiCol_ButtonHovered] = shade(72, 108, 210);
+        colors[ImGuiCol_ButtonActive] = shade(40, 60, 130);
+        colors[ImGuiCol_Header] = shade(50, 77, 154, 0.75f);
+        colors[ImGuiCol_HeaderHovered] = shade(72, 108, 210, 0.85f);
+        colors[ImGuiCol_HeaderActive] = shade(84, 124, 232);
+        colors[ImGuiCol_Separator] = shade(90, 120, 220, 0.4f);
+        colors[ImGuiCol_ScrollbarBg] = shade(8, 14, 36, 0.6f);
+        colors[ImGuiCol_ScrollbarGrab] = shade(50, 77, 154);
+        colors[ImGuiCol_NavCursor] = shade(255, 210, 74);
+        base_style_ = style;
+    }
+    bool start_ui() {
+        if (!imgui_context_) {
+            IMGUI_CHECKVERSION();
+            ImGui::CreateContext();
+            imgui_context_ = true;
+            auto& io = ImGui::GetIO();
+            io.IniFilename = nullptr;
+            io.LogFilename = nullptr;
+            apply_ui_theme();
+            // The base package's font; without it ImGui's own (a small bitmap font).
+            if (auto font = resources_.read("mods/base/fonts/dejavu_sans.ttf"); font && !font->empty()) {
+                void* data = IM_ALLOC(font->size());
+                std::memcpy(data, font->data(), font->size());
+                ImFontConfig config;
+                config.FontDataOwnedByAtlas = true;
+                io.Fonts->AddFontFromMemoryTTF(data, static_cast<int>(font->size()), 16.0f, &config);
+            }
+        }
+        if (!imgui_backend_) {
+            if (!ImGui_ImplSDL3_InitForSDLRenderer(window_.get(), renderer_.get())) return false;
+            if (!ImGui_ImplSDLRenderer3_Init(renderer_.get())) {
+                ImGui_ImplSDL3_Shutdown();
+                return false;
+            }
+            imgui_backend_ = true;
+        }
+        return true;
+    }
+    void draw_ui(const Viewport& viewport) {
+        if (ui_.empty()) {
+            ui_keyboard_ = ui_mouse_ = false;
+            return;
+        }
+        if (!start_ui()) return;
+        int width = 0;
+        int height = 0;
+        if (!SDL_GetRenderOutputSize(renderer_.get(), &width, &height) || viewport.width < 1 || viewport.height < 1) return;
+        // The menus scale and sit like the letterboxed picture.
+        const float scale = std::min(static_cast<float>(width) / static_cast<float>(viewport.width),
+                                     static_cast<float>(height) / static_cast<float>(viewport.height));
+        const float left = (static_cast<float>(width) - static_cast<float>(viewport.width) * scale) / 2.0f;
+        const float top = (static_cast<float>(height) - static_cast<float>(viewport.height) * scale) / 2.0f;
+        if (std::abs(scale - ui_scale_) > 0.01f) {
+            ImGui::GetStyle() = base_style_;
+            ImGui::GetStyle().ScaleAllSizes(scale);
+            ImGui::GetStyle().FontScaleMain = scale;
+            ui_scale_ = scale;
+        }
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        auto& io = ImGui::GetIO();
+        // ImGui draws the pointer while a menu takes clicks; over a fight with only passive windows, none shows.
+        io.MouseDrawCursor = std::ranges::any_of(ui_, [](const UiCommand& element) {
+            return element.kind == UiCommand::Kind::window && !(element.flags & ui_passive);
+        });
+        const auto size = [scale](int value) { return static_cast<float>(value) * scale; };
+        int windows = 0;
+        int children = 0;
+        for (const auto& element : ui_) {
+            const auto labelled = element.label + "##" + element.id;
+            if (element.kind != UiCommand::Kind::window && windows == 0) continue;
+            switch (element.kind) {
+            case UiCommand::Kind::window: {
+                if (windows > 0) break;
+                ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse
+                    | ImGuiWindowFlags_NoSavedSettings;
+                if (element.height > 0) {
+                    ImGui::SetNextWindowPos({left + size(element.x), top + size(element.y)});
+                    ImGui::SetNextWindowSize({size(element.width), size(element.height)});
+                } else {
+                    // Height 0: as tall as its content, in the middle of the picture's height.
+                    ImGui::SetNextWindowPos({left + size(element.x), top + size(viewport.height) / 2.0f}, ImGuiCond_Always,
+                                            {0.0f, 0.5f});
+                    ImGui::SetNextWindowSizeConstraints({size(element.width), 0.0f}, {size(element.width), size(viewport.height)});
+                    flags |= ImGuiWindowFlags_AlwaysAutoResize;
+                }
+                if (element.flags & ui_no_title) flags |= ImGuiWindowFlags_NoTitleBar;
+                if (element.flags & ui_glass) ImGui::SetNextWindowBgAlpha(0.5f);
+                if (element.flags & ui_passive) {
+                    flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing
+                        | ImGuiWindowFlags_NoBringToFrontOnFocus;
+                }
+                ImGui::Begin(labelled.c_str(), nullptr, flags);
+                ++windows;
+                break;
+            }
+            case UiCommand::Kind::end_window:
+                if (children == 0) {
+                    ImGui::End();
+                    --windows;
+                }
+                break;
+            case UiCommand::Kind::text: {
+                if (element.color >= 0) {
+                    ImGui::PushStyleColor(ImGuiCol_Text, shade((element.color >> 16) & 0xff, (element.color >> 8) & 0xff,
+                                                               element.color & 0xff));
+                }
+                if (element.flags & ui_large) ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.5f);
+                if (element.flags & ui_wrap) ImGui::TextWrapped("%s", element.label.c_str());
+                else ImGui::TextUnformatted(element.label.c_str());
+                if (element.flags & ui_large) ImGui::PopFont();
+                if (element.color >= 0) ImGui::PopStyleColor();
+                break;
+            }
+            case UiCommand::Kind::button: {
+                ImGui::BeginDisabled((element.flags & ui_disabled) != 0);
+                if (ImGui::Button(labelled.c_str(), {size(element.width), size(element.height)})) {
+                    ui_events_.push_back({UiEvent::Kind::clicked, element.id, {}});
+                }
+                ImGui::EndDisabled();
+                break;
+            }
+            case UiCommand::Kind::input: {
+                // The scripts' value wins when it changes (a cleared chat line); otherwise the typed text stays.
+                auto& text = ui_inputs_[element.id];
+                auto& given = ui_given_[element.id];
+                if (given != element.value) text = given = element.value;
+                if ((element.flags & ui_focus) && focused_.insert(element.id).second) ImGui::SetKeyboardFocusHere();
+                ImGui::SetNextItemWidth(element.width > 0 ? size(element.width) : -1.0f);
+                std::array<char, 256> buffer{};
+                std::memcpy(buffer.data(), text.data(), std::min(text.size(), buffer.size() - 1));
+                const auto hidden = "##" + element.id;
+                if (ImGui::InputTextWithHint(hidden.c_str(), element.label.c_str(), buffer.data(), buffer.size())) {
+                    text = buffer.data();
+                    ui_events_.push_back({UiEvent::Kind::changed, element.id, text});
+                }
+                if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+                    ui_events_.push_back({UiEvent::Kind::submitted, element.id, text});
+                    // Enter leaves the field; it takes the keyboard again, so that the next line can follow.
+                    ImGui::SetKeyboardFocusHere(-1);
+                }
+                break;
+            }
+            case UiCommand::Kind::selectable: {
+                ImGui::BeginDisabled((element.flags & ui_disabled) != 0);
+                if (ImGui::Selectable(labelled.c_str(), element.value == "1", ImGuiSelectableFlags_None,
+                                      {size(element.width), size(element.height)})) {
+                    ui_events_.push_back({UiEvent::Kind::clicked, element.id, {}});
+                }
+                ImGui::EndDisabled();
+                break;
+            }
+            case UiCommand::Kind::same_line:
+                ImGui::SameLine(element.x > 0 ? size(element.x) : 0.0f);
+                break;
+            case UiCommand::Kind::separator:
+                ImGui::Separator();
+                break;
+            case UiCommand::Kind::spacing:
+                ImGui::Dummy({0.0f, size(element.height)});
+                break;
+            case UiCommand::Kind::child: {
+                const auto hidden = "##" + element.id;
+                ImGui::BeginChild(hidden.c_str(), {size(element.width), size(element.height)},
+                                  (element.flags & ui_border) ? ImGuiChildFlags_Borders : ImGuiChildFlags_None);
+                ++children;
+                break;
+            }
+            case UiCommand::Kind::end_child:
+                if (children > 0) {
+                    ImGui::EndChild();
+                    --children;
+                }
+                break;
+            }
+        }
+        for (; children > 0; --children) ImGui::EndChild();
+        for (; windows > 0; --windows) ImGui::End();
+        // Inputs that are gone forget their text, and get the focus again when they come back.
+        const auto shown = [this](const std::string& id) {
+            return std::ranges::any_of(ui_, [&](const UiCommand& element) { return element.id == id; });
+        };
+        std::erase_if(focused_, [&](const std::string& id) { return !shown(id); });
+        std::erase_if(ui_inputs_, [&](const auto& entry) { return !shown(entry.first); });
+        std::erase_if(ui_given_, [&](const auto& entry) { return !shown(entry.first); });
+        ImGui::Render();
+        ui_keyboard_ = io.WantTextInput;
+        ui_mouse_ = io.WantCaptureMouse;
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_.get());
+    }
+#endif
     // Draws the overlay commands over the whole window, still in viewport coordinates but not
     // clipped to the letterboxed picture: logical presentation is switched off for this pass
     // and replaced by the same scale and centring.
@@ -1216,6 +1478,19 @@ private:
     Uint64 rebuild_after_ = 0;
     bool enter_consumed_ = false; // Enter belongs to an Alt+Enter until it is released
     bool text_input_ = false;
+#ifdef OPENLF2_IMGUI
+    std::vector<UiCommand> ui_;
+    std::vector<UiEvent> ui_events_;
+    std::map<std::string, std::string> ui_inputs_; // each input's text as typed
+    std::map<std::string, std::string> ui_given_;  // each input's value as the scripts last gave it
+    std::set<std::string> focused_;                // inputs that took the keyboard when they appeared
+    ImGuiStyle base_style_;
+    float ui_scale_ = 0.0f;
+    bool imgui_context_ = false;
+    bool imgui_backend_ = false;
+    bool ui_keyboard_ = false;
+    bool ui_mouse_ = false;
+#endif
     // Touch: the finger that acts as the pointer, its last position in viewport coordinates,
     // and whether the pointer last moved by touch rather than by the mouse or a key.
     std::optional<SDL_FingerID> finger_;

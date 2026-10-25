@@ -233,6 +233,18 @@ function controls.read(settings, raw)
         end
         -- " w": Alt+Enter, which the host consumed, asks for fullscreen or window.
         input.toggle_fullscreen = raw:find(" w", 1, true) ~= nil
+        -- " u": the menu events of the previous frame (base/ui/imgui): c:ID, x:ID:HEX or s:ID:HEX.
+        input.ui_keyboard = raw:find(" U", 1, true) ~= nil
+        local events = raw:match(" u([%w_:,]*)")
+        if events then
+            input.ui = {clicked = {}, changed = {}, submitted = {}}
+            for kind, id, hex in (events .. ","):gmatch("(%a):([%w_]+):?(%x*),") do
+                local text = hex:gsub("%x%x", function(pair) return string.char(tonumber(pair, 16)) end)
+                if kind == "c" then input.ui.clicked[id] = true
+                elseif kind == "x" then input.ui.changed[id] = text
+                elseif kind == "s" then input.ui.submitted[id] = text end
+            end
+        end
         for code in (raw:match(" t([%d,]*)") or ""):gmatch("%d+") do input.text = input.text .. string.char(tonumber(code)) end
         for letter in (raw:match(" g(%a*)") or ""):gmatch("%a") do input.gamepad[letter] = true end
         -- " j": each controller as its held directions, ':' and its buttons in hex, comma separated.

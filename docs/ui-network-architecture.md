@@ -64,7 +64,7 @@ A screen has two parts:
 - The view draws the model and the local UI state. The local UI state is the focus, the hover, the pointer, scroll positions and animations. It is never shared.
 - The controller turns local input into commands. For the keyboard, it maps the keys of each local player to commands, as the original does (right on a fighter slot is `step_fighter(slot, 1)`). For the mouse, it uses the widgets that the view drew.
 
-Widgets solve the fixed rectangles: when the view draws an entry, it also registers a widget with the area of that drawing and the command of the entry. The controller tests the pointer against the widgets of the last drawn frame. The rectangles then come from the drawing itself, in one place.
+The network menus use Dear ImGui (base/ui/imgui.lua): the view describes its widgets each frame, the engine draws them at the window's resolution and returns the clicks, so the hit areas come from the widgets themselves. Widgets solve the fixed rectangles: when the view draws an entry, it also registers a widget with the area of that drawing and the command of the entry. The controller tests the pointer against the widgets of the last drawn frame. The rectangles then come from the drawing itself, in one place.
 
 The views keep the original look: they draw the original bitmaps at the original positions.
 

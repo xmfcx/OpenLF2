@@ -282,6 +282,24 @@ else()
 endif()
 openlf2_target(openlf2_adapter_sdl)
 target_link_libraries(openlf2_adapter_sdl PRIVATE openlf2_core SDL3::SDL3)
+# Menus at the window's own resolution (the network menus): Dear ImGui with its SDL3 backends, built from its release
+# archive.
+option(OPENLF2_IMGUI "Draw the network menus with Dear ImGui" ON)
+if(OPENLF2_IMGUI)
+    include(FetchContent)
+    FetchContent_Declare(imgui
+        URL https://github.com/ocornut/imgui/archive/refs/tags/v1.92.1.tar.gz
+        URL_HASH SHA256=32c237c2abf67a2ffccaac17192f711d4a787554b4133187a153d49057d6109c)
+    FetchContent_MakeAvailable(imgui)
+    add_library(openlf2_imgui STATIC ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp)
+    target_include_directories(openlf2_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+    target_compile_definitions(openlf2_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+    target_link_libraries(openlf2_imgui PUBLIC SDL3::SDL3)
+    target_link_libraries(openlf2_adapter_sdl PRIVATE openlf2_imgui)
+    target_compile_definitions(openlf2_adapter_sdl PRIVATE OPENLF2_IMGUI)
+endif()
 if(TARGET SDL3_ttf::SDL3_ttf AND OPENLF2_TEXT_RENDERING)
     target_link_libraries(openlf2_adapter_sdl PRIVATE SDL3_ttf::SDL3_ttf)
 endif()

@@ -34,6 +34,7 @@ local function screen_module(name)
     if name == "launch" then return require("base/ui/launch") end
     if name == "versions" then return require("base/ui/versions") end
     if name == "online_lobby" then return require("base/ui/online_lobby") end
+    if name == "online_menu" then return require("base/ui/online_menu") end
     return title
 end
 -- Whether the current screen reads key sets directly (not mouse/touch via base/ui/navigation);
@@ -97,8 +98,6 @@ function flow.create(options)
         state.network = require("base/ui/network").create(options)
         state.active = "network"
         state.network_cli = options.network_trace
-        -- --host and --join keep the two-computer TCP game.
-        state.network.cli = true
         require("base/ui/network").begin(state.network, options.network_role == "host", options.network_address)
     end
     return state
@@ -193,6 +192,11 @@ local function route(state, input, context)
         state.versions = require("base/ui/versions").create(state.options)
         state.active = "versions"
         state.wait_release = true
+    elseif requested == "network" and engine.messages then
+        -- An engine with UDP messages plays through the server program (base/ui/online_menu); older ones keep the
+        -- two-computer game below.
+        state.online_menu = require("base/ui/online_menu").create(state.options)
+        state.active = "online_menu"
     elseif requested == "network" then
         state.network = require("base/ui/network").create(state.options)
         state.active = "network"
@@ -218,8 +222,8 @@ local function route(state, input, context)
     elseif requested == "online_connect" then
         -- Host or Join on the network screen: hosting starts the server program on this computer first, so the lobby
         -- tries to connect for a while (the server needs a moment to load the game data).
-        local request = state.network.online_request
-        state.network.online_request = nil
+        local request = state.online_menu.request
+        state.online_menu.request = nil
         if request.host then context.action("start_server") end
         state.online_lobby = require("base/ui/online_lobby").create(state.options, request.address,
             state.options.network_port or constants.network.default_port, request.host and 20000 or nil)
@@ -374,13 +378,17 @@ end
 -- own (the character selection, the fight) show it for three seconds after the mouse moves. Drawing only: the
 -- screens' own logic keeps the pointer it always had.
 local pointer_shown_ms = 3000
--- The connection to a server program while its lobby or one of its fights shows (base/game/online).
+-- The connection to a server program while its lobby or one of its fights shows (base/game/online), and whether
+-- a fight shows (it has the chat window of base/ui/chat; the lobby has its own chat panel).
 local function online_connection(state)
     local lobby = state.online_lobby
     if not lobby then return nil end
-    if state.active == "online_lobby" or (state.active == "match" and state.match.online) then return lobby.online end
+    if state.active == "match" and state.match.online then return lobby.online, true end
+    if state.active == "online_lobby" then return lobby.online, false end
     return nil
 end
+-- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
+local imgui_screens = {online_menu = true, online_lobby = true}
 local function pointer_position(state)
     return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
 end
@@ -425,11 +433,11 @@ function flow.draw(state, context)
     end
     if state.active == "match" and state.chart.match then damage_chart.draw(state.chart, context) end
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
-    local connection = online_connection(state)
-    if connection and state.chat then chat.draw(state.chat, context, connection) end
+    local connection, fighting = online_connection(state)
+    if fighting and state.chat then chat.draw(state.chat, context, connection) end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
-    if not pointer_drawn and state.local_pointer_x
+    if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
        and engine.network_time() - (state.pointer_moved_at or -pointer_shown_ms) < pointer_shown_ms then
         local x, y = pointer_position(state)
         draw_image("pe/lf2_cursor", x, y, true)
@@ -439,7 +447,7 @@ end
 -- the game: not in a network game, where it disconnects, not on the network and versions screens, where it goes back,
 -- and not on the launch screen's pages that use it.
 local function escape_free(state)
-    if state.session or state.active == "network" or state.active == "versions" or state.active == "online_lobby" then
+    if state.session or state.active == "network" or state.active == "versions" or imgui_screens[state.active] then
         return false
     end
     if state.active == "match" and state.match.online then return false end
@@ -613,10 +621,10 @@ function flow.update(state, raw, context)
     end
     -- The chat of a server program (base/ui/chat), in its lobby and its fights: while its line is open, it takes the
     -- keys, and the players' keys are held back.
-    local connection = online_connection(state)
+    local connection, fighting = online_connection(state)
     if connection then
         state.chat = state.chat or chat.create()
-        if chat.update(state.chat, input, connection, context) then
+        if fighting and chat.update(state.chat, input, connection) then
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses, input.keys, input.presses, input.text = "", "", {}, {}, ""
         end

@@ -167,7 +167,11 @@ local FrameOpcode = {
     viewport = 1, sprite = 2, fill = 3, overlay = 4, render_area = 5,
     clip = 6, sound = 7, rumble = 8, music = 9, speed = 10,
     render_filter = 11, text_input = 12, replay_drop = 13, fullscreen = 14, action = 15, text = 16, file_dialog = 17, world_sprite = 18,
+    ui = 19,
 }
+-- Menu elements drawn with Dear ImGui (OpenLF2 extension, base/ui/imgui); the order matches UiCommand::Kind.
+local UiKind = {window = 0, end_window = 1, text = 2, button = 3, input = 4, selectable = 5, same_line = 6,
+    separator = 7, spacing = 8, child = 9, end_child = 10}
 local RumbleTarget = {gamepad = 0, phone = 1}
 local MusicKind = {play = 0, stop = 1, resume = 2, volume = 3}
 local RenderFilter = {nearest = 0, linear = 1, xbrz = 2}
@@ -229,6 +233,10 @@ local function render(input)
         command(FrameOpcode.music, MusicKind[kind] or INVALID_ENUM, value or false)
     end
     function context.speed(fast) command(FrameOpcode.speed, fast) end
+    function context.ui(kind, id, label, value, x, y, width, height, color, flags)
+        command(FrameOpcode.ui, UiKind[kind] or INVALID_ENUM, id or "", label or "", value or "", x or 0, y or 0,
+            width or 0, height or 0, color or -1, flags or 0)
+    end
     function context.render_filter(filter)
         command(FrameOpcode.render_filter, RenderFilter[filter] or INVALID_ENUM)
     end

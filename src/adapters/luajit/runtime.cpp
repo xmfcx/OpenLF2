@@ -244,7 +244,7 @@ constexpr int max_frame_commands = 1 << 20;
 constexpr double max_frame_fields = max_frame_commands * 20.0;
 enum class FrameOpcode {
     viewport = 1, sprite, fill, overlay, render_area, clip, sound, rumble,
-    music, speed, render_filter, text_input, replay_drop, fullscreen, action, text, file_dialog, world_sprite
+    music, speed, render_filter, text_input, replay_drop, fullscreen, action, text, file_dialog, world_sprite, ui
 };
 class FrameReader {
 public:
@@ -314,7 +314,7 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
         int commands = 0;
         while (reader.remaining()) {
             if (++commands > max_frame_commands) throw std::runtime_error("too many frame commands");
-            const auto opcode = static_cast<FrameOpcode>(reader.integer(1, 18));
+            const auto opcode = static_cast<FrameOpcode>(reader.integer(1, static_cast<int>(FrameOpcode::ui)));
             switch (opcode) {
             case FrameOpcode::viewport:
                 if (frame.viewport.width) throw std::runtime_error("duplicate viewport");
@@ -361,6 +361,26 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
                 const bool enabled = reader.flag();
                 const auto area = reader.rectangle(enabled);
                 clip = enabled ? std::optional<Rectangle>(area) : std::nullopt;
+                break;
+            }
+            case FrameOpcode::ui: {
+                // A menu element (ports/platform.hpp UiCommand): kind, id, label, value, x, y, width, height,
+                // color, flags.
+                UiCommand element;
+                element.kind = static_cast<UiCommand::Kind>(reader.integer(0, static_cast<int>(UiCommand::Kind::end_child)));
+                const auto id = reader.text();
+                if (id.size() > 64 || id.find_first_not_of(
+                        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string_view::npos) {
+                    throw std::runtime_error("invalid menu element id");
+                }
+                element.id = std::string(id);
+                element.label = std::string(reader.text());
+                element.value = std::string(reader.text());
+                element.x = reader.integer(); element.y = reader.integer();
+                element.width = reader.integer(); element.height = reader.integer();
+                element.color = reader.integer(-1, 0xffffff); element.flags = reader.integer(0, 255);
+                if (frame.ui.size() >= 4096) throw std::runtime_error("too many menu elements");
+                frame.ui.push_back(std::move(element));
                 break;
             }
             case FrameOpcode::sound: {
@@ -974,9 +994,11 @@ public:
         // or "k", comma-separated virtual-key codes, " m" x,y,button and
         // optionally " p" with the key-down codes, " t" with typed character codes, " g" with
         // controller button letters, " h" with the touch state and " f" with the scaling modes
-        // the renderer offers. The bound covers 256 held keys and 256 key-downs.
+        // the renderer offers, " u" with the menu events (ids and hex text) and " U" while a menu takes the keyboard.
+        // The bound covers 256 held keys and 256 key-downs.
         const bool keys = input.starts_with('k');
-        const auto allowed = keys ? std::string_view("0123456789,mptgfjhudlrabcexyswk -:")
+        const auto allowed = keys
+            ? std::string_view("0123456789,abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_ -:")
                                   : std::string_view("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/@_!#%^.?$&~");
         if (input.size() > 4096 || input.substr(keys ? 1 : 0).find_first_not_of(allowed) != std::string_view::npos) {
             return fail(ErrorCode::script, "invalid input action");

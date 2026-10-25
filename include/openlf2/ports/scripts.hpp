@@ -70,6 +70,7 @@ struct ScriptFrame {
     std::vector<RumbleCommand> rumbles;
     std::vector<std::string> actions;
     std::optional<FileDialogText> file_dialog; // for a "replay" action in this frame
+    std::vector<UiCommand> ui;                  // menu elements drawn with Dear ImGui (OpenLF2 extension)
 };
 class ScriptRuntime {
 public:

@@ -146,9 +146,40 @@ struct TouchPoint { int id; int x; int y; };
 // The window's edges in viewport coordinates: beyond 0..width / 0..height when the picture is
 // letterboxed. Overlay draw commands use the same coordinates.
 struct ScreenExtent { int left = 0; int top = 0; int right = 0; int bottom = 0; };
+// A menu element that the platform draws with Dear ImGui at the window's own resolution (OpenLF2 extension, the
+// network menus). Positions and sizes are in viewport units and scale with the picture; 0 is "automatic" (a window
+// of height 0 fits its content and sits in the middle of the picture's height).
+struct UiCommand {
+    enum class Kind { window, end_window, text, button, input, selectable, same_line, separator, spacing, child, end_child };
+    Kind kind = Kind::text;
+    std::string id;    // letters, digits and '_'; the events name it
+    std::string label; // the text shown (an input's hint)
+    std::string value; // an input's text, as the scripts know it
+    int x = 0, y = 0, width = 0, height = 0;
+    int color = -1;    // 0xRRGGBB, or -1 for the theme's
+    int flags = 0;     // per kind, see UiFlag
+};
+// Flags of UiCommand: a window without a title bar, a text that wraps, a big text, an input that takes the keyboard
+// when it appears, a child with a border, a button or selectable that cannot be used, a see-through window (over a
+// fight), a window that clicks pass through.
+enum UiFlag : int {
+    ui_no_title = 1, ui_wrap = 2, ui_large = 4, ui_focus = 8, ui_border = 16, ui_disabled = 32, ui_glass = 64, ui_passive = 128
+};
+// What the player did with the menu elements of the previous frame.
+struct UiEvent {
+    enum class Kind { clicked, changed, submitted };
+    Kind kind = Kind::clicked;
+    std::string id;
+    std::string text; // the input's text (changed, submitted)
+};
 // Viewport-coordinate pointer (-1 when unknown); follows the mouse or the last finger touched.
 struct InputSnapshot {
     std::array<bool, 256> keys{};
+    // The menu elements' events (UiCommand), and whether a menu takes the keyboard (a text field is active) or the
+    // mouse (it points at a menu) this poll.
+    std::vector<UiEvent> ui_events;
+    bool ui_keyboard = false;
+    bool ui_mouse = false;
     int pointer_x = -1;
     int pointer_y = -1;
     bool button = false;
@@ -198,6 +229,8 @@ public:
     virtual InputSnapshot poll() = 0;
     // Commands are drawn in order over the viewport's clear color.
     virtual Result<void> present(std::span<const DrawCommand> commands, const Viewport& viewport) = 0;
+    // The menu elements for the next present (OpenLF2 extension); platforms without Dear ImGui ignore them.
+    virtual void set_ui(std::vector<UiCommand> commands) { (void)commands; }
     // Shows or hides the on-screen keyboard where the system has one; `text` of the snapshot
     // only carries typing while it is active.
     virtual void set_text_input(bool active) = 0;

@@ -1,22 +1,23 @@
 -- SPDX-License-Identifier: MIT
 -- Copyright (c) 2026 OpenLF2 contributors
 
--- The chat of a server program's lobby and fights (OpenLF2 extension, docs/netcode.md "Chat and presence"). Enter
--- opens the chat line (T when Enter is a player's key), Enter sends it and Escape closes it. While it is open, the
--- keys write into the line and the players' keys are held back. The last messages show for a few seconds. A message
--- that is only a number from 1 to 42 plays that taunt on every computer (mods/base/taunts/NN.wav).
+-- The chat during the fights of a server program (OpenLF2 extension, docs/netcode.md "Chat and presence"; the lobby
+-- has its own chat panel). Enter opens the chat line (T when Enter is a player's key); its text field takes the
+-- keyboard, Enter sends and Escape closes it. The last messages show for a few seconds in a see-through window
+-- (base/ui/imgui). A message that is only a number from 1 to 42 plays that taunt on every computer
+-- (mods/base/taunts/NN.wav).
 local constants = require("base/game/constants")
 local controls = require("base/ui/controls")
 local online = require("base/game/online")
 local music = require("base/game/music")
-local font = require("base/ui/font")
+local imgui = require("base/ui/imgui")
 local virtual_keys = constants.virtual_keys
 local chat = {}
 
-local shown_ms, fade_ms, lines_shown, line_limit = 10000, 2000, 6, 120
+local shown_ms, lines_shown = 10000, 6
 
 function chat.create()
-    return {open = false, text = "", held = {}}
+    return {open = false, text = "", held = {}, frames = 0}
 end
 
 -- Enter, unless a player uses it; then T.
@@ -29,45 +30,25 @@ local function open_key()
     return virtual_keys.enter
 end
 
-local function pressed(state, input, code)
-    local down = input.keys[code] == true
-    local fresh = down and not state.held[code]
-    state.held[code] = down
-    return fresh
-end
-
--- Returns true while the chat line takes the keys (the caller then holds the players' keys back).
-function chat.update(state, input, connection, context)
-    local enter = pressed(state, input, virtual_keys.enter)
-    local escape = pressed(state, input, virtual_keys.escape)
-    local backspace = pressed(state, input, virtual_keys.backspace)
+-- Returns true while the chat line is open (the engine gives its text field the keys).
+function chat.update(state, input, connection)
     local key = open_key()
-    local opening = key == virtual_keys.enter and enter or pressed(state, input, key)
-    local was_open = state.open
+    local down = input.keys[key] == true
+    local fresh = down and not state.held[key]
+    state.held[key] = down
     if not state.open then
-        if opening and connection.phase == "lobby" then state.open, state.text, state.skip_text = true, "", true end
-    else
-        if escape then
-            state.open = false
-        elseif enter then
-            if state.text ~= "" then online.send(connection, {type = "chat", text = state.text}) end
-            state.open = false
-        else
-            if backspace then state.text = state.text:sub(1, -2) end
-            -- The key that opened the line (T) also arrives as typed text: it is not part of the message.
-            local typed = state.skip_text and "" or input.text or ""
-            state.skip_text = false
-            for character in typed:gmatch("[%w%p ]") do
-                if #state.text < line_limit then state.text = state.text .. character end
-            end
-        end
+        if fresh and connection.phase == "lobby" then state.open, state.text, state.frames = true, "", 0 end
+        return state.open
     end
-    if state.open ~= was_open then context.text_input(state.open) end
-    -- The key that closed the line stays held back until it is let go.
-    if not state.open and was_open then state.release = true end
-    if state.release then
-        if not (input.keys[virtual_keys.enter] or input.keys[virtual_keys.escape]) then state.release = nil end
-        return true
+    state.frames = state.frames + 1
+    local events = imgui.events(input)
+    if events.changed.chat_line then state.text = events.changed.chat_line end
+    if events.submitted.chat_line then
+        if state.text:match("%S") then online.send(connection, {type = "chat", text = state.text}) end
+        state.open = false
+    -- Escape (or a click elsewhere) leaves the text field: the line closes. Its focus takes a frame to arrive.
+    elseif state.frames > 3 and not input.ui_keyboard then
+        state.open = false
     end
     return state.open
 end
@@ -84,21 +65,21 @@ end
 
 function chat.draw(state, context, connection)
     local now = engine.network_time()
-    local y = 440
-    local first = math.max(1, #connection.chat - lines_shown + 1)
-    for index = #connection.chat, first, -1 do
+    local lines = {}
+    for index = math.max(1, #connection.chat - lines_shown + 1), #connection.chat do
         local line = connection.chat[index]
-        local age = now - line.at
-        if age < shown_ms + fade_ms or state.open then
-            local alpha = state.open and 1 or math.max(0, math.min(1, (shown_ms + fade_ms - age) / fade_ms))
-            local gray = math.floor(0xff * alpha)
-            font.gdi(context, line.name .. ": " .. line.text, 10, y, gray * 65536 + gray * 256 + gray, 0x000000)
-            y = y - 18
-        end
+        if state.open or now - line.at < shown_ms then lines[#lines + 1] = line end
     end
+    if #lines == 0 and not state.open then return end
+    -- Its bottom stays above the input timeline (base/ui/input_timeline).
+    local height = 34 + 25 * #lines + (state.open and 40 or 0)
+    imgui.window(context, "chat_window", "Chat", 8, 400 - height, 420, height,
+        imgui.no_title + imgui.glass + (state.open and 0 or imgui.passive))
+    for _, line in ipairs(lines) do imgui.text(context, line.name .. ": " .. line.text, nil, imgui.wrap) end
     if state.open then
-        font.gdi(context, "Say: " .. state.text .. "_", 10, 462, 0xffd24a, 0x000000)
+        imgui.input(context, "chat_line", state.text, "Message (1 to 42 plays a taunt), Enter sends", -1, true)
     end
+    imgui.end_window(context)
 end
 
 return chat

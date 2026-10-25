@@ -3,6 +3,7 @@
 
 local transport = require("base/game/network")
 local controls = require("base/ui/controls")
+local server_list = require("base/game/server_list")
 local font = require("base/ui/font")
 local i18n = require("base/i18n/i18n")
 local sounds = require("base/game/sounds")
@@ -44,59 +45,13 @@ end
 -- config.json ("network_servers"), favorites first. A click on a row joins it, a click on its star makes it a
 -- favorite or not. While the page is open, each server is checked in turn with a short connection (closed at once;
 -- a waiting host goes on waiting): green is a host waiting for a player, red is none.
-local servers_limit, servers_shown = 8, 5
+local servers_shown = 5
 local server_rows = {x = 0xdb, y = 418, width = 363, height = 17, step = 18}
 local star_width = 26
 local probe_timeout, probe_interval = 1500, 4000
-local function load_servers()
-    local document = engine.read_settings()
-    local saved = type(document) == "table" and document.network_servers
-    local list = {}
-    if type(saved) == "table" then
-        for _, entry in ipairs(saved) do
-            if type(entry) == "table" and type(entry.address) == "string" and #entry.address <= 15
-               and entry.address:match("^[%d.]+$") and #list < servers_limit then
-                list[#list + 1] = {address = entry.address, favorite = entry.favorite == true}
-            end
-        end
-    end
-    return list
-end
-local function save_servers(list)
-    local document = engine.read_settings()
-    if type(document) ~= "table" then document = {} end
-    local saved = {}
-    for index, entry in ipairs(list) do saved[index] = {address = entry.address, favorite = entry.favorite} end
-    document.network_servers = saved
-    engine.write_settings(document)
-end
--- Favorites first, then the others, each in their order.
-local function sort_servers(list)
-    local sorted = {}
-    for pass = 1, 2 do
-        for _, entry in ipairs(list) do
-            if entry.favorite == (pass == 1) then sorted[#sorted + 1] = entry end
-        end
-    end
-    return sorted
-end
--- A joined address moves to the front of its group; the oldest non-favorite goes when the list is full.
-local function remember_server(state, address)
-    local favorite = false
-    for index = #state.servers, 1, -1 do
-        if state.servers[index].address == address then
-            favorite = state.servers[index].favorite
-            table.remove(state.servers, index)
-        end
-    end
-    table.insert(state.servers, 1, {address = address, favorite = favorite})
-    state.servers = sort_servers(state.servers)
-    for index = #state.servers, 1, -1 do
-        if #state.servers <= servers_limit then break end
-        if not state.servers[index].favorite then table.remove(state.servers, index) end
-    end
-    save_servers(state.servers)
-end
+-- The list itself lives in base/game/server_list (the network menu of the server program uses it too).
+local load_servers, save_servers, sort_servers = server_list.load, server_list.save, server_list.sort
+local function remember_server(state, address) state.servers = server_list.remember(state.servers, address) end
 local function server_row(index)
     local top = server_rows.y + (index - 1) * server_rows.step
     return {x = server_rows.x, y = top, width = server_rows.width, height = server_rows.height}
@@ -148,13 +103,6 @@ end
 function screen.begin(state, host, address)
     stop_probe(state)
     state.message = nil
-    -- An engine with UDP messages plays through the server program (docs/netcode.md): hosting starts one on this
-    -- computer, joining connects to one. The flow opens the lobby (base/ui/online_lobby).
-    if engine.messages and not state.cli then
-        if not host then remember_server(state, address) end
-        state.online_request = {host = host, address = host and "127.0.0.1" or address}
-        return
-    end
     if transport.start(state.session, host, address) then state.page = "waiting"
     else state.message = state.session.error end
     state.started = engine.network_time()
@@ -329,7 +277,6 @@ function screen.update(state, flow_input, context)
         context.text_input(typing)
     end
     for _, sound in ipairs(sounds.flush(state)) do context.sound(sound.resource, sound.volume, sound.pan) end
-    if state.online_request then context.action("online_connect") end
 end
 function screen.draw(state, context)
     local function sprite(frame, x, y) context.sprite("pe/menu_clip", frames[frame], x, y, true) end
