@@ -35,6 +35,9 @@ VERSUS=",,#13,,#13,,$WAIT,c,,,r,,,c,,,r,,,c,,,u,,,c,,,c,,,c,,,d,,,c$(frames 1500
 CLASSIC=",,#13,,#13,,,,c,,,,c,,,,c$WAIT,c,,,,c,,,,c,,,,c$(frames 170),c,,,,c,,,,c,,,,c$WAIT,u,,,,u,,,,c$WAIT$WAIT$(frames 1500)"
 STAGE=",,#13,,#13,,$WAIT,=mode_1$(frames 10)c$(frames 16)c$(frames 16)c$(frames 16)f$(frames 160)$(frames 1500)"
 LONG=",,#13,,#13,,$WAIT,c,,,r,,,c,,,r,,,c,,,u,,,c,,,c,,,c,,,d,,,c$(frames 3000)"
+# The setup screen's brain buttons and Superhuman (two tactician computers), and Stage mode with the Stage AI on.
+BRAINS=",,#13,,#13,,$WAIT,c,,,r,,,c,,,r,,,c,,,u,,,c,,,c,,$WAIT,=brain_1,,,,=brain_2,,,,=superhuman,,,,d,,,c$(frames 6000)"
+STAGE_AI=",,#13,,#13,,$WAIT,=mode_1$(frames 10)=stage_ai$(frames 10)c$(frames 16)c$(frames 16)c$(frames 16)f$(frames 1700)"
 
 # Scripts with a rollback check on almost every tick (rollback.interval 9).
 cp -r scripts "$WORK/scripts9"
@@ -54,6 +57,11 @@ for level in easy crazy; do
 done
 run rollback_tactician --scripts "$WORK/scripts9" --seed 1234 --ai-brain tactician --rollback-check --input-trace "$VERSUS" &
 run netsim_tactician --scripts scripts --seed 1234 --ai-brain tactician --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
+run rollback_stage_ai --scripts "$WORK/scripts9" --seed 1234 --rollback-check --input-trace "$STAGE_AI" &
+mkdir -p "$WORK/record" && echo '{"recording": {"enabled": true}}' > "$WORK/record/config.json"
+(run record --scripts scripts --config-dir "$WORK/record" --seed 1234 --input-trace "$BRAINS"
+ run replay --scripts scripts --config-dir "$WORK/record" --replay "$(ls "$WORK"/record/recording/*.lfr 2>/dev/null | head -1)" \
+     --input-trace "$(frames 3000)") &
 run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$STAGE" &
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
@@ -83,11 +91,19 @@ for name in classic_versus classic_menus; do
 done
 
 # Rollback: no failure, and no error of the memory validator.
-for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_tactician rollback_stage; do
+for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_tactician rollback_stage rollback_stage_ai; do
     line=$(grep -o "rollback=checks:[0-9]*,failures:[0-9]*" "$WORK/$name.out" | tail -1)
     echo "$line" | grep -qE "checks:[1-9][0-9]*,failures:0$"; check "rollback: $name" $? "${line:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
 grep -q "screen=match.*stage=" "$WORK/rollback_stage.out"; check "rollback: the Stage trace reaches a stage fight" $? "$(description rollback_stage | cut -c1-120)"
+
+grep -q "ai=tactician" "$WORK/rollback_stage_ai.out"; check "setup: the Stage AI gives the stage's fighters the tactician" $? "$(description rollback_stage_ai | cut -c1-160)"
+
+# Recordings: a fight with tactician computers from the setup screen replays to the same end (OpenLF2's AI block).
+recorded=$(description record | grep -oE "round=[0-9]+ winner=[-0-9]+|ai=[^ }]*" | tr '\n' ' ')
+replayed=$(description replay | grep -oE "round=[0-9]+ winner=[-0-9]+|ai=[^ }]*" | tr '\n' ' ')
+grep -q "Recording saved" "$WORK/record.out" && echo "$recorded" | grep -q "ai=tactician" && [ "$recorded" = "$replayed" ]
+check "recording: a tactician fight replays the same" $? "recorded: $recorded replayed: $replayed"
 
 # The simulated network: both clients agree on every hash.
 for name in netsim_idle netsim_sentry netsim_guard netsim_tactician; do

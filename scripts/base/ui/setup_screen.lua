@@ -31,6 +31,8 @@ local team_colors = {[0] = 0xa0a0a0, 0xff7070, 0x70a0ff, 0x80e080, 0xffd060}
 local difficulty_names = {[constants.difficulties.easy] = "Easy", [constants.difficulties.normal] = "Normal",
     [constants.difficulties.difficult] = "Difficult", [constants.difficulties.crazy] = "CRAZY!"}
 local stage_names = {"Stage 1", "Stage 2", "Stage 3", "Stage 4", "Stage 5", "Survival"}
+-- The names of the brains of a computer slot (base/game/setup brain_list).
+local brain_names = {classic = "Classic AI", tactician = "Tactician"}
 -- After a player is ready, up and down move the cursor between these panels.
 local panels = {"arena", "difficulty", "computers", "start"}
 
@@ -249,6 +251,10 @@ local function clicks(state, events, context)
             apply(state, {type = "team", slot = slot, value = setup.step_team(model, model.slots[slot].team, 1)})
         end
         if clicked["ready_" .. slot] then apply(state, {type = "ready", slot = slot, value = not model.slots[slot].ready}) end
+        if clicked["brain_" .. slot] then
+            -- The next brain of the list (docs/ai-plan.md "From the setup to the fight").
+            apply(state, {type = "brain", slot = slot, value = (model.slots[slot].brain or 1) % #setup.brain_list + 1})
+        end
     end
     for position, value in ipairs(state.grid) do
         if clicked["fighter_" .. position] then
@@ -269,6 +275,8 @@ local function clicks(state, events, context)
         if clicked["mode_" .. mode] then apply(state, {type = "mode", value = mode}) end
     end
     if clicked.free_transform then apply(state, {type = "free_transform", value = not state.setup.free_transform}) end
+    if clicked.superhuman then apply(state, {type = "superhuman", value = not state.setup.superhuman}) end
+    if clicked.stage_ai then apply(state, {type = "stage_ai", value = state.setup.stage_ai == 1 and 0 or 1}) end
     local current = state.network and state.network.get_speed() or speed.tenths
     local tenths = imgui.slider_value(events, "setup_speed", current, 1, 10)
     if tenths and tenths ~= current then
@@ -434,6 +442,12 @@ local function roster(state, context)
                 imgui.same_line(context, 262)
                 imgui.button(context, "ready_" .. slot, entry.ready and i18n.tr("Ready") or i18n.tr("Set ready"), 74, 0,
                     false, entry.ready and 0x6fdc8c or 0xffb347)
+            else
+                -- The computer's brain: a click takes the next one.
+                local name = setup.brain_list[entry.brain or 1] or "classic"
+                imgui.same_line(context, 262)
+                imgui.button(context, "brain_" .. slot, i18n.tr(brain_names[name] or name), 74, 0, false,
+                    name ~= "classic" and 0x9fd0ff or nil)
             end
             imgui.same_line(context, 342)
             imgui.button(context, "remove_" .. slot, "x", -1, 0)
@@ -537,17 +551,27 @@ local function rules_panel(state, context)
     for index, value in ipairs(setup.difficulty_order) do
         if not (model.mode == modes.battle and value == constants.difficulties.crazy) then
             if index > 1 then imgui.same_line(context) end
-            imgui.selectable(context, "difficulty_" .. (value + 1), i18n.tr(difficulty_names[value]), model.difficulty == value, 64, 0)
+            imgui.selectable(context, "difficulty_" .. (value + 1), i18n.tr(difficulty_names[value]),
+                model.difficulty == value and not model.superhuman, 64, 0)
         end
     end
+    -- Superhuman: Crazy's game rules, and brains without human limits (base/ai/difficulty).
+    if model.mode ~= modes.battle then
+        imgui.same_line(context)
+        imgui.selectable(context, "superhuman", i18n.tr("Superhuman"), model.superhuman == true, 84, 0)
+    end
     local tenths = state.network and state.network.get_speed() or speed.tenths
-    imgui.same_line(context, 400)
+    imgui.same_line(context, 492)
     imgui.text(context, i18n.tr("Speed %s", tenths == 10 and "1.0" or "0." .. tenths), 0xa8b8e8)
-    imgui.same_line(context, 480)
+    imgui.same_line(context, 568)
     imgui.slider(context, "setup_speed", "", tenths, 1, 10, -1)
     -- The fight rule of the original's `lf2.net` word; every fighter stays selectable without it.
     imgui.selectable(context, "free_transform", i18n.tr("Transform at any HP: Firen and Freeze merge into Firzen, "
         .. "Louis turns into Louis EX (the lf2.net rule)"), model.free_transform, 0, 0)
+    if model.mode == modes.stage then
+        imgui.selectable(context, "stage_ai", i18n.tr("Stage AI: the new Tactician brain for the stage's fighters (off: the classic AI)"),
+            model.stage_ai == 1, 0, 0)
+    end
     if #cursor_frames(state, "computers") > 0 then
         imgui.text(context, "> " .. i18n.tr("Computers: Attack adds one, Defend removes the last"), 0x8090c0)
     end
@@ -563,7 +587,7 @@ local function start_bar(state, context)
     summary[#summary + 1] = i18n.tr("%d fighters", count)
     summary[#summary + 1] = model.mode == modes.stage and i18n.tr(stage_names[model.stage_level / 10 + 1])
         or arena_name(state, model.background)
-    summary[#summary + 1] = i18n.tr(difficulty_names[model.difficulty] or "")
+    summary[#summary + 1] = model.superhuman and i18n.tr("Superhuman") or i18n.tr(difficulty_names[model.difficulty] or "")
     local tenths = state.network and state.network.get_speed() or speed.tenths
     if tenths < 10 then summary[#summary + 1] = i18n.tr("speed 0.%d", tenths) end
     imgui.separator(context)

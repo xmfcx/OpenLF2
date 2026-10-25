@@ -13,6 +13,31 @@ local records_offset = 0x2b38
 local checksums_offset = 0x14b8
 local max_frames = 0x9e33f
 local tail_offset = 0x630bb8 -- unlock-flag shadows, author, info and e-mail lines
+-- OpenLF2's AI block (docs/ai-plan.md "From the setup to the fight"): the brains of a fight's computer fighters, as a
+-- text after a marker in the last 256 bytes of the frame records' padding. A fight with it records at most
+-- `ai_frames` frames, so the frames never reach the block. The original ignores the padding.
+local ai_offset, ai_size, ai_marker = tail_offset - 256, 256, "OLF2AI1"
+local ai_frames = math.floor((tail_offset - 256 - records_offset) / 10)
+
+-- The AI of a fight as the text of the block, or nil for the classic AI alone.
+local function ai_text(match_state)
+    if not (match_state.ai_brains or match_state.ai_brain or match_state.ai_level) then return nil end
+    local brains = require("base/ai/brains")
+    local parts = {ai_marker, "level=" .. (match_state.ai_level or "-"), "default=" .. (match_state.ai_brain or "-")}
+    local entries = {}
+    for index = 0, 399 do
+        local name = match_state.ai_brains and match_state.ai_brains[index]
+        if name then
+            local brain = brains.get(name)
+            local persona = match_state.ai_personas and match_state.ai_personas[index] or 0
+            entries[#entries + 1] = string.format("%d:%s:%d:%d", index, name, brain and brain.version or 0, persona)
+        end
+    end
+    local default = match_state.ai_brain and brains.get(match_state.ai_brain)
+    parts[#parts + 1] = "version=" .. (default and default.version or 0)
+    parts[#parts + 1] = "brains=" .. table.concat(entries, ",")
+    return table.concat(parts, ";")
+end
 
 local function byte_of(value, shift) return math.floor(value / 2 ^ shift) % 256 end
 local function to_unsigned(value)
@@ -113,7 +138,7 @@ function recording.begin(match_state, setup)
     put_int(header, 0x14b0, setup.random_index)
     put_int(header, 0x14b4, setup.input_phase)
     match_state.recording = {header = header, frames = {}, frame = 0, name = setup.name,
-        author = setup.author, info = setup.info, email = setup.email, battle = battle}
+        author = setup.author, info = setup.info, email = setup.email, battle = battle, ai_text = ai_text(match_state)}
     recording.status = {kind = constants.recording_statuses.starting, name = setup.name, count = 0}
 end
 
@@ -172,7 +197,7 @@ end
 
 function recording.capture(match_state, bytes)
     local run = match_state.recording
-    if not run or run.frame >= max_frames then return end
+    if not run or run.frame >= (run.ai_text and ai_frames or max_frames) then return end
     run.frames[run.frame + 1] = string.char(unpack(bytes, 1, 10))
     if run.frame % constants.recording.hp_checksum_interval == 0 then
         put_int(run.header, checksums_offset + math.floor(run.frame / constants.recording.hp_checksum_interval) * 4, recording.hp_sum(match_state))
@@ -240,8 +265,14 @@ function recording.finish(match_state, results)
     put_text(tail, 8 + 0x64, run.info, 0x190)
     put_text(tail, 8 + 0x1f4, run.email, 0x64)
     local records = table.concat(frames)
-    local block = table.concat({bytes_to_string(header, 0, header_size - 1), records,
-        string.rep("\0", tail_offset - records_offset - #records), bytes_to_string(tail, 0, block_size - tail_offset - 1)})
+    local padding = string.rep("\0", tail_offset - records_offset - #records)
+    if run.ai_text then
+        local text = run.ai_text:sub(1, ai_size - 1)
+        local start = ai_offset - records_offset - #records
+        padding = padding:sub(1, start) .. text .. string.rep("\0", ai_size - #text)
+    end
+    local block = table.concat({bytes_to_string(header, 0, header_size - 1), records, padding,
+        bytes_to_string(tail, 0, block_size - tail_offset - 1)})
     assert(#block == block_size, "recording block size")
     return engine.save_recording(run.name, block)
 end
@@ -288,6 +319,32 @@ function recording.open(block, version)
     battle.defense = {[0] = (math.floor(stamp % 1000000 / 100000) * 10 + math.floor(stamp % 100000 / 10000)) * 10,
         [1] = (math.floor(stamp % 100 / 10) * 10 + stamp % 10) * 10}
     replay.battle = battle
+    -- OpenLF2's AI block: the brains to run again, with their versions.
+    local text = get_text(block, ai_offset, ai_size)
+    if text:sub(1, #ai_marker) == ai_marker then
+        local brains = require("base/ai/brains")
+        local ai = {brains = {}, personas = {}}
+        ai.level = text:match("level=([%w_%-]+)")
+        ai.default = text:match("default=([%w_%-]+)")
+        if ai.level == "-" then ai.level = nil end
+        if ai.default == "-" then ai.default = nil end
+        local version = tonumber(text:match("version=(%d+)") or "0")
+        if ai.default then
+            local brain = brains.get(ai.default)
+            if not brain or (brain.version or 0) ~= version then
+                return nil, "This recording needs the brain " .. ai.default .. " version " .. version .. "."
+            end
+        end
+        for index, name, number, persona in (text:match("brains=([^;]*)") or ""):gmatch("(%d+):([%w_]+):(%d+):(%d+)") do
+            local brain = brains.get(name)
+            if not brain or (brain.version or 0) ~= tonumber(number) then
+                return nil, "This recording needs the brain " .. name .. " version " .. number .. "."
+            end
+            ai.brains[tonumber(index)] = name
+            if tonumber(persona) > 0 then ai.personas[tonumber(index)] = tonumber(persona) end
+        end
+        replay.ai = ai
+    end
     return replay
 end
 

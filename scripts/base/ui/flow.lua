@@ -179,6 +179,12 @@ local function start_replay(state, block)
     local options = {mode = replay.mode, difficulty = replay.difficulty, background = replay.background,
         stage_level = replay.stage_level, fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = {},
         replay = replay, battle = replay.battle, free_transform = replay.unlock_characters == 1}
+    -- OpenLF2's AI block of the recording: the same brains as in the recorded fight (base/game/recording).
+    if replay.ai then
+        options.ai_brains = next(replay.ai.brains) and replay.ai.brains or nil
+        options.ai_personas = next(replay.ai.personas) and replay.ai.personas or nil
+        options.ai_level, options.ai_brain = replay.ai.level, replay.ai.default
+    end
     state.match = require("base/ui/match_screen").create(options)
     state.active = "match"
     state.wait_release = true
@@ -270,7 +276,8 @@ local function route(state, input, context)
         local model = state.setup.setup
         if state.session and state.session.online then
             online.send(state.session, {type = "setup_used", mode = model.mode, difficulty = model.difficulty,
-                background = model.background, stage_level = model.stage_level, free_transform = model.free_transform and 1 or 0})
+                background = model.background, stage_level = model.stage_level, free_transform = model.free_transform and 1 or 0,
+                superhuman = model.superhuman and 1 or 0, stage_ai = model.stage_ai or 0})
         end
         state.characters = require("base/ui/setup_screen").selection(state.setup)
         if state.characters.mode == constants.modes.versus then music.play_selected() end

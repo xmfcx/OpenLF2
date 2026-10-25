@@ -306,6 +306,11 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - A brain and a persona (Random by default) for each computer slot on the setup screen, through server commands and `last_setup`. The Stage AI option, and the defaults for Stage enemies and allies. Superhuman in the difficulty list.
 - OpenLF2's recording block with the brain, persona, difficulty row and script version of each computer slot.
 - Tests: a session with tactician computers passes tools/test-online.sh scenarios. A recording of a tactician fight replays the same.
+- Status: built.
+    - base/game/setup: each slot has `brain` (1 classic, 2 tactician: `setup.brain_list`) and `persona` (0 is Random), and the setup has `superhuman` and `stage_ai`. The commands `brain`, `persona`, `superhuman` and `stage_ai` carry numbers and flags, so the server passes them like the others. Choosing a difficulty clears Superhuman, and Battle mode has none. The server keeps `superhuman` and `stage_ai` in `last_setup`.
+    - The setup screen: a brain button on each computer row (a click takes the next brain), Superhuman after Crazy, and the switch "Stage AI" in Stage mode. The values reach the fight as the match options `ai_brains`, `ai_personas`, `ai_level` and `ai_brain` (the Stage AI gives the tactician to every computer fighter of the stage).
+    - Recordings: OpenLF2's AI block (a marker and a short text with the level, the default brain and each computer's brain, version and persona) sits in the last 256 bytes of the frame records' padding. A fight with it records 26 frames less at most. A replay runs the same brains, and a brain of another version stops it with a message.
+    - Tests: tools/test-online.sh has the scenario `brains` (a click gives a computer the tactician in a session: both clients run it and the hashes agree; 95 checks pass). tools/test-ai.sh records a fight with two tactician computers on Superhuman and replays it to the same end, and runs Stage mode with the Stage AI under the rollback check.
 
 ### Phase 11: fighter kits, personas and team play
 

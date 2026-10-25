@@ -252,8 +252,22 @@ scenario_clicks() {
     ! grep -qE "desync|difference" "$WORK/clicks.server"; check "clicks: the menus and the fight stay the same on both clients" $? "$(grep -E "desync|difference" "$WORK/clicks.server")"
 }
 
+# 11. A computer with the tactician brain (docs/ai-plan.md phase 10): client one adds a computer on the setup screen
+#     and gives it the tactician; both clients run the same brain in the fight, and the hashes agree.
+scenario_brains() {
+    CLICKS="c$(wait_frames 15)=computer_3$(wait_frames 15)=brain_3$(wait_frames 15)=fighter_5$(wait_frames 15)r$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"
+    KEYS="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)$(wait_frames 90)$(wait_frames 140)"
+    SERVER_FLAGS= run_session brains 23620 "$START$CLICKS$FIGHT" "$START$(wait_frames 11)$KEYS$FIGHT"
+    for side in one two; do
+        client_checks brains $side "screen=match"
+        grep -q "ai=tactician" "$WORK/brains.$side"; check "brains: client $side runs the tactician" $? "$(grep -oE 'item1[0-9]\{[^}]*\}' "$WORK/brains.$side" | tail -2)"
+    done
+    grep -q "hashes agree" "$WORK/brains.server"; check "brains: the server compared the fight hashes" $? "no comparison"
+    ! grep -qE "desync|difference" "$WORK/brains.server"; check "brains: the fight stays the same on both clients" $? "$(grep -E "desync|difference" "$WORK/brains.server")"
+}
+
 # The scenarios run in the background, each writes its results to $WORK/NAME.result, and the results print in order.
-SCENARIOS=${ONLY:-"versus stage quit speed leave drop give return again resume watch rooms setup clicks"}
+SCENARIOS=${ONLY:-"versus stage quit speed leave drop give return again resume watch rooms setup clicks brains"}
 limit=${JOBS:-0}
 [ "${SERIAL:-}" = 1 ] && limit=1
 total=$(wc -w <<< "$SCENARIOS")

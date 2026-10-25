@@ -52,11 +52,10 @@ function screen.create(options, connection)
         start_random = {engine.random_position()}
     end
     -- --ai-brain (developer, base/ai/brains): the brain of the computer fighters of a local fight. A network session
-    -- takes the match options of the server only, the demo and the replays need the original's AI, and a recording
-    -- cannot hold another brain (its records only have the players' keys).
+    -- takes the match options of the server only, and the demo and the replays keep their own (a recording holds its
+    -- brains in OpenLF2's AI block, base/game/recording).
     if (brains.default or brains.by_index) and not connection and not options.demo and not options.replay then
         options.ai_brain, options.ai_brains = brains.default, brains.by_index
-        options.record = nil
     end
     local state = {match = match.create(options), effects = fight_effects.create()}
     ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)

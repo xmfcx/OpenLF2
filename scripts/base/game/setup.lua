@@ -16,25 +16,34 @@ setup.countdown_frames = 90
 setup.stage_groups = 6
 setup.mode_names = {[modes.versus] = "VS", [modes.stage] = "Stage", [modes.battle] = "Battle"}
 setup.difficulty_order = {difficulties.easy, difficulties.normal, difficulties.difficult, difficulties.crazy}
+-- The brains that a computer slot can have (docs/ai-plan.md "From the setup to the fight"), by the number that the
+-- commands carry. A slot starts with the first (classic). Persona 0 is Random: the brain picks one of its fighter's
+-- personas.
+setup.brain_list = {"classic", "tactician"}
 
 -- mode: constants.modes.versus, stage or battle; previous: the setup of the last visit, whose values stay; last: the
 -- values of the server's last match ({difficulty, background, stage_level}) for a first visit.
 function setup.create(mode, previous, last)
     local state = {mode = mode, slots = {}, background = constants.background_rows.random, stage_level = 0,
-        difficulty = difficulties.difficult, countdown = nil, changed_by = nil, free_transform = false}
-    for slot = 0, 7 do state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false} end
+        difficulty = difficulties.difficult, countdown = nil, changed_by = nil, free_transform = false,
+        superhuman = false, stage_ai = 0}
+    for slot = 0, 7 do state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false, brain = 1, persona = 0} end
     if previous then
         for slot = 0, 7 do
             local before = previous.slots[slot]
-            state.slots[slot] = {kind = before.kind, fighter = before.fighter, team = before.team, ready = before.ready}
+            state.slots[slot] = {kind = before.kind, fighter = before.fighter, team = before.team, ready = before.ready,
+                brain = before.brain or 1, persona = before.persona or 0}
         end
         state.background, state.stage_level, state.difficulty = previous.background, previous.stage_level, previous.difficulty
         state.free_transform = previous.free_transform == true
+        state.superhuman, state.stage_ai = previous.superhuman == true, previous.stage_ai or 0
     elseif last then
         state.difficulty = tonumber(last.difficulty) or state.difficulty
         state.background = tonumber(last.background) or state.background
         state.stage_level = tonumber(last.stage_level) or state.stage_level
         state.free_transform = tonumber(last.free_transform) == 1
+        state.superhuman = tonumber(last.superhuman) == 1 and state.difficulty == difficulties.crazy
+        state.stage_ai = tonumber(last.stage_ai) == 1 and 1 or 0
     end
     setup.apply(state, {type = "mode", value = mode})
     return state
@@ -79,14 +88,15 @@ function setup.apply(state, command, fighters)
             if other.kind and not allowed_team(state, other.team) then other.team = first_team(state, index) end
         end
         if mode == modes.battle and state.difficulty == difficulties.crazy then state.difficulty = difficulties.difficult end
+        if mode == modes.battle then state.superhuman = false end
         return true
     elseif kind == "join" then
         if not entry or entry.kind then return false end
-        state.slots[slot] = {kind = "human", fighter = 0, team = first_team(state, slot), ready = false}
+        state.slots[slot] = {kind = "human", fighter = 0, team = first_team(state, slot), ready = false, brain = 1, persona = 0}
         return true
     elseif kind == "leave" or kind == "remove_computer" then
         if not entry or not entry.kind or (kind == "remove_computer") ~= (entry.kind == "computer") then return false end
-        state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false}
+        state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false, brain = 1, persona = 0}
         return true
     elseif kind == "add_computer" then
         if not entry or entry.kind then return false end
@@ -101,7 +111,28 @@ function setup.apply(state, command, fighters)
                 if not used[candidate] then team = candidate break end
             end
         end
-        state.slots[slot] = {kind = "computer", fighter = 0, team = team, ready = true}
+        state.slots[slot] = {kind = "computer", fighter = 0, team = team, ready = true, brain = 1, persona = 0}
+        return true
+    elseif kind == "brain" then
+        local value = tonumber(command.value)
+        if not entry or entry.kind ~= "computer" or not value or not setup.brain_list[value] then return false end
+        entry.brain, entry.persona = value, 0
+        return true
+    elseif kind == "persona" then
+        local value = tonumber(command.value)
+        if not entry or entry.kind ~= "computer" or not value or value < 0 or value > 9 or value % 1 ~= 0 then return false end
+        entry.persona = value
+        return true
+    elseif kind == "stage_ai" then
+        local value = tonumber(command.value)
+        if value ~= 0 and value ~= 1 then return false end
+        state.stage_ai = value
+        return true
+    elseif kind == "superhuman" then
+        -- The fifth level (base/ai/difficulty): the game rules of Crazy, and brains without human limits.
+        if type(command.value) ~= "boolean" or (command.value and state.mode == modes.battle) then return false end
+        state.superhuman = command.value
+        if command.value then state.difficulty = difficulties.crazy end
         return true
     elseif kind == "fighter" then
         local value = tonumber(command.value)
@@ -134,7 +165,7 @@ function setup.apply(state, command, fighters)
         if value ~= difficulties.easy and value ~= difficulties.normal and value ~= difficulties.difficult
            and value ~= difficulties.crazy then return false end
         if state.mode == modes.battle and value == difficulties.crazy then return false end
-        state.difficulty = value
+        state.difficulty, state.superhuman = value, false
         return true
     elseif kind == "free_transform" then
         -- The rule of the original's `lf2.net` word: Firen and Freeze merge, and Louis turns into Louis EX, at any hp.
@@ -221,6 +252,21 @@ function setup.selection(state)
     selection.options.random_background = state.background == constants.background_rows.random
     selection.options.stage_level = state.stage_level
     selection.options.free_transform = state.free_transform
+    -- The brains of the computer slots (by item index: a computer of slot s is item s + 10), the personas, the level and
+    -- Stage mode's AI (base/ai/brains).
+    local brains, personas = {}, {}
+    for slot = 0, 7 do
+        local entry = state.slots[slot]
+        if entry.kind == "computer" then
+            local name = setup.brain_list[entry.brain or 1] or "classic"
+            if name ~= "classic" then brains[slot + 10] = name end
+            if (entry.persona or 0) > 0 then personas[slot + 10] = entry.persona end
+        end
+    end
+    selection.options.ai_brains = next(brains) and brains or nil
+    selection.options.ai_personas = next(personas) and personas or nil
+    selection.options.ai_level = state.superhuman and "superhuman" or nil
+    selection.options.ai_brain = (state.mode == modes.stage and state.stage_ai == 1) and "tactician" or nil
     selection.menu, selection.last_menu = constants.character_menus.options, constants.character_menus.options
     return selection
 end
@@ -229,12 +275,13 @@ function setup.describe(state)
     local slots = {}
     for slot = 0, 7 do
         local entry = state.slots[slot]
-        slots[#slots + 1] = entry.kind and string.format("%s:%d:%d:%s", entry.kind:sub(1, 1), entry.fighter, entry.team,
-            entry.ready and "r" or "-") or "."
+        slots[#slots + 1] = entry.kind and string.format("%s:%d:%d:%s%s", entry.kind:sub(1, 1), entry.fighter, entry.team,
+            entry.ready and "r" or "-", (entry.brain or 1) > 1 and (":b" .. entry.brain .. ":p" .. (entry.persona or 0)) or "") or "."
     end
     return string.format("mode=%d slots=%s arena=%d stage=%d difficulty=%d countdown=%s%s", state.mode,
         table.concat(slots, ","), state.background, state.stage_level, state.difficulty, tostring(state.countdown),
         state.free_transform and " free_transform" or "")
+        .. (state.superhuman and " superhuman" or "") .. (state.stage_ai == 1 and " stage_ai" or "")
 end
 
 return setup

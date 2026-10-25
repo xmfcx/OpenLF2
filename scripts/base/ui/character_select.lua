@@ -639,7 +639,10 @@ function selection.match_options(state)
     end
     return {mode = state.mode, difficulty = state.options.difficulty, background = state.options.background,
         stage_level = state.options.stage_level, free_transform = state.options.free_transform == true,
-        fighters = state.fighters, backgrounds = state.backgrounds, slots = slots}
+        fighters = state.fighters, backgrounds = state.backgrounds, slots = slots,
+        -- The brains of the setup screen (base/game/setup selection), nil for the classic AI.
+        ai_brains = state.options.ai_brains, ai_personas = state.options.ai_personas, ai_level = state.options.ai_level,
+        ai_brain = state.options.ai_brain}
 end
 
 function selection.update(state, held, context)

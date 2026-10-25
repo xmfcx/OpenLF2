@@ -214,7 +214,7 @@ end
 -- the mode, the difficulty, the arena, the stage group, the game speed and the transform rule, from config.json's
 -- "last_setup".
 local setup_fields = {mode = {0, 4}, difficulty = {-1, 2}, background = {0, 100}, stage_level = {0, 50}, speed = {1, 10},
-    free_transform = {0, 1}}
+    free_transform = {0, 1}, superhuman = {0, 1}, stage_ai = {0, 1}}
 local function clean_setup(values)
     if type(values) ~= "table" then return nil end
     local clean = {}
@@ -469,7 +469,7 @@ end
 local command_types = {join = true, leave = true, fighter = true, team = true, ready = true, add_computer = true,
     remove_computer = true, mode = true, arena = true, stage = true, difficulty = true, start = true, wait = true,
     exit = true, rematch = true, change_fighters = true, results_setup = true, championship = true, team_championship = true,
-    free_transform = true}
+    free_transform = true, brain = true, persona = true, stage_ai = true, superhuman = true}
 function handlers.command(state, peer, message)
     local command = message.command
     if state.phase ~= "session" or not state.players[peer] or type(command) ~= "table" or not command_types[command.type] then
