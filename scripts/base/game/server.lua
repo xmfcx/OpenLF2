@@ -11,6 +11,7 @@
 local constants = require("base/game/constants")
 local authority = require("base/game/authority")
 local wire = require("base/game/wire")
+local ticks = require("base/game/ticks")
 local network = require("base/game/network")
 local server = {}
 
@@ -22,13 +23,20 @@ local max_players = 8
 local start_delay_ms = 1000
 -- Chat: printable text up to 120 characters, at most 5 messages in 5 seconds for each player.
 local chat_length, chat_burst, chat_window_ms = 120, 5, 5000
+-- A dropped player (plan.md "Drops, returns and AI control"): after this long without a message from a player of a
+-- session, the ticks are held (nothing advances) and the room role chooses: wait, the computer plays, another player
+-- takes the fighter, or stop and resume later. Without a choice, the computer plays after `decide_ms`.
+local drop_ms, decide_ms = 3000, 30000
+-- The final ticks of a session go to a returning player in parts of this many ticks.
+local log_chunk = 300
+local tick_ms = 33
 
 -- options: the runtime settings (server_port, network_profile).
 function server.create(options)
     local listening, problem = engine.messages("listen", "0.0.0.0", options.server_port, 64)
     assert(listening, problem)
     return {profile = options.network_profile, version = network.own_version() or "", players = {}, order = {},
-        phase = "lobby", log = {}, hashes = {}}
+        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved()}
 end
 
 local function log(state, text) state.log[#state.log + 1] = text end
@@ -47,7 +55,7 @@ local function lobby_message(state)
         players[position] = {id = peer, name = player.name, slot = player.slot, ready = player.ready, role = position == 1}
     end
     return {type = "lobby", players = players, phase = state.phase, public_address = state.public_address,
-        upnp = state.upnp}
+        upnp = state.upnp, resume = server.can_resume(state)}
 end
 local function broadcast_lobby(state) broadcast(state, lobby_message(state)) end
 
@@ -63,42 +71,184 @@ local function free_slot(state)
 end
 
 local function back_to_lobby(state, reason)
-    state.phase, state.authority, state.hashes = "lobby", nil, {}
+    state.phase, state.authority, state.hashes, state.session = "lobby", nil, {}, nil
     for _, player in pairs(state.players) do player.ready = false end
     broadcast(state, {type = "end"})
     broadcast_lobby(state)
     log(state, "session over: " .. reason)
 end
 
+local drop_player, save_session
 local function remove(state, peer)
     if not state.players[peer] then return end
-    log(state, "left: " .. state.players[peer].name)
+    local player = state.players[peer]
+    log(state, "left: " .. player.name)
     state.players[peer] = nil
     for position, other in ipairs(state.order) do
         if other == peer then table.remove(state.order, position) break end
     end
-    if state.phase == "session" and #state.order == 0 then back_to_lobby(state, "everybody left") end
+    if state.phase == "session" and #state.order == 0 then
+        -- Everybody left: the session is saved, and the same players can resume it from the lobby.
+        save_session(state)
+        back_to_lobby(state, "everybody left")
+    elseif state.phase == "session" then
+        drop_player(state, player.slot, engine.network_time())
+    end
     broadcast_lobby(state)
 end
 
--- Starts a session: every client gets the player names and slots and the server's random state, so that all of
--- them start the same game. The keys of a player who leaves are predicted as none (authority).
-local function start_session(state, now)
-    local owners, names, clients = {}, {}, {}
+-- The start of a session as every client gets it: the player names and slots and the random state, so that all of
+-- them start the same game. A returning player gets the same message again (`rejoin`).
+local function session_message(state, rejoin)
+    local session = state.session
+    local owners = {}
+    for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
+    return {type = "session", owners = owners, names = session.names, role = state.order[1], random = session.random,
+        rejoin = rejoin or nil}
+end
+-- The final ticks so far, to a player who must run them to catch up (a return, or a resumed session).
+local function send_log(state, peer)
+    local session = state.session
+    for first = 0, session.logged, log_chunk do
+        local part = {}
+        for tick = first, math.min(first + log_chunk - 1, session.logged) do part[tick] = session.log[tick] end
+        send(peer, {type = "log", ticks = part})
+    end
+end
+
+-- Starts a session: every client gets the player names and slots and the server's random state. `saved`: a stopped
+-- session that goes on (its random state, its slots by player name, and its final ticks, which every client runs
+-- again to catch up). The keys of a player who leaves are predicted as none (authority).
+local function start_session(state, now, saved)
+    local owners, names, clients, slots = {}, {}, {}, {}
+    local used = {}
     for position, peer in ipairs(state.order) do
         local player = state.players[peer]
+        if saved then
+            for slot, name in pairs(saved.slots) do
+                if name == player.name and not used[slot] then player.slot, used[slot] = slot, true break end
+            end
+        end
         owners[player.slot] = peer
         names[player.slot + 1] = player.name
+        slots[player.slot] = {name = player.name, peer = peer}
         clients[position] = peer
     end
-    engine.reset_random_sequence()
-    local table_string = engine.random_state()
-    local index, sequence, crt = engine.random_position()
-    state.authority = authority.create({owners = owners, clients = clients, all_functions = true})
-    state.phase, state.start_at, state.hashes = "session", now + start_delay_ms, {}
-    broadcast(state, {type = "session", owners = owners, names = names, role = state.order[1],
-        random = {table = table_string, index = index, sequence = sequence, crt = crt}})
-    log(state, "session started with " .. #state.order .. " players")
+    local random
+    if saved then
+        random = saved.random
+    else
+        engine.reset_random_sequence()
+        local index, sequence, crt = engine.random_position()
+        random = {table = engine.random_state(), index = index, sequence = sequence, crt = crt}
+    end
+    local first = saved and saved.length or 0
+    state.authority = authority.create({owners = owners, clients = clients, all_functions = true, first_tick = first})
+    state.authority.speed = saved and saved.speed or nil
+    state.phase, state.hashes = "session", {}
+    -- A resumed session goes on with its next tick, after the start delay.
+    state.start_at = now + start_delay_ms - first * tick_ms
+    state.session = {names = names, random = random, slots = slots, log = saved and saved.log or {}, logged = first - 1,
+        drops = {}}
+    broadcast(state, session_message(state))
+    if first > 0 then
+        for _, peer in ipairs(state.order) do send_log(state, peer) end
+    end
+    log(state, (saved and "session resumed with " or "session started with ") .. #state.order .. " players")
+end
+
+-- The stopped session in the configuration of this computer, or nil.
+function server.load_saved()
+    local document = engine.read_settings()
+    local saved = type(document) == "table" and document.saved_session
+    if type(saved) ~= "table" or type(saved.data) ~= "string" then return nil end
+    local data = wire.decode(saved.data)
+    if type(data) ~= "table" or type(data.slots) ~= "table" or type(data.runs) ~= "table" then return nil end
+    -- The final ticks are stored in runs of equal ticks: {count, tick}.
+    local log, tick = {}, 0
+    for _, run in ipairs(data.runs) do
+        for _ = 1, run[1] do
+            log[tick] = run[2]
+            tick = tick + 1
+        end
+    end
+    data.log, data.length, data.runs = log, tick, nil
+    return data
+end
+-- Whether the players in the lobby are the players of the stopped session (by name), so that it can go on.
+function server.can_resume(state)
+    local saved = state.saved
+    if not saved or state.phase ~= "lobby" then return nil end
+    local wanted, count = {}, 0
+    for _, name in pairs(saved.slots) do
+        wanted[name] = (wanted[name] or 0) + 1
+        count = count + 1
+    end
+    if count ~= #state.order then return nil end
+    for _, peer in ipairs(state.order) do
+        local name = state.players[peer].name
+        if not wanted[name] or wanted[name] == 0 then return nil end
+        wanted[name] = wanted[name] - 1
+    end
+    return true
+end
+-- Saves the session (stop and resume later, or everybody left): its random state, its slots, and its final ticks.
+save_session = function(state)
+    local session = state.session
+    if not session or session.logged < 0 then return end
+    local slots = {}
+    for slot, entry in pairs(session.slots) do slots[slot] = entry.name end
+    local runs = {}
+    for tick = 0, session.logged do
+        local final, last = session.log[tick], runs[#runs]
+        if last and ticks.same(last[2], final) then last[1] = last[1] + 1 else runs[#runs + 1] = {1, final} end
+    end
+    local data = {slots = slots, random = session.random, speed = state.authority and state.authority.speed, runs = runs}
+    local document = engine.read_settings()
+    if type(document) ~= "table" then document = {} end
+    document.saved_session = {data = wire.encode(data), ticks = session.logged + 1}
+    local saved, problem = engine.write_settings(document)
+    if saved then
+        state.saved = server.load_saved()
+        log(state, "session saved (" .. (session.logged + 1) .. " ticks)")
+    else
+        log(state, "cannot save the session: " .. tostring(problem))
+    end
+end
+
+local function hold_update(state)
+    if not state.authority then return end
+    local held = false
+    for _, drop in pairs(state.session.drops) do
+        if not drop.decided then held = true end
+    end
+    state.authority.hold = held
+end
+-- A player of the session is gone (left, or silent for a while): the ticks are held until the room role decides.
+drop_player = function(state, slot, now)
+    local session = state.session
+    if not session or not slot or session.drops[slot] then return end
+    local entry = session.slots[slot]
+    session.drops[slot] = {slot = slot, name = entry and entry.name or tostring(slot + 1), since = now}
+    if entry then entry.peer = nil end
+    hold_update(state)
+    broadcast(state, {type = "drop", slot = slot, name = session.drops[slot].name, decide_ms = decide_ms})
+    log(state, "dropped: " .. session.drops[slot].name)
+end
+local function end_drop(state, slot, text)
+    state.session.drops[slot] = nil
+    hold_update(state)
+    broadcast(state, {type = "drop_end", slot = slot, text = text})
+    log(state, text)
+end
+-- The computer plays a dropped fighter from the next tick (base/game/match "read_control").
+local function computer_plays(state, slot)
+    local drop = state.session.drops[slot]
+    if not drop then return end
+    drop.decided = true
+    hold_update(state)
+    state.authority.inject[slot] = "A"
+    end_drop(state, slot, "the computer plays " .. drop.name)
 end
 
 local handlers = {}
@@ -109,14 +259,28 @@ function handlers.hello(state, peer, message)
         engine.messages("disconnect", peer)
         return
     end
+    local name = type(message.name) == "string" and message.name:gsub("[^\32-\126]", "")
+        :sub(1, constants.text_limits.player_name_bytes) or ""
+    -- A player who comes back to a session: the slot of the dropped player with this name.
+    if state.phase == "session" then
+        local slot
+        for dropped, entry in pairs(state.session.slots) do
+            if not entry.peer and entry.name == (name ~= "" and name or tostring(dropped + 1)) then slot = dropped end
+        end
+        if not slot then
+            send(peer, {type = "refused", reason = "playing"})
+            engine.messages("disconnect", peer)
+            return
+        end
+        server.rejoin(state, peer, slot)
+        return
+    end
     local slot = free_slot(state)
     if not slot or state.phase ~= "lobby" then
         send(peer, {type = "refused", reason = slot and "playing" or "full"})
         engine.messages("disconnect", peer)
         return
     end
-    local name = type(message.name) == "string" and message.name:gsub("[^\32-\126]", "")
-        :sub(1, constants.text_limits.player_name_bytes) or ""
     if name == "" then name = tostring(slot + 1) end
     state.players[peer] = {name = name, slot = slot, ready = false}
     state.order[#state.order + 1] = peer
@@ -132,10 +296,55 @@ function handlers.ready(state, peer, message)
 end
 function handlers.start(state, peer, message, now)
     if state.order[1] ~= peer or state.phase ~= "lobby" then return end
+    if message.resume then
+        -- The stopped session of these players goes on.
+        if not server.can_resume(state) then return end
+        local saved = state.saved
+        state.saved = nil
+        local document = engine.read_settings()
+        if type(document) == "table" then
+            document.saved_session = nil
+            engine.write_settings(document)
+        end
+        state.agreed = 0
+        start_session(state, now, saved)
+        return
+    end
     for _, other in ipairs(state.order) do
         if not state.players[other].ready then return end
     end
     start_session(state, now)
+end
+-- The room role's choice for a dropped player: "wait", "computer", "give" (to = the player who takes the fighter),
+-- or "stop" (the session is saved and the players go back to the lobby, where they can resume it).
+function handlers.drop_choice(state, peer, message, now)
+    if state.phase ~= "session" or state.order[1] ~= peer then return end
+    local slot = tonumber(message.slot)
+    local drop = slot and state.session.drops[slot]
+    if not drop then return end
+    if message.choice == "wait" then
+        drop.waiting = true
+        broadcast(state, {type = "drop", slot = slot, name = drop.name, waiting = true})
+    elseif message.choice == "computer" then
+        computer_plays(state, slot)
+    elseif message.choice == "give" then
+        local to = tonumber(message.to)
+        local player = to and state.players[to]
+        if not player then return end
+        state.authority.owners[slot] = to
+        state.session.slots[slot].peer = to
+        drop.decided = true
+        local own = {}
+        for owned, owner in pairs(state.authority.owners) do
+            if owner == to then own[#own + 1] = owned end
+        end
+        table.sort(own)
+        send(to, {type = "owners", slots = own})
+        end_drop(state, slot, player.name .. " plays the fighter of " .. drop.name)
+    elseif message.choice == "stop" then
+        save_session(state)
+        back_to_lobby(state, "stopped to resume later")
+    end
 end
 -- The title's Quit runs on every client on the same tick; the first client that reports it ends the session.
 -- The game speed of a session (docs/pregame-ui-redesign.md "Who sets it"): any player sets it, the last change wins,
@@ -195,6 +404,26 @@ function handlers.hash(state, peer, message)
     end
 end
 
+-- A dropped player who comes back: the slot again, the start of the session and every final tick so far, which the
+-- client runs to catch up; the ticks go on meanwhile.
+function server.rejoin(state, peer, slot)
+    local session = state.session
+    local entry = session.slots[slot]
+    state.players[peer] = {name = entry.name, slot = slot, ready = true}
+    state.order[#state.order + 1] = peer
+    entry.peer = peer
+    state.authority.owners[slot] = peer
+    authority.add_client(state.authority, peer)
+    send(peer, {type = "welcome", id = peer, slot = slot})
+    send(peer, session_message(state, true))
+    -- The log tells again when the hashes agree, now with the returning player.
+    state.agreed = 0
+    send_log(state, peer)
+    if session.drops[slot] then end_drop(state, slot, entry.name .. " is back")
+    else log(state, entry.name .. " is back") end
+    broadcast_lobby(state)
+end
+
 -- One frame: the messages of the clients, then the due ticks of a session. Returns the lines to log.
 -- raw: the program's input; "upnp:STATE[:ADDRESS]" while it opens the port on the home router (--upnp).
 function server.update(state, raw)
@@ -218,6 +447,24 @@ function server.update(state, raw)
         -- The program runs a frame on each message and every few milliseconds; the clients hear from the server
         -- when a tick became final (and its message repeats the ticks they did not acknowledge yet).
         local messages = authority.update(state.authority, now - state.start_at)
+        -- Every final tick stays in the session's log: a returning player and a resumed session run them again.
+        local session = state.session
+        for tick = session.logged + 1, state.authority.tick - 1 do session.log[tick] = state.authority.final[tick] end
+        session.logged = math.max(session.logged, state.authority.tick - 1)
+        -- A player without a message for a while has dropped; without a choice the computer plays it.
+        for peer, player in pairs(state.players) do
+            local client = state.authority.clients[peer]
+            if client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
+                drop_player(state, player.slot, now)
+            elseif client and client.heard > 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
+                -- Its messages arrive again (it was only slow).
+                session.slots[player.slot].peer = peer
+                end_drop(state, player.slot, player.name .. " is back")
+            end
+        end
+        for slot, drop in pairs(session.drops) do
+            if not drop.waiting and not drop.decided and now - drop.since > decide_ms then computer_plays(state, slot) end
+        end
         if state.authority.tick ~= state.sent_tick then
             state.sent_tick = state.authority.tick
             for peer, message in pairs(messages) do

@@ -433,6 +433,33 @@ local function online_connection(state)
     if state.active == "online_lobby" and state.online_lobby then return state.online_lobby.online, false end
     return nil
 end
+-- A dropped player: the game waits, and the room role chooses what happens (base/game/server "drop_choice").
+local function room_role(connection)
+    for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
+        if player.id == connection.id then return player.role end
+    end
+    return connection.host
+end
+local function draw_drops(state, context, connection)
+    for slot, drop in pairs(connection.drops) do
+        imgui.window(context, "drop_" .. slot, i18n.tr("A player lost the connection"), 197, 0, 400, 0)
+        local left = drop.waiting and "" or i18n.tr(" The computer plays it in %d s.",
+            math.max(0, math.ceil(((drop.decide_ms or 30000) - (engine.network_time() - drop.since)) / 1000)))
+        imgui.text(context, i18n.tr("%s lost the connection. The game waits.", drop.name) .. left, nil, imgui.wrap)
+        if room_role(connection) then
+            imgui.button(context, "drop_wait_" .. slot, i18n.tr("Wait for %s", drop.name), -1, 26)
+            imgui.button(context, "drop_computer_" .. slot, i18n.tr("Let the computer play"), -1, 26)
+            for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
+                imgui.button(context, "drop_give_" .. slot .. "_" .. player.id, i18n.tr("Give the fighter to %s", player.name), -1, 26)
+            end
+            imgui.button(context, "drop_stop_" .. slot, i18n.tr("Stop and resume later"), -1, 26)
+        else
+            imgui.text(context, i18n.tr("The room role decides."), 0x8090c0)
+        end
+        imgui.end_window(context)
+        return
+    end
+end
 -- What the settings menu (base/ui/fight_menu) shows: this computer's human fighters, the speed, the cheat keys.
 local function menu_env(state)
     local fight = state.active == "match" and state.match and state.match.match
@@ -464,6 +491,7 @@ function flow.probe(state)
             connection.taunts_played or 0, tostring(state.chat and state.chat.release or false))
     end
     if state.fight_menu then parts[#parts + 1] = fight_menu.describe(state.fight_menu) end
+    if connection and connection.drops and next(connection.drops) then parts[#parts + 1] = "drop" end
     local fight = state.active == "match" and state.match and state.match.match
     if fight then
         local computer = {}
@@ -523,6 +551,7 @@ function flow.draw(state, context)
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
     if state.fight_menu then fight_menu.draw(state.fight_menu, context, menu_env(state)) end
+    if fighting and connection.drops and next(connection.drops) then draw_drops(state, context, connection) end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
     if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
@@ -617,7 +646,11 @@ local function fight_due(state, input)
         for _, field in ipairs(fields) do
             if held[field] then input[field] = merged_letters(input[field] or "", held[field]) end
         end
-        state.speed_held = nil
+        -- The fight reads function keys on every second tick (base/game/match "note_function_keys"): on a tick that
+        -- does not read them, they stay for the next one that runs.
+        local waiting = input.functions ~= "" or (input.function_presses or "") ~= ""
+        state.speed_held = not reads and waiting and {functions = input.functions,
+            function_presses = input.function_presses} or nil
     else
         for _, field in ipairs(fields) do held[field] = merged_letters(held[field] or "", input[field] or "") end
         state.speed_held = held
@@ -626,18 +659,54 @@ local function fight_due(state, input)
 end
 -- The settings menu's function keys (F1, F5, F6 to F9) are held for three frames: the fight reads the function keys
 -- on every second tick, and a release clears a key that it has not read (base/game/match "note_function_keys").
-local function hold_functions(state, input)
+local function hold_functions(state, input, again)
     local hold = state.function_hold
     if not hold then return end
     for letter in hold.keys:gmatch(".") do
         if not input.functions:find(letter, 1, true) then input.functions = input.functions .. letter end
     end
+    -- A frame that waits for the server runs again: it does not count.
+    if again then return end
     hold.frames = hold.frames - 1
     if hold.frames <= 0 then state.function_hold = nil end
 end
+-- The room role's choices for a dropped player (base/game/server "drop_choice").
+local function drop_choices(state, events)
+    local session = state.session
+    for slot in pairs(session.drops or {}) do
+        local choice, to
+        if events.clicked["drop_wait_" .. slot] then choice = "wait" end
+        if events.clicked["drop_computer_" .. slot] then choice = "computer" end
+        if events.clicked["drop_stop_" .. slot] then choice = "stop" end
+        for _, player in ipairs(session.lobby and session.lobby.players or {}) do
+            if events.clicked["drop_give_" .. slot .. "_" .. player.id] then choice, to = "give", player.id end
+        end
+        if choice then online.send(session, {type = "drop_choice", slot = slot, choice = choice, to = to}) end
+    end
+end
 -- raw: the host's input; screens get it per player slot, with the last known pointer position
 -- and `click`, a fresh press of the left button.
+local update_frame
 function flow.update(state, raw, context)
+    local result = update_frame(state, raw, context)
+    -- A return to a server's session, or a resumed one, runs the session's final ticks so far: the menus take up to
+    -- 40 of them a frame, each through the whole update as on any frame, without keys and sounds (a fight catches up
+    -- in base/game/rollback_client).
+    local session = state.session
+    if result == false or not (session and session.online) or online.backlog(session) <= 3 then return result end
+    -- Only actions pass: a frame takes each flag (speed, fullscreen and the others) once, and sounds would pile up.
+    local quiet = {}
+    for key, value in pairs(context) do quiet[key] = type(value) == "function" and function() end or value end
+    quiet.action = context.action
+    for _ = 1, 40 do
+        if state.session ~= session or (state.active == "match" and state.match.online) or online.backlog(session) <= 3 then
+            break
+        end
+        if update_frame(state, "k m-1,-1,0", quiet) == false then break end
+    end
+    return result
+end
+update_frame = function(state, raw, context)
     if state.server then
         for _, line in ipairs(require("base/game/server").update(state.server, raw)) do context.action("log " .. line) end
         return
@@ -786,6 +855,9 @@ function flow.update(state, raw, context)
             disconnect(state, session.problem or i18n.tr("Network game disconnected"))
             return
         end
+        -- This run of the frame repeats one that waited for the server's tick (its menu clicks repeat in traces).
+        local again = state.exchange_waited
+        state.exchange_waited = nil
         -- Escape opens the settings menu (base/ui/fight_menu); the game goes on meanwhile, with this computer's keys
         -- held back. Escape closes it again, or its question first.
         local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
@@ -802,20 +874,23 @@ function flow.update(state, raw, context)
                 return
             end
             if answer and answer.control then state.control_request = {letter = answer.control[2], frames = 3} end
-            if answer and answer.speed then online.send(session, {type = "set_speed", tenths = answer.speed}) end
+            if answer and answer.speed and not again then online.send(session, {type = "set_speed", tenths = answer.speed}) end
             if answer and answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer and answer.close then state.fight_menu = nil end
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses = "", ""
         end
-        hold_functions(state, input)
+        hold_functions(state, input, again)
+        drop_choices(state, imgui.events(input))
         -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
         if not (state.active == "match" and state.match.online) then
             local combined, problem = online.exchange(session, input)
             if problem then
                 disconnect(state, problem)
                 return
-            elseif not combined then return false
+            elseif not combined then
+                state.exchange_waited = true
+                return false
             else input = combined end
         end
     elseif state.session then
@@ -928,7 +1003,9 @@ function flow.update(state, raw, context)
     end
     local held_keys, frame_before = input[watched], fight and fight.frame_number
     local reads = fight and (fight.input_phase + 1) % 2 == 0
-    if not state.quit_dialog and (state.session or not state.speed_menu) and not closed_now and fight_due(state, input) then
+    -- A held tick of a server session (a player dropped): the screens wait.
+    if not state.quit_dialog and (state.session or not state.speed_menu) and not closed_now and not input.hold
+       and fight_due(state, input) then
         -- The settings menu's "let the computer play": the control letter goes with the slot's keys for a few frames
         -- (base/game/match "read_control"), so a frame that runs no tick does not lose it. A server's session sends
         -- this computer's player 1 as its own slot.

@@ -135,6 +135,14 @@ When a player drops for more than about 2 seconds:
 
 Every pause, for a drop or for the pause key, ends with the same countdown, so that nobody loses a fighter to a sudden start.
 
+### What is built
+
+- The server holds the session's ticks (each final tick carries `hold`) when a player is silent for 3 seconds or leaves. Nothing advances on a held tick: the menus skip it, and a fight does not run (base/game/speed_gate). Every computer sees the same held ticks, so the game stays the same everywhere.
+- The room role's screen shows the choices: wait, let the computer play, give the fighter to another player, or stop and resume later. The other players see who dropped. Without a choice, the computer plays the fighter after 30 seconds. The computer takes over with the letter `A` in the slot's keys (base/game/match `read_control`), and a key press of the returning player takes the fighter back.
+- The server keeps every final tick of the session (its log). A returning player (the same name) gets the start of the session and the log. Its computer runs all these ticks again, up to 40 menu ticks and 32 fight ticks a frame, and then plays on. The ticks are the same, so the state is the same: the server compares the hashes of the returning player with the others.
+- "Stop and resume later", and a session that everybody left, save the session in the configuration of the server's computer (`saved_session`: the random state, the slots by name and the final ticks in runs of equal ticks). When the same players are in the lobby, the room role sees "Resume the stopped game". Every client then runs the saved ticks to catch up, and the session goes on.
+- This differs from the plan above in one point: there is no snapshot. The game has no way to copy its whole state (the menus, the fight and the modules), so a return and a resume run the ticks again from the start of the session. A long session takes longer to catch up: a fight runs about 8 times faster than real time.
+
 ## What players see
 
 - A connection line, which a key turns on: the RTT, the jitter, the lost packets, the input delay and the rollback length of each player.

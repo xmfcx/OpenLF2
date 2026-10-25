@@ -22,7 +22,9 @@ check() { # name, condition result (0 = pass), details
 # run_session NAME PORT TRACE1 TRACE2: starts a server and two clients, then leaves the outputs in $WORK/NAME.*.
 run_session() {
     local name=$1 port=$2
-    timeout 120 "$GAME" --server --installer "$INSTALLER" --scripts scripts --port "$port" > "$WORK/$name.server" 2>&1 &
+    mkdir -p "$WORK/server-config"
+    timeout 120 "$GAME" --server --installer "$INSTALLER" --scripts scripts --config-dir "$WORK/server-config" --port "$port" \
+        > "$WORK/$name.server" 2>&1 &
     local server=$!
     sleep 2
     timeout 110 "$GAME" --headless --installer "$INSTALLER" --scripts scripts --connect 127.0.0.1 --port "$port" \
@@ -101,5 +103,49 @@ LONG=$(printf 'r,,rc,,c,,%.0s' $(seq 1 60))
 run_session leave 23604 "$START$TITLE$PICK$MENU$FIGHT$LONG" "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))"
 client_checks leave one "screen=match"
 grep -q "left" "$WORK/leave.server"; check "leave: the server saw the player leave" $? "no leave"
+
+# 6. A dropped player: client two leaves during a fight; the game waits, and client one (the room role now) lets the
+#    computer play the fighter (one of the two slots is the dropped one).
+DROP="$(wait_frames 150)=drop_computer_0,,,=drop_computer_1,,,$(wait_frames 150)"
+run_session drop 23606 "$START$TITLE$PICK$MENU$FIGHT$DROP" "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))"
+client_checks drop one "screen=match"
+grep -q "dropped: " "$WORK/drop.server"; check "drop: the server saw the drop" $? "no drop"
+grep -q "the computer plays" "$WORK/drop.server"; check "drop: the computer plays the dropped fighter" $? "$(tail -3 "$WORK/drop.server")"
+grep -qE "item[0-7]\{[^}]*computer=1" "$WORK/drop.one"; check "drop: client one sees the computer play it" $? "no computer=1"
+
+# 7. The dropped player comes back: a new client with the same name joins during the fight, runs the session's final
+#    ticks to catch up, and plays on with the same state (the server compares its hashes with client one's).
+start_server() { mkdir -p "$WORK/server-config"; timeout 150 "$GAME" --server --installer "$INSTALLER" --scripts scripts \
+    --config-dir "$WORK/server-config" --port "$1" > "$WORK/$2.server" 2>&1 & SERVER=$!; }
+client() { timeout 140 "$GAME" --headless --installer "$INSTALLER" --scripts scripts --connect 127.0.0.1 --port "$1" --input-trace "$2" > "$3" 2>&1; }
+start_server 23607 return; sleep 2
+client 23607 "$START$TITLE$PICK$MENU$FIGHT$LONG$LONG" "$WORK/return.one" &
+one=$!
+client 23607 "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))" "$WORK/return.two"
+sleep 2
+client 23607 "$(wait_frames 30)$LONG" "$WORK/return.three"
+wait "$one"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
+grep -q "is back" "$WORK/return.server"; check "return: the server gave the slot back" $? "$(tail -3 "$WORK/return.server")"
+client_checks return three "screen=match"
+! grep -q "difference" "$WORK/return.server"; check "return: no state difference after the return" $? "$(grep difference "$WORK/return.server")"
+grep -c "hashes agree (1 checks" "$WORK/return.server" | grep -q "^2$"; check "return: the hashes agree with the returning player" $? "$(grep 'hashes agree' "$WORK/return.server")"
+
+# 8. Stop and resume later: both players leave during a fight, the server saves the session, two clients with the
+#    same names come back, the room role resumes, both run the saved ticks to catch up, and the fight goes on.
+start_server 23608 resume; sleep 2
+client 23608 "$START$TITLE$PICK$MENU$FIGHT" "$WORK/resume.one" &
+one=$!
+client 23608 "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 25))" "$WORK/resume.two"
+wait "$one"; sleep 2
+RESUME="$L=resume$(wait_frames 15)=resume$(wait_frames 300)$FIGHT"
+client 23608 "$RESUME" "$WORK/resume.three" &
+one=$!
+client 23608 "$RESUME" "$WORK/resume.four"
+wait "$one"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
+grep -q "session saved" "$WORK/resume.server"; check "resume: the server saved the session" $? "$(tail -3 "$WORK/resume.server")"
+grep -q "session resumed" "$WORK/resume.server"; check "resume: the session went on" $? "$(tail -3 "$WORK/resume.server")"
+for side in three four; do client_checks resume $side "screen=match"; done
+! grep -q "difference" "$WORK/resume.server"; check "resume: no state difference" $? "$(grep difference "$WORK/resume.server")"
+grep -c "hashes agree (1 checks" "$WORK/resume.server" | grep -q "^2$"; check "resume: the hashes agree after the resume" $? "$(grep 'hashes agree' "$WORK/resume.server")"
 
 exit $FAILED

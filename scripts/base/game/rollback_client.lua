@@ -58,8 +58,8 @@ local function input_for(state, tick)
         else input.slots[slot] = state.last_known[slot] or "" end
     end
     if state.owns_functions then input.functions, input.function_presses = own.functions, own.function_presses end
-    -- The speed stays as the newest final tick has it.
-    input.speed = state.last_speed
+    -- The speed and the hold stay as the newest final tick has them.
+    input.speed, input.hold = state.last_speed, state.last_hold
     return input
 end
 
@@ -124,6 +124,7 @@ function client.update(state, now)
             local tick = state.confirmed + 1
             state.confirmed = tick
             state.last_known, state.last_speed = state.final[tick].slots, state.final[tick].speed
+            state.last_hold = state.final[tick].hold
             if tick < state.tick and not ticks.same(state.final[tick], state.used[tick]) then wrong = wrong or tick end
         end
         if wrong then
@@ -139,7 +140,9 @@ function client.update(state, now)
         -- Run ahead of the server: half the round trip and a margin for jitter, less what the input delay covers.
         local lead = math.max(state.rtt / 2 + 2 * state.jitter + 8 - state.delay * tick_ms, 4)
         local target = math.floor((now + state.offset + lead) / tick_ms)
-        local limit = state.tick <= state.confirmed and catch_up_limit or run_limit
+        -- Far behind (a return or a resumed session runs the ticks so far): more ticks a frame.
+        local limit = state.tick <= state.confirmed and (state.confirmed - state.tick > 60 and 4 * catch_up_limit or catch_up_limit)
+            or run_limit
         state.window = math.max(window_least, math.min(window_most, math.ceil(state.rtt / tick_ms) + 4))
         while state.tick <= target and state.new_ticks < limit do
             if state.tick - state.confirmed > state.window then
@@ -177,7 +180,9 @@ function client.update(state, now)
             state.server_hashes[tick] = nil
         end
     end
-    local oldest = state.confirmed - keep
+    -- Kept: the ticks near the newest final tick, and every tick not run yet (a client that catches up runs far
+    -- behind its final ticks).
+    local oldest = math.min(state.confirmed, state.tick) - keep
     for _, list in ipairs({state.saved, state.used, state.final, state.local_inputs, state.results, state.played}) do
         for tick in pairs(list) do
             if tick < oldest then list[tick] = nil end

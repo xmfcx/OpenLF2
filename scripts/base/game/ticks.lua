@@ -16,7 +16,7 @@ end
 -- The `held` table that match.step reads.
 function ticks.held(input)
     local held = {functions = input.functions or "", function_presses = input.function_presses or "", keys = {},
-        speed = input.speed}
+        speed = input.speed, hold = input.hold}
     for slot = 0, 7 do held[slot] = input.slots[slot] or "" end
     return held
 end
@@ -51,7 +51,7 @@ function ticks.same(a, b)
     if (a.functions or "") ~= (b.functions or "") or (a.function_presses or "") ~= (b.function_presses or "") then
         return false
     end
-    if (a.speed or 10) ~= (b.speed or 10) then return false end
+    if (a.speed or 10) ~= (b.speed or 10) or (a.hold or false) ~= (b.hold or false) then return false end
     for slot = 0, 7 do
         if (a.slots[slot] or "") ~= (b.slots[slot] or "") then return false end
     end

@@ -113,6 +113,7 @@ function handlers.session(state, message)
     state.names, state.host = message.names, message.role == state.id
     state.finals, state.next_tick, state.local_inputs, state.sent_tick, state.speed = {}, 0, {}, -1, nil
     state.input_acknowledged, state.frames, state.client, state.base = -1, 0, nil, nil
+    state.drops, state.slots, state.rejoin = {}, nil, message.rejoin == true
     state.events[#state.events + 1] = message
 end
 handlers["end"] = function(state, message)
@@ -137,6 +138,11 @@ function handlers.chat(state, message)
     local number = tonumber(tostring(message.text):match("^%s*(%d+)%s*$"))
     if number and number >= 1 and number <= 42 then state.taunts[#state.taunts + 1] = number end
 end
+local function store_finals(state, message)
+    for tick, input in pairs(message.ticks or {}) do
+        if tick >= state.next_tick and not state.finals[tick] then state.finals[tick] = input end
+    end
+end
 function handlers.ticks(state, message)
     if state.phase ~= "session" then return end
     local now = engine.network_time()
@@ -144,10 +150,45 @@ function handlers.ticks(state, message)
     if message.newest_input and message.newest_input > state.input_acknowledged then
         state.input_acknowledged = message.newest_input
     end
-    for tick, input in pairs(message.ticks or {}) do
-        if tick >= state.next_tick and not state.finals[tick] then state.finals[tick] = input end
-    end
+    store_finals(state, message)
     if state.client then rollback_client.receive(state.client, fight_message(state, message), now) end
+end
+-- The session's final ticks so far (a return, or a resumed session): this computer runs them to catch up.
+function handlers.log(state, message)
+    if state.phase ~= "session" then return end
+    store_finals(state, message)
+    if state.client then
+        local converted = fight_message(state, {server_time = 0, ticks = message.ticks})
+        for tick, input in pairs(converted.ticks) do
+            if not state.client.final[tick] then state.client.final[tick] = input end
+        end
+    end
+end
+-- A player of the session dropped: the ticks are held while the room role decides (base/ui/flow draws the choice).
+function handlers.drop(state, message)
+    state.drops = state.drops or {}
+    local slot = tonumber(message.slot)
+    if not slot then return end
+    local drop = state.drops[slot] or {since = engine.network_time()}
+    drop.name, drop.waiting, drop.decide_ms = tostring(message.name), message.waiting == true, tonumber(message.decide_ms) or drop.decide_ms
+    state.drops[slot] = drop
+end
+function handlers.drop_end(state, message)
+    if state.drops then state.drops[tonumber(message.slot) or -1] = nil end
+    handlers.notice(state, {text = message.text})
+end
+-- This computer plays more slots now (the fighter of a dropped player).
+function handlers.owners(state, message)
+    if type(message.slots) ~= "table" then return end
+    state.slots = {}
+    for _, slot in ipairs(message.slots) do state.slots[#state.slots + 1] = tonumber(slot) end
+    if state.client then state.client.owned = owned_map(state) end
+end
+-- How many final ticks wait to be run in the menus (a return or a resume catches up when there are many).
+function online.backlog(state)
+    local count = 0
+    while state.finals and state.finals[state.next_tick + count] do count = count + 1 end
+    return count
 end
 
 -- Takes the messages of this frame. Call once per frame, also in the lobby.
@@ -179,11 +220,19 @@ function online.take_events(state)
 end
 
 -- This computer's keys for the session: player 1's keys drive its slot; the function keys go with them.
+-- This computer's slots: its own, and the fighters of dropped players it took over (the server's "owners"), played
+-- by its player 1, player 2 and so on.
+local function own_slots(state) return state.slots or {state.slot} end
 local function own_input(state, held)
     local input = ticks.empty()
-    input.slots[state.slot] = held[0] or ""
+    for position, slot in ipairs(own_slots(state)) do input.slots[slot] = held[position - 1] or "" end
     input.functions, input.function_presses = held.functions or "", held.function_presses or ""
     return input
+end
+local function owned_map(state)
+    local map = {}
+    for _, slot in ipairs(own_slots(state)) do map[slot] = true end
+    return map
 end
 
 -- The combined input of a final tick, as the original's network exchange gives it (base/game/network): every
@@ -191,6 +240,7 @@ end
 local function combined_input(final)
     local combined = ticks.held(final)
     combined.pointer_x, combined.pointer_y, combined.button, combined.network, combined.unlock_bits = 0, 0, false, true, 0
+    combined.hold = final.hold
     return combined
 end
 
@@ -234,7 +284,7 @@ function online.begin_match(state, fight)
     state.base = state.next_tick - 1
     local first = state.base + 1
     local client = rollback_client.create({id = state.id, match = fight, random = {engine.random_position()},
-        owned = {[state.slot] = true}, owns_functions = true})
+        owned = owned_map(state), owns_functions = true})
     -- A speed set in the menus holds in the fight until a final tick says otherwise.
     if state.speed and state.speed < 10 then client.last_speed = state.speed end
     for tick = first, state.sent_tick do
@@ -282,14 +332,15 @@ function online.frame(state, held)
     online.send(state, {type = "input", sent_at = now, acknowledged = message.acknowledged + first, inputs = inputs},
         unreliable)
     -- The state after every 30th final tick goes to the server, which compares the clients.
-    for tick = state.hash_sent + 1, client.confirmed do
+    local last = math.min(client.confirmed, client.tick - 2)
+    for tick = state.hash_sent + 1, last do
         local saved = client.saved[tick + 1]
         if tick % hash_interval == 0 and saved then
             online.send(state, {type = "hash", tick = tick + first, hash = rollback.hash_saved(saved)})
             state.hashes_sent = (state.hashes_sent or 0) + 1
         end
     end
-    state.hash_sent = math.max(state.hash_sent, client.confirmed)
+    state.hash_sent = math.max(state.hash_sent, last)
     local played, results = rollback_client.take(client)
     local new_ticks = client.new_ticks
     for _, entry in ipairs(results) do

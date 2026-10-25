@@ -24,16 +24,20 @@ authority.hash_interval = 30
 -- count, or all_functions = true for the function keys of every client together (a server session, like the
 -- original's network game); match = a fight to run on the final ticks and random = its random position, or none (a
 -- server session: the clients run the game).
+-- first_tick: the first tick to make final (a resumed session goes on after its saved ticks).
 function authority.create(options)
+    local first = options.first_tick or 0
     local state = {match = options.match, random = options.random, owners = options.owners,
-        function_owner = options.function_owner, all_functions = options.all_functions, tick = 0, final = {}, last_final = ticks.empty(), clients = {},
-        hashes = {}, results = {}, stats = {late = 0, predicted = 0}}
-    for _, id in ipairs(options.clients) do
-        -- `newest`: the newest tick up to which every input of the client arrived; `heard`: its newest message time
-        -- (server clock); `echo`: the client time of its newest message; `acknowledged`: its newest final tick.
-        state.clients[id] = {inputs = {}, newest = -1, heard = 0, echo = nil, acknowledged = -1, missed = {}}
-    end
+        function_owner = options.function_owner, all_functions = options.all_functions, tick = first, final = {}, last_final = ticks.empty(), clients = {},
+        hashes = {}, results = {}, stats = {late = 0, predicted = 0}, hold = false, inject = {}}
+    for _, id in ipairs(options.clients) do authority.add_client(state, id) end
     return state
+end
+-- A client that joins (a session's start, or a player who comes back).
+function authority.add_client(state, id)
+    -- `newest`: the newest tick up to which every input of the client arrived; `heard`: its newest message time
+    -- (server clock); `echo`: the client time of its newest message; `acknowledged`: its newest final tick.
+    state.clients[id] = {inputs = {}, newest = state.tick - 1, heard = 0, echo = nil, acknowledged = -1, missed = {}}
 end
 
 function authority.receive(state, message, now)
@@ -89,6 +93,12 @@ local function finalize(state, tick, now)
     end
     -- The game speed of the session (set_speed): every final tick carries it, so all clients skip the same ticks.
     if state.speed and state.speed < 10 then final.speed = state.speed end
+    -- A held tick (a player dropped, and the room decides): no fight and no menu advances on it.
+    if state.hold then final.hold = true end
+    -- Letters the server adds to a slot once (base/game/match "read_control": "A" gives a dropped fighter to the
+    -- computer).
+    for slot, letters in pairs(state.inject) do final.slots[slot] = (final.slots[slot] or "") .. letters end
+    state.inject = {}
     state.final[tick], state.last_final = final, final
     -- Inputs for a final tick are not needed anymore, from any client.
     for _, client in pairs(state.clients) do

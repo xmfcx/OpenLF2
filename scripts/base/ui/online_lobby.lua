@@ -71,6 +71,8 @@ function screen.update(state, input, context)
     -- Player 1's keys work too (keyboard players, headless tests): attack says ready, the room role's defend starts.
     local fresh = input.ui_keyboard and {} or presses(state, input[0] or "")
     if events.clicked.ready or fresh.c then online.send(connection, {type = "ready", value = not me.ready}) end
+    -- A stopped session of these players goes on (base/game/server "can_resume").
+    if me.role and events.clicked.resume and connection.lobby.resume then online.send(connection, {type = "start", resume = true}) end
     if me.role and (events.clicked.start or fresh.f) and everybody_ready(connection.lobby) then
         online.send(connection, {type = "start"})
     end
@@ -117,6 +119,7 @@ function screen.draw(state, context)
         imgui.same_line(context)
         if me and me.role then
             imgui.button(context, "start", "Start the game", -1, 32, not everybody_ready(lobby))
+            if lobby.resume then imgui.button(context, "resume", "Resume the stopped game", -1, 32) end
         else
             imgui.text(context, "The room role starts the game.", 0x8090c0)
         end
@@ -137,7 +140,7 @@ end
 
 function screen.describe(state)
     local connection = state.online
-    local parts = {"online=" .. connection.phase}
+    local parts = {"online=" .. connection.phase .. (connection.lobby and connection.lobby.resume and " resume" or "")}
     if connection.problem then parts[#parts + 1] = "problem=" .. connection.problem end
     for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
         parts[#parts + 1] = string.format("player{slot=%d,name=%s,ready=%s,role=%s}", player.slot, player.name,
