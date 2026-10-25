@@ -148,7 +148,7 @@ local function session_message(state, rejoin)
     local session = state.session
     local owners = {}
     for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
-    return {type = "session", owners = owners, names = session.names, role = state.order[1], role_slot = session.role_slot,
+    return {type = "session", owners = owners, names = session.names, role = state.order[1],
         random = session.random, last_setup = state.last_setup,
         rejoin = rejoin or nil, classic = state.classic or nil}
 end
@@ -199,9 +199,8 @@ local function start_session(state, now, saved)
     state.phase, state.hashes = "session", {}
     -- A resumed session goes on with its next tick, after the start delay.
     state.start_at = now + start_delay_ms - first * tick_ms
-    -- role_slot: the slot whose keys start a fight on the setup screen, the same for the whole session.
     state.session = {names = names, random = random, slots = slots, log = saved and saved.log or {}, logged = first - 1,
-        drops = {}, role_slot = state.players[state.order[1]].slot}
+        drops = {}}
     broadcast(state, session_message(state))
     if first > 0 then
         for _, peer in ipairs(state.order) do send_log(state, peer) end

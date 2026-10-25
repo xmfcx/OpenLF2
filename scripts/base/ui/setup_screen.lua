@@ -315,9 +315,10 @@ local function screen_command(state, command, context)
         state.results = nil
         apply(state, {type = "start"})
     elseif command.type == "change_fighters" then
+        -- Only the player who asks goes back to the grid (a local game does not know who clicked: all of them).
         state.results = nil
         for slot = 0, 7 do
-            if model.slots[slot].kind == "human" then
+            if model.slots[slot].kind == "human" and (not state.network or command.from == slot) then
                 apply(state, {type = "ready", slot = slot, value = false})
                 state.cursors[slot] = {panel = "grid", index = grid_index(state, model.slots[slot].fighter)}
             end
@@ -558,7 +559,8 @@ local function start_bar(state, context)
     summary[#summary + 1] = model.mode == modes.stage and i18n.tr(stage_names[model.stage_level / 10 + 1])
         or arena_name(state, model.background)
     summary[#summary + 1] = i18n.tr(difficulty_names[model.difficulty] or "")
-    if speed.tenths < 10 then summary[#summary + 1] = i18n.tr("speed 0.%d", speed.tenths) end
+    local tenths = state.network and state.network.get_speed() or speed.tenths
+    if tenths < 10 then summary[#summary + 1] = i18n.tr("speed 0.%d", tenths) end
     imgui.separator(context)
     if model.countdown then
         imgui.text(context, i18n.tr("The fight starts in %d...", math.ceil(model.countdown / 30)), 0xffd24a, imgui.large)

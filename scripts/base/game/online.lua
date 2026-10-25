@@ -196,7 +196,7 @@ function handlers.log(state, message)
         end
     end
 end
--- A player of the session dropped: the ticks are held while the room role decides (base/ui/flow draws the choice).
+-- A player of the session dropped: the ticks are held until it comes back or a player decides (base/ui/flow draws it).
 function handlers.drop(state, message)
     state.drops = state.drops or {}
     local slot = tonumber(message.slot)
@@ -216,16 +216,6 @@ function handlers.owners(state, message)
     state.slots = {}
     for _, slot in ipairs(message.slots) do state.slots[#state.slots + 1] = tonumber(slot) end
     if state.client then state.client.owned = owned_map(state) end
-end
--- The slot of the room role in the session (it starts the fight on the setup screen).
-function online.role_slot(state)
-    local start = state.session_start
-    if start and tonumber(start.role_slot) then return tonumber(start.role_slot) end
-    if not start or type(start.owners) ~= "table" then return nil end
-    for slot, peer in pairs(start.owners) do
-        if peer == start.role then return tonumber(slot) end
-    end
-    return nil
 end
 -- How many final ticks wait to be run in the menus (a return or a resume catches up when there are many).
 function online.backlog(state)

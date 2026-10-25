@@ -181,7 +181,7 @@ function menu.draw(state, context, env)
     imgui.window(context, "settings", i18n.tr("Settings"), 197, 0, 400, 0)
     if state.confirm then
         local questions = {
-            leave = i18n.tr("Leave the network game? The others go on playing."),
+            leave = i18n.tr("Leave the network game? The others wait for you, or choose to go on without you."),
             end_fight = i18n.tr("End the fight?"),
             cheat_keys = i18n.tr("Cheat keys F6 to F9 then work in all modes, also in the fight that runs now. Turn them on?"),
         }

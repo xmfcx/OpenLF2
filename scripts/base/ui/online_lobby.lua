@@ -2,9 +2,9 @@
 -- Copyright (c) 2026 OpenLF2 contributors
 
 -- The lobby of a server program (OpenLF2 extension, docs/ui-network-architecture.md, drawn with Dear ImGui,
--- base/ui/imgui): the players who joined, each with a slot, say they are ready; the player with the room role
--- starts the game, and every client goes to the title menu of the same session (base/game/online), where the game
--- runs as the original's network game: the character selection, the modes, the fights. The chat panel sends
+-- base/ui/imgui): the players who joined, each with a slot, say they are ready; any player starts the game when
+-- everybody is ready, and every client goes to the match setup screen of the same session (base/game/online), where
+-- the whole game runs on the server's ticks: the setup, the modes, the fights. The chat panel sends
 -- messages; a number from 1 to 42 plays a taunt. Escape or Leave goes back to the network menu.
 local constants = require("base/game/constants")
 local online = require("base/game/online")
