@@ -3,7 +3,7 @@
 This document describes the AI that OpenLF2 has today. It has two parts:
 
 - The classic AI: a port of the original game's routines for computer fighters. It plays every computer fighter unless a developer option picks another brain. The sections from "Summary" to "Cost" describe it.
-- The AI framework: the brain registry, the move book, perception, prediction, the AI log and the development view (docs/ai-plan.md phases 1 to 3). The section "The AI framework" describes what is built.
+- The AI framework: the brain registry, the move book, perception, prediction, the AI log and the development view (docs/ai-plan.md phases 1 to 3), and since then the hardening, the arena, the actuator, reflexes, the brain `tactician` with personas and team play, the inspector, brains on the setup screen and in recordings, learning, and learning from data (phases 4 to 13). The section "The AI framework" describes the parts of phases 1 to 3. The status notes of each phase in docs/ai-plan.md describe the rest, with their measured results.
 
 docs/ai-plan.md is the plan for the rest of the work. docs/ai-moves.md lists the moves of every fighter.
 
@@ -145,7 +145,7 @@ A headless run of 3000 fight ticks with 5 computer fighters took 3.9 s with the 
 
 ## The AI framework
 
-The framework lets a fighter use another brain than the classic AI, and it gives a brain the knowledge and the tools to play well. Phases 1 to 3 of docs/ai-plan.md built it. No brain uses it to fight yet: the brains `idle` and `sentry` are test brains.
+The framework lets a fighter use another brain than the classic AI, and it gives a brain the knowledge and the tools to play well. The brain `tactician` fights with it (a choice on the setup screen), the brain `imitator` plays by a trained network, and `idle`, `sentry`, `drill`, `guard` and `jumper` are test brains. The classic AI stays the default until the tactician passes the arena test of phase 8.
 
 ### One tick with the framework
 
