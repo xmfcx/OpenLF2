@@ -128,7 +128,7 @@ grep -q "sound mods/base/taunts/30.wav" "$WORK/host.log"
 check "host: the engine plays the taunt's sound" $? "no sound line"
 focus 95; press 95 "$CHAT"; sleep 0.3; shot 95 title-chat; sleep 0.2; press 95 Escape
 expect "host: Escape closes the chat" host "chat_open=false"
-expect_not "host: Escape in the chat does not ask to leave" host "leave_dialog"
+expect_not "host: Escape in the chat does not open the settings" host "settings="
 
 # To a fight: Versus, both join with attack three times, no computers, Fight!
 press 95 "$ATTACK"; sleep 1.5
@@ -144,13 +144,30 @@ press 95 "$CHAT"; sleep 0.1; shot 95 fight-chat-0; sleep 0.3; shot 95 fight-chat
 press 95 Return
 expect "host: chat in a fight sends and closes" host "screen=match .*chat_open=false chat_lines=2"
 press 95 Escape
-expect "host: Escape asks before leaving" host "leave_dialog"
+expect "host: Escape opens the settings menu" host "settings=game"
+expect "host: the fight goes on behind the menu" host "screen=match online=session"
 press 95 Escape
-expect_not "host: Escape again closes the question" host "leave_dialog"
-press 95 Escape; sleep 0.5; [ "${KEEP:-}" = 1 ] && DISPLAY=:95 import -window root "$WORK/leave.png"; click 95 "$(gx 462)" "$(gy 314)"
-expect_not "host: Stay keeps the game" host "leave_dialog"
-expect "host: still in the fight after Stay" host "screen=match online=session"
+expect_not "host: Escape again closes the menu" host "settings="
+press 95 Escape; sleep 0.5; shot 95 settings; click 95 "$(gx 395)" "$(gy 78)"
+expect_not "host: Resume closes the menu" host "settings="
+expect "host: still in the fight after Resume" host "screen=match online=session"
 expect "join: the other player is still in the fight" join "screen=match online=session"
+
+# The computer plays the host's fighter, on both computers, and a key of the host takes it back.
+press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 156)"
+expect "host: the computer plays the host's fighter" host "computer_controls="
+expect "join: the computer plays the host's fighter there too" join "computer_controls="
+sleep 1.5; press 95 "$ATTACK"
+expect_not "host: a key takes the control back" host "computer_controls="
+expect_not "join: the control is back there too" join "computer_controls="
+
+# Leave asks first; No keeps the game.
+press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 501)"
+expect "host: Leave asks first" host "settings=game:leave"
+shot 95 leave; press 95 Escape
+expect "host: Escape closes the question, not the menu" host "settings=game"
+press 95 Escape
+expect_not "host: the menu closes" host "settings="
 
 ! grep -qiE "traceback|attempt to|error" "$WORK/host.log" "$WORK/join.log"
 check "no script errors" $? "$(grep -iE 'traceback|attempt to|error' "$WORK/host.log" "$WORK/join.log" | head -2)"

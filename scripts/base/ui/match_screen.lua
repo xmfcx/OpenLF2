@@ -530,6 +530,7 @@ function screen.describe(state)
             -- Holding links are listed only when set, so plain items keep the short form.
             local held = value.weapon ~= constants.weapon_holder_codes.none and string.format(" weapon=%d link=%d", value.weapon,
                 value.weapon > 0 and value.held_item or value.holder) or ""
+            if value.ai_control then held = held .. " computer=1" end
             parts[#parts + 1] = string.format("item%d{id=%d frame=%d x=%.3f y=%.3f z=%.3f vx=%.3f vy=%.3f vz=%.3f hp=%d mp=%d facing=%d%s}",
                 index, value.record.id, value.frame, value.x, value.y, value.z, value.vx, value.vy, value.vz,
                 value.hp, value.mp, value.facing, held)

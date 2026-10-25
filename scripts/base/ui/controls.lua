@@ -292,6 +292,12 @@ function controls.read(settings, raw)
     local x, y = raw:match("@(%d+)_(%d+)")
     if x then input.pointer_x, input.pointer_y = tonumber(x), tonumber(y) end
     raw = raw:gsub("@%d+_%d+", "")
+    -- "=ID" and "=ID:N": trace form of the menu events (" u"): a click on element ID, or a slider set to N.
+    for id, value in raw:gmatch("=([%w_]+):?(%d*)") do
+        input.ui = input.ui or {clicked = {}, changed = {}, submitted = {}}
+        if value ~= "" then input.ui.changed[id] = value else input.ui.clicked[id] = true end
+    end
+    raw = raw:gsub("=[%w_]+:?%d*", "")
     for code in raw:gmatch("#(%d+)") do input.keys[tonumber(code)] = true end
     raw = raw:gsub("#%d+", "")
     for letter in raw:gmatch("%%(%a)") do input.gamepad[letter] = true end

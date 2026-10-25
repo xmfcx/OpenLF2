@@ -24,6 +24,7 @@ local input_timeline = require("base/ui/input_timeline")
 local chat = require("base/ui/chat")
 local online = require("base/game/online")
 local imgui = require("base/ui/imgui")
+local fight_menu = require("base/ui/fight_menu")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -150,7 +151,7 @@ local function disconnect(state, message)
     local online_session = state.session and state.session.online
     if online_session then online.close(state.session)
     elseif state.session then network.close(state.session) end
-    state.session, state.leave_dialog = nil, nil
+    state.session, state.fight_menu = nil, nil
     controls.replace_names(nil)
     unlock.end_replay()
     state.active, state.wait_release = "launch", nil
@@ -168,7 +169,7 @@ local function disconnect(state, message)
 end
 -- The end of a server's session while connected (the title's Quit, or the server ended it): back to its lobby.
 local function back_to_lobby(state)
-    state.session, state.leave_dialog = nil, nil
+    state.session, state.fight_menu = nil, nil
     controls.replace_names(nil)
     state.title = title.create(state.options)
     state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
@@ -406,6 +407,26 @@ local function online_connection(state)
     if state.active == "online_lobby" and state.online_lobby then return state.online_lobby.online, false end
     return nil
 end
+-- What the settings menu (base/ui/fight_menu) shows: this computer's human fighters, the speed, the cheat keys.
+local function menu_env(state)
+    local fight = state.active == "match" and state.match and state.match.match
+    local session = state.session and state.session.online and state.session
+    local env = {online = session and true or false, fight = fight and not fight.replay and true or false,
+        mode = fight and fight.mode, speed = session and 10 or speed.tenths, speed_shared = false,
+        cheat_keys = unlock.flags.function_keys == 1, cheats_online = false, fighters = {}}
+    if env.fight then
+        local slots = session and {session.slot} or {0, 1, 2, 3, 4, 5, 6, 7}
+        for _, slot in ipairs(slots) do
+            local value = fight.items[slot]
+            if value and value.human then
+                local name = session and session.names and session.names[slot + 1] or controls.name(slot)
+                env.fighters[#env.fighters + 1] = {slot = slot, name = name ~= "" and name or tostring(slot + 1),
+                    ai = value.ai_control == true}
+            end
+        end
+    end
+    return env
+end
 -- A short line about the screens and the network session, which the tests read from a window (OPENLF2_PROBE=1:
 -- the flow logs it every 15 frames).
 function flow.probe(state)
@@ -416,7 +437,15 @@ function flow.probe(state)
             connection.phase, tostring(state.chat and state.chat.open or false), #connection.chat,
             connection.taunts_played or 0, tostring(state.chat and state.chat.release or false))
     end
-    if state.leave_dialog then parts[#parts + 1] = "leave_dialog" end
+    if state.fight_menu then parts[#parts + 1] = fight_menu.describe(state.fight_menu) end
+    local fight = state.active == "match" and state.match and state.match.match
+    if fight then
+        local computer = {}
+        for slot = 0, 7 do
+            if fight.items[slot] and fight.items[slot].ai_control then computer[#computer + 1] = tostring(slot) end
+        end
+        if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
+    end
     return table.concat(parts, " ")
 end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
@@ -467,15 +496,7 @@ function flow.draw(state, context)
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
-    if state.leave_dialog then
-        imgui.window(context, "leave", "Leave the network game?", 247, 0, 300, 0)
-        imgui.text(context, "The others go on playing. Your fighter stands still.", nil, imgui.wrap)
-        imgui.spacing(context, 4)
-        imgui.button(context, "leave_game", "Leave", 120, 28)
-        imgui.same_line(context)
-        imgui.button(context, "stay", "Stay", -1, 28)
-        imgui.end_window(context)
-    end
+    if state.fight_menu then fight_menu.draw(state.fight_menu, context, menu_env(state)) end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
     if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
@@ -728,19 +749,27 @@ function flow.update(state, raw, context)
             disconnect(state, session.problem or i18n.tr("Network game disconnected"))
             return
         end
-        -- Escape asks before leaving; the game goes on meanwhile, with this computer's keys held back.
-        local events = imgui.events(input)
+        -- Escape opens the settings menu (base/ui/fight_menu); the game goes on meanwhile, with this computer's keys
+        -- held back. Escape closes it again, or its question first.
         local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
-        if escape and not state.escape_held then state.leave_dialog = not state.leave_dialog end
-        state.escape_held = input.keys[virtual_keys.escape] == true
-        if state.leave_dialog and events.clicked.leave_game then
-            disconnect(state, nil)
-            return
+        if escape and not state.escape_held then
+            if not state.fight_menu then state.fight_menu = fight_menu.create()
+            elseif state.fight_menu.confirm then state.fight_menu.confirm = nil
+            else state.fight_menu = nil end
         end
-        if events.clicked.stay then state.leave_dialog = nil end
-        if state.leave_dialog then
+        state.escape_held = input.keys[virtual_keys.escape] == true
+        local functions = ""
+        if state.fight_menu then
+            local answer = fight_menu.update(state.fight_menu, input, menu_env(state))
+            if answer and answer.leave then
+                disconnect(state, nil)
+                return
+            end
+            if answer and answer.control then state.control_request = {letter = answer.control[2], frames = 3} end
+            if answer and answer.functions then functions = answer.functions end
+            if answer and answer.close then state.fight_menu = nil end
             for slot = 0, 7 do input[slot] = "" end
-            input.functions, input.function_presses = "", ""
+            input.functions, input.function_presses = functions, functions
         end
         -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
         if not (state.active == "match" and state.match.online) then
@@ -820,10 +849,34 @@ function flow.update(state, raw, context)
         if speed_menu.update(state.speed_menu, input, context, speed_keys) == "close" then
             state.speed_menu, state.wait_release, state.swallow_pointer, closed_now = nil, true, true, true
         end
+    elseif state.fight_menu and not state.session then
+        -- A local fight stops while the settings menu is open (base/ui/fight_menu); Escape closes it.
+        local answer = fight_menu.update(state.fight_menu, input, menu_env(state))
+        if escape_pressed then
+            if state.fight_menu.confirm then state.fight_menu.confirm = nil else answer = {close = true} end
+        end
+        if answer then
+            if answer.end_fight then state.pending_leave = 3 end
+            if answer.control then state.control_request = {slot = answer.control[1], letter = answer.control[2], frames = 3} end
+            if answer.functions then state.pending_functions = answer.functions end
+            if answer.speed then speed.tenths = answer.speed end
+            if answer.cheat_keys then unlock.mark_function_keys() end
+            if answer.close then state.fight_menu, state.swallow_pointer = nil, true end
+        end
+        closed_now = true
     elseif speed_keys then
         state.speed_menu = speed_menu.create()
+    elseif escape_pressed and escape_free(state) and state.active == "match" and not state.match.match.replay then
+        state.fight_menu = fight_menu.create()
+        closed_now = true
     elseif escape_pressed and escape_free(state) then
         state.quit_dialog = quit_dialog.create(state.active == "match" and "leave" or "exit")
+    end
+    if state.pending_functions and not state.fight_menu then
+        for letter in state.pending_functions:gmatch(".") do
+            if not input.functions:find(letter, 1, true) then input.functions = input.functions .. letter end
+        end
+        state.pending_functions = nil
     end
     if state.pending_leave and not state.quit_dialog then
         if state.active == "match" and not input.functions:find("4", 1, true) then input.functions = input.functions .. "4" end
@@ -843,6 +896,18 @@ function flow.update(state, raw, context)
     local held_keys, frame_before = input[watched], fight and fight.frame_number
     local reads = fight and (fight.input_phase + 1) % 2 == 0
     if not state.quit_dialog and (state.session or not state.speed_menu) and not closed_now and fight_due(state, input) then
+        -- The settings menu's "let the computer play": the control letter goes with the slot's keys for a few frames
+        -- (base/game/match "read_control"), so a frame that runs no tick does not lose it. A server's session sends
+        -- this computer's player 1 as its own slot.
+        local request = state.active == "match" and state.control_request
+        if request then
+            local slot = state.session and state.session.online and 0 or request.slot
+            input[slot] = (input[slot] or "") .. request.letter
+            request.frames = request.frames - 1
+            if request.frames <= 0 then state.control_request = nil end
+        elseif state.active ~= "match" then
+            state.control_request = nil
+        end
         route(state, input, context)
     end
     if fight and state.active == "match" and state.match.match == fight then

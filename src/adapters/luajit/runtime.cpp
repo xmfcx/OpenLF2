@@ -990,7 +990,7 @@ public:
     Result<ScriptFrame> frame(std::string_view input) override {
         // Input is host-generated, not Lua source: trace letters ('/' between players, "@x_y"
         // pointer, '!' button, "#n" raw key, "%x" controller button, "^x" typed character,
-        // "&n_x_y" a held finger, "?x"/"?w" a renderer/window capability, "~n" a measured fps)
+        // "&n_x_y" a held finger, "?x"/"?w" a renderer/window capability, "~n" a measured fps, "=id[:n]" a menu event)
         // or "k", comma-separated virtual-key codes, " m" x,y,button and
         // optionally " p" with the key-down codes, " t" with typed character codes, " g" with
         // controller button letters, " h" with the touch state and " f" with the scaling modes
@@ -999,7 +999,7 @@ public:
         const bool keys = input.starts_with('k');
         const auto allowed = keys
             ? std::string_view("0123456789,abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_ -:")
-                                  : std::string_view("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/@_!#%^.?$&~");
+                                  : std::string_view("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/@_!#%^.?$&~=:");
         if (input.size() > 4096 || input.substr(keys ? 1 : 0).find_first_not_of(allowed) != std::string_view::npos) {
             return fail(ErrorCode::script, "invalid input action");
         }

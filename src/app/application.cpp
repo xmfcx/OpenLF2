@@ -31,6 +31,7 @@
 #include <condition_variable>
 #include <mutex>
 #endif
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -204,13 +205,24 @@ Result<void> valid_trace_frame(std::string_view frame) {
             // "~60": a fixed measured FPS value (the host's " s60" in live frames).
             ++position;
             if (!number(position, 3)) return fail(ErrorCode::format, "input trace fps must be ~0-~999");
+        } else if (c == '=') {
+            // "=resume": a click on the menu element "resume"; "=speed:4": slider "speed" set to 4.
+            const auto first = ++position;
+            while (position < frame.size() && (std::isalnum(static_cast<unsigned char>(frame[position])) || frame[position] == '_')) {
+                ++position;
+            }
+            if (position == first || position - first > 64) return fail(ErrorCode::format, "input trace menu events are =ID or =ID:N");
+            if (position < frame.size() && frame[position] == ':') {
+                ++position;
+                if (!number(position, 4)) return fail(ErrorCode::format, "input trace menu events are =ID or =ID:N");
+            }
         } else if (c == '/') {
             if (++players > 7) return fail(ErrorCode::format, "input trace frames have at most eight players");
             ++position;
         } else if (std::string_view("udlrcbf123456789!").find(c) != std::string_view::npos) {
             ++position;
         } else {
-            return fail(ErrorCode::format, "input trace frames use udlrcbf, 1-9, '/', @X_Y, '!', #N, %x, ^x, &N_X_Y, ?x, ?w and ~N");
+            return fail(ErrorCode::format, "input trace frames use udlrcbf, 1-9, '/', @X_Y, '!', #N, %x, ^x, &N_X_Y, ?x, ?w, ~N and =ID");
         }
     }
     return {};
