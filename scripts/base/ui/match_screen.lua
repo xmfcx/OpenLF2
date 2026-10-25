@@ -167,7 +167,8 @@ end
 local function netsim_update(state, held, context)
     local played, results, stepped = netsim.frame(state.netsim, held)
     for _, sound in ipairs(played) do context.sound(sound.resource, sound.volume, sound.pan) end
-    fight_effects.observe(state.effects, state.match)
+    state.overlay_match = netsim.confirmed(state.netsim)
+    fight_effects.observe(state.effects, state.overlay_match)
     for _ = 1, stepped do follow_step(state, state.match) end
     state.view = state.match.last_snapshot
     for _, result in ipairs(results) do

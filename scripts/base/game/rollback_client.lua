@@ -14,8 +14,9 @@ local ticks = require("base/game/ticks")
 local client = {}
 
 local tick_ms = ticks.tick_ms
--- The most ticks the client runs ahead of its newest final tick; past it, the client waits.
-client.window = 12
+-- The most ticks the client runs ahead of its newest final tick; past it, the client waits. The window covers the
+-- round trip and a few ticks more, from 12 to 20 ticks (a rollback of 20 ticks costs about 12 ms in battle mode).
+local window_least, window_most = 12, 20
 -- Saved states and inputs are kept this many ticks behind the newest final tick (the hash checks need them).
 local keep = 40
 -- The most ticks a message repeats, and the most new ticks a frame runs (more when the client catches up on final
@@ -39,7 +40,7 @@ end
 
 -- The keys of the client's own slots for `tick`: the newest sample at or before it.
 local function local_input(state, tick)
-    for earlier = tick, tick - client.window, -1 do
+    for earlier = tick, tick - window_most, -1 do
         local input = state.local_inputs[earlier]
         if input then return input end
     end
@@ -134,8 +135,9 @@ function client.update(state, now)
         local lead = math.max(state.rtt / 2 + 2 * state.jitter + 8 - state.delay * tick_ms, 4)
         local target = math.floor((now + state.offset + lead) / tick_ms)
         local limit = state.tick <= state.confirmed and catch_up_limit or run_limit
+        state.window = math.max(window_least, math.min(window_most, math.ceil(state.rtt / tick_ms) + 4))
         while state.tick <= target and state.new_ticks < limit do
-            if state.tick - state.confirmed > client.window then
+            if state.tick - state.confirmed > state.window then
                 state.stats.stalls = state.stats.stalls + 1
                 break
             end

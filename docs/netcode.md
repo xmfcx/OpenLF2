@@ -169,7 +169,7 @@ With `--net-sim`, two clients and the server run in one program over simulated l
 | 80 ms, jitter 30 ms, loss 5 % | 223 ms | 2 | 266, 1810, 9 | 0 |
 | 150 ms, jitter 60 ms, loss 15 % | 390 ms | 2 | 229, 2666, 12 | 320 |
 
-The round trip includes one frame of 33 ms on each side, because the simulation passes messages once per frame. At a round trip of 390 ms, the clients wait at the rollback window of 12 ticks. The window must grow with the round trip.
+The round trip includes one frame of 33 ms on each side, because the simulation passes messages once per frame. At a round trip of 390 ms, the clients waited at a fixed rollback window of 12 ticks. The window now follows the round trip (12 to 20 ticks), and the waits went from 320 to 1.
 
 Two causes of differences showed up and are fixed: the flow wrote the unlock bits into the shown fight outside its ticks, and only the shown fight had the function that advances the hit sparks at the end of a tick.
 
@@ -208,7 +208,7 @@ Two causes of differences showed up and are fixed: the flow wrote the unlock bit
 ## Steps
 
 1. Foundation: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode. Done except the championship check and a faster hash (see Measurements).
-2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here. Built: base/game/rollback_client.lua, base/game/authority.lua, base/game/net_link.lua and base/game/netsim.lua (`--net-sim`). Open: the overlays on confirmed ticks, a rollback window that follows the round trip, and tuning by play.
+2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here. Built: base/game/rollback_client.lua, base/game/authority.lua, base/game/net_link.lua and base/game/netsim.lua (`--net-sim`), with the overlays on final ticks and a rollback window that follows the round trip. Open: tuning by play.
 3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines.
 4. The rollback client against the server, with the hash checks and the snapshots.
 5. Drops and returns: the 500 ms rule, pause or AI, the session token, the return with a snapshot.

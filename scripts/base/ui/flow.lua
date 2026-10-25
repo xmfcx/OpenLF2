@@ -697,7 +697,8 @@ function flow.update(state, raw, context)
         input_timeline.record(state.timeline, fight, held_keys, stepped and reads and input[watched] or nil, stepped,
             waiting)
     end
-    if state.active == "match" then damage_chart.observe(state.chart, state.match.match) end
+    -- A fight through the simulated network shows the chart of its final ticks (base/game/netsim).
+    if state.active == "match" then damage_chart.observe(state.chart, state.match.overlay_match or state.match.match) end
     if joining_cli then
         if state.network.session.error then error(state.network.session.error) end
         -- CLI traces start at the title; the handshake consumes no trace frames.

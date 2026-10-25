@@ -81,6 +81,23 @@ function netsim.frame(session, held)
     return played, results, main.new_ticks
 end
 
+-- The overlays (damage chart, fight effects) read the newest final state of client A, so that they never show a hit
+-- that a rollback takes back. The view is one table that points at the fields of that saved state; before the first
+-- final tick it is the shown fight.
+function netsim.confirmed(session)
+    local main = session.clients.a
+    local saved = main.saved[math.min(main.confirmed, main.tick - 1) + 1]
+    if not saved then return main.match end
+    local view = session.view or {}
+    session.view = view
+    if view.source ~= saved then
+        for key in pairs(view) do view[key] = nil end
+        for key, value in pairs(saved.match) do view[key] = value end
+        view.source = saved
+    end
+    return view
+end
+
 -- For headless descriptions: each client's tick, final tick, rollbacks (count, ticks, longest), waits and hash
 -- checks; the server's tick and its late and predicted inputs; the round trip of client A.
 function netsim.describe(session)
