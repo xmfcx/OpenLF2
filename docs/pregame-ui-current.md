@@ -1,5 +1,7 @@
 # The pre-game menus today
 
+Note (2026-10-25): this document describes the menus before the redesign, and it stays as a record. Since 60216e1, "game start" and a network session open the match setup screen (base/ui/setup_screen.lua, base/game/setup.lua) in place of the title menu. The title menu and the classic screens below stay behind "Classic menus" (the Display page of the settings menu) and `--classic-menus`. The game starts unlocked (the `lf2.net` word does nothing in a live game), the music is local to each computer, and the game speed is a slider of the setup screen and the settings menu (base/ui/fight_menu.lua). docs/pregame-ui-redesign.md describes the new design and marks what is built.
+
 This document describes how a player gets from the title menu into a fight in VS mode and Stage mode, as the code works today. It also covers the parts of Battle mode and the championships that use the same screens, and the network cases. docs/pregame-ui-redesign.md proposes a new design.
 
 The port copies the original LF2 v2.0a. Most of the rules below are rules of the original, not choices of OpenLF2.

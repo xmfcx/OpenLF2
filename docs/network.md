@@ -1,5 +1,7 @@
 # Network code
 
+Note (2026-10-25): this document describes the old two-computer TCP game, and it stays as a record of that code. Network Game now plays through the server program over UDP (ENet), with rooms, rollback fights and the match setup screen. docs/netcode.md and docs/architecture.md describe it. The TCP game stays for `--host` and `--join`, and for engines without UDP messages. In this old game, Escape still disconnects, and the keys M, F and D still open the speed menu. The game now starts unlocked, so the word LF2.NET no longer sets its bit in a live game. The music is local to each computer.
+
 This document explains how two computers play one game of OpenLF2 over a network. It is for developers who change the network protocol, the network screens or anything that must stay the same on both computers.
 
 The line references point to the code at commit `99e0cdd` (branch `arena`). Lines move when the code changes, so search for the named function when a reference does not match.

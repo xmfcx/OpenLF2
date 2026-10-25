@@ -5,6 +5,7 @@ OpenLF2 reimplements Little Fighter 2 v2.0a. A C++23 engine opens the window, re
 - docs/netcode.md: the network game (prediction and rollback, the server, drops, rooms, spectators).
 - docs/ui-network-architecture.md: how the menus and the network game share one model.
 - docs/pregame-ui-redesign.md: the match setup screen and the settings menu.
+- docs/camera.md: the fight camera of each computer (classic, wide and dynamic).
 - docs/network.md: the old two-computer TCP game.
 
 ## The parts
@@ -59,13 +60,15 @@ sequenceDiagram
     A->>P: draw the picture, then the menus at the window's resolution
 ```
 
-- A frame runs every 33 ms, as in the original. The game speed setting skips fight ticks; it does not change the frame time.
+- A frame runs every 33 ms, as in the original. The game speed setting skips fight ticks. It does not change the frame time.
 - Headless runs (`--headless --input-trace`) run the same scripts without a window. The tests use them.
 - A frame of a network game can wait for the server. The engine then runs the scripts again with the same input, so code before the network exchange must not count frames.
+- A client that catches up (a return, a resume or a spectator) runs up to 40 menu ticks in one frame through flow.update, and up to 32 fight ticks in the rollback client.
+- The dynamic camera (base/ui/camera_view.lua) draws the world into a scaled render area: the engine draws it 1:1 into a texture and scales it once into the window. The HUD and the overlays draw over it at the window's scale.
 
 ## Determinism
 
-Everything that changes a fight must be the same on all computers: the keys, the speed and the random numbers. The keys come through the combined input of a tick, and the random numbers come from the shared generator (`engine.random`). The menus, the music, the overlays and the settings are local to each computer. The rollback code saves, restores and hashes the whole fight state, so two computers can compare their states.
+Everything that changes a fight must be the same on all computers: the keys, the speed and the random numbers. The keys come through the combined input of a tick, and the random numbers come from the shared generator (`engine.random`). The menus, the music, the overlays, the camera and the settings are local to each computer. The rollback code saves, restores and hashes the whole fight state, so two computers can compare their states.
 
 ## The network game
 
@@ -96,7 +99,10 @@ flowchart LR
 - The server does not run the game. It collects the keys, makes each tick final at its deadline (it never waits for a slow player), and sends the final ticks to every client. Every client runs the whole game on these ticks.
 - The menus run in lockstep on the final ticks. The fights run with prediction and rollback: a client runs ahead with predicted keys, and it goes back and runs the ticks again when a final tick differs.
 - The clients send a hash of their fight state every 30 ticks, and the server compares them.
-- A player who drops holds the game until the room role decides. A returning player, a spectator and a resumed session get the log of final ticks and run them again to catch up.
+- No player has more rights than the others: any player starts a session, starts the fight and chooses for a dropped player.
+- A player who drops holds the game, and the game waits for the player. Any player can also let the computer play, give the fighter to another player, or stop and resume later.
+- A returning player, a spectator and a resumed session get the log of final ticks and run them again to catch up. The game waits meanwhile, and every player sees a progress bar.
+- The server keeps a stopped session and the values of the last match in its config.json.
 
 ## Game versions
 
@@ -114,6 +120,7 @@ flowchart LR
 - Each build has the address of `versions.json` built in, through the public link of the folder.
 - The base program starts the active version. All versions share the same configuration, controls and recordings.
 - Two computers play together only with the same version: a different build has a different network profile, and the server refuses it.
+- The latest published version is 2026.10.25-37 (29fdd48).
 
 ## The source folders
 
@@ -125,5 +132,5 @@ flowchart LR
 | include/openlf2/ports | The interfaces of the adapters. |
 | scripts/runtime | bootstrap.lua, the trusted part of the scripts. |
 | scripts/base/game | The fight (match, objects, combat, AI), the rollback, the network (server, online client, authority, ticks), the setup model, music and options. |
-| scripts/base/ui | The flow and the screens: launch, title, setup screen, classic menus, settings menu, lobby, chat, overlays. |
+| scripts/base/ui | The flow and the screens: launch, title, setup screen, classic menus, settings menu, lobby, chat, overlays, the dynamic camera. |
 | tools | The online tests (test-online.sh, test-online-ui.sh) and helper scripts. |

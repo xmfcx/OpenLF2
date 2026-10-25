@@ -1,6 +1,6 @@
 # UI and network architecture
 
-This document describes a new split between the game state, the user interface (UI) and the network. It replaces the first approach to mouse clicks in the menus, where clicks traveled through the network as screen positions (reverted in 99e0cdd). Nothing here is built yet. plan.md lists the work in phases.
+This document describes a new split between the game state, the user interface (UI) and the network. It replaces the first approach to mouse clicks in the menus, where clicks traveled through the network as screen positions (reverted in 99e0cdd). Parts of it are built. "What is built" near the end says which parts, and where the code differs from the design. plan.md lists the work that stays open.
 
 ## The problem today
 
@@ -101,13 +101,26 @@ A local game uses the same model and the same commands, with a local authority i
 
 Each client shows its own screen of the current session phase. For example, in the character selection one player can open the options while another one picks a fighter. Only the commands change the shared state, and each client draws it in its own way. The session phase (lobby, character selection, match, results) is shared, so all clients move to a match together.
 
+## What is built
+
+- Dear ImGui draws the network menu, the lobby, the chat window, the match setup screen and the settings menu (base/ui/imgui.lua). The engine returns the clicks and the typed text in the next frame's input (`input.ui`).
+- The server program (`openlf2 --server`, base/game/server.lua) is the authority of every server game. It does not run the session model or the fight. It orders the keys and the commands into final ticks (base/game/authority.lua), and every client runs the whole game on these ticks: the menus in lockstep, the fights with rollback.
+- The match setup is a model with commands (base/game/setup.lua). The screen (base/ui/setup_screen.lua) turns keys and clicks into commands. In a local game the screen applies a command at once. In a server session a click goes to the server, which puts the command into the next final tick, and every client applies it on the same tick. A command acts only for the sender's own slot or for a computer slot.
+- The keys of the players still reach the setup screen through the combined input, as on the classic screens. The cursor of each slot and the focus are local UI state.
+- The match setup screen replaces the title menu. Its buttons open the championships, which keep their classic screens. The title menu, the classic character selection, the battle setup and the championships have no models yet. With `--classic-menus` on the server, a session runs the classic screens in lockstep on the final ticks, as the original's network game does.
+- All clients show the same screen of the session. The settings menu and the chat are local windows over it. The menus still wait for each final tick, so a late tick stops the menus until it arrives.
+- No player has a role. Any player starts a session from the lobby, starts the fight on the setup screen and chooses for a dropped player (owner's decision, 723d449).
+- "Leave the network game" in the settings menu takes one player to the launch menu. The game of the others then waits for that player (docs/netcode.md, "A dropped player"). Exit on the setup screen (or Quit on the classic title menu) takes every player of the session back to the lobby on the same tick.
+- A server that a game hosts runs as long as that game runs. It stops when the game ends, also after a crash (`--stop-with-parent`).
+- The old two-computer TCP game stays for `--host` and `--join`.
+
 ## Steps
 
-1. Model and commands for one screen (the character selection), with a local authority, and the look unchanged. Make sure that a headless trace gives the same result as before. The mouse comes with the controller and the widgets of the screen.
-2. The server program: a listener with many connections, the framed protocol, the lobby, and the host button that starts the server and joins it. The menus run on commands through the server.
-3. The title choices, the battle setup and the championship as models and commands.
-4. The fight through the server: the tick stream, the input delay, the merge rule, pause, speed and AI control as commands, and the hashes for the difference log.
-5. Drops and returns.
+1. Model and commands for one screen (the character selection), with a local authority, and the look unchanged. Make sure that a headless trace gives the same result as before. The mouse comes with the controller and the widgets of the screen. Built as a new screen: the match setup screen (base/game/setup.lua). The classic character selection keeps its old code.
+2. The server program: a listener with many connections, the framed protocol, the lobby, and the host button that starts the server and joins it. The menus run on commands through the server. Built. The setup screen runs on commands, and the classic menus run on the keys of the final ticks.
+3. The title choices, the battle setup and the championship as models and commands. Partly built: the title choices are buttons of the setup screen. The battle setup and the championships stay classic screens.
+4. The fight through the server: the tick stream, the input delay, the merge rule, pause, speed and AI control as commands, and the hashes for the difference log. Built: the tick stream, the input delay, pause and the cheat keys as function keys, the speed in each final tick, AI control as the letters `A` and `P` in a slot's keys, and the hashes.
+5. Drops and returns. Built without a snapshot (docs/netcode.md, "A dropped player").
 
 ## Decisions
 

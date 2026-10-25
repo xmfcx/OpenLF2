@@ -4,20 +4,27 @@ This plan collects the requested features for network play with friends and the 
 
 - docs/ui-network-architecture.md: a shared session model that changes only through commands, a local UI on each computer, and a server program that is always the authority of a network game.
 - docs/netcode.md: the fight over UDP with prediction and rollback, bad connections, rooms, spectators and chat, with measurements.
-- docs/pregame-ui-redesign.md: one match setup screen in Dear ImGui, local music, no locks, the game speed as a setting, and one settings menu. docs/pregame-ui-current.md describes the menus of today and their problems.
+- docs/pregame-ui-redesign.md: one match setup screen in Dear ImGui, local music, no locks, the game speed as a setting, and one settings menu. It marks the steps that are built. docs/pregame-ui-current.md describes the menus before the redesign and their problems.
+- docs/camera.md: a camera of each computer for wide screens (classic, wide and dynamic), with the first version that is built and the steps that stay open.
 - docs/network.md: the old two-computer network code.
 - docs/architecture.md: the parts of the game, one frame, the network game and the game versions, with diagrams.
 
 ## Where the game is now
 
-- Network Game opens a menu (Dear ImGui): host a game, or join one by its address or from the saved servers. Host starts the server program (`openlf2 --server --stop-with-parent --upnp`, UDP with ENet) on this computer and joins it. The server opens UDP 12345 on the home router with UPnP, and the lobby shows the public address.
-- The server holds a main room and private rooms (a code of four characters). The lobby lists the players and the open rooms. They say ready, and the room role starts a session. The lobby has a chat, and a message that is only a number from 1 to 42 plays a taunt on every computer.
-- A session runs the whole game on the server's final ticks: the title menu and the match setup screen (or the classic menus with `--server --classic-menus`), every mode and the results run in lockstep, and the fights run with rollback. Clicks on the setup screen go through the server as commands in the ticks. The server makes each tick final at its deadline and never waits for a player. The clients send a hash of their fight state every 30 ticks, and the server compares them. The round trip on one machine is about 7 to 21 ms.
-- During a session, Enter (or T) opens a chat window, and Escape opens the settings menu (the game goes on). Any player sets the game speed. A player who drops holds the game until the room role decides (wait, the computer plays, another player takes the fighter, stop and resume later). A returning player, a spectator and a resumed session run the session's final ticks again to catch up. A line shows the ping, the input delay and the rollbacks.
-- Local games: the title's VS, Stage and Battle open the match setup screen (portraits, arenas, difficulty, speed, start with a countdown, Results buttons after the fight). "Classic menus" keeps the original screens. Escape opens the settings menu in a fight, where the computer can play a player's fighter. The music is local, and the game starts unlocked.
+- Network Game opens a menu (Dear ImGui): host a game, or join one by its address or from the saved servers. Host starts the server program (`openlf2 --server --stop-with-parent --upnp`, UDP with ENet) on this computer and joins it. The server opens UDP 12345 on the home router with UPnP, and the lobby shows the public address. The server stops when the hosting game ends, also after a crash.
+- The server holds a main room and private rooms (a code of four letters and digits). The lobby lists the players and the open rooms, with Join, or Watch when the room plays. The players say ready, and any player starts the session when everybody is ready. The lobby has a chat, and a message that is only a number from 1 to 42 plays a taunt on every computer.
+- No player has more rights than the others. Any player starts a session from the lobby, resumes a stopped session, starts the fight on the setup screen and chooses for a dropped player.
+- A session runs the whole game on the server's final ticks. It opens the match setup screen in place of the title menu (or the classic title menu and screens with `--server --classic-menus`). The menus and the results run in lockstep, and the fights run with rollback. Clicks on the setup screen go through the server as commands in the ticks. The server makes each tick final at its deadline and never waits for a player. The clients send a hash of their fight state every 30 ticks, and the server compares them. The round trip on one machine is about 7 to 21 ms.
+- The server keeps the values of the last match (mode, difficulty, arena, stage group, game speed) in its config.json (`last_setup`). The next session on this server starts with them.
+- During a session, Enter (or T) opens a chat window, and Escape opens the settings menu. In a fight, the menu pauses the fight for everybody (F1), and the fight resumes when the menu closes. In the menus, the game goes on. Any player sets the game speed. A line shows the ping, and in a fight also the input delay, the rollbacks and the waits. The settings menu sets the input delay of this computer: automatic, or 0, 1 or 2 ticks.
+- A player who drops holds the game (each final tick carries `hold`). The game waits for the player without a time limit. Any player can also let the computer play, give the fighter to another player, or stop and resume later. The server saves a stopped session in its config.json as hex text.
+- A returning player, a spectator and a resumed session run the session's final ticks again to catch up (up to 40 menu ticks a frame). The game waits meanwhile, and every player sees a progress bar. A spectator then watches 30 ticks (one second) behind.
+- Local games: "game start" opens the match setup screen in place of the title menu (portraits, arenas, difficulty, speed, start with a countdown, Results buttons after the fight). Its buttons open Championship, Teams (the team championship), Demo and Replay, and Exit goes back to the launch menu. "Classic menus" keeps the title menu and the original screens. Escape opens the settings menu in a fight, where the computer can play a player's fighter. The game starts unlocked.
+- Sound: the music is local to each computer, with a Music switch, the VS track, the music volume and the sound effects volume. F11 and F12 change the music volume by 10 per press.
+- The fight camera is local too: Classic, Wide or Dynamic zoom, on the Display page of the settings menu. The dynamic camera frames the fighters of this computer and zooms out up to the widest view of the player (100 to 300 percent of the window). Page Up, Page Down and Home zoom in a fight.
 - The old two-computer TCP game stays for `--host` and `--join` only.
-- Game versions: players install complete builds and switch between them on the Versions screen.
-- Tests: tools/test-online.sh (headless: versus with a second fight, stage mode, Quit back to the lobby, the game speed, a player who leaves, a drop with the computer taking over, a return, stop and resume, a spectator, two rooms, the setup screen in a session) and tools/test-online-ui.sh (two windows on Xvfb: host and join, the chat, taunts, the setup screen, the settings menu, the computer control on both computers, the leave question, the server stopping with a crashed host).
+- Game versions: players install complete builds and switch between them on the Versions screen. `publish-version.sh` uploads each version to the Nextcloud versions folder, and the game reads `versions.json` through the public link of that folder (docs/upload-to-nextcloud.md). The latest version is 2026.10.25-37 (29fdd48).
+- Tests: tools/test-online.sh has 73 checks (headless: versus with a second fight, stage mode, Quit back to the lobby, the game speed, a player who leaves, a drop with the computer taking over, "give the fighter", a return, stop and resume, a spectator, two rooms, the setup screen in a session with the values of the last match). tools/test-online-ui.sh has 34 checks (two windows on Xvfb: host and join, the session at the setup screen, the chat, taunts, the settings menu that pauses the fight for both players, the computer control on both computers, the leave question, the server stopping with a crashed host).
 
 ## The requests
 
@@ -60,6 +67,13 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 - The old TCP game stays until every player has the new engine.
 - Work: one commit per step on `arena`, each with passing tests. A fresh agent reviews each large part.
 
+Later decisions of 2026-10-25 (723d449, 60216e1):
+
+- No player has more rights than the others. The room role no longer starts, resumes or chooses alone.
+- A dropped player: the game waits for them by default. The 30-second rule is gone.
+- Escape in a network fight pauses the fight for everybody, and closing the menu resumes it.
+- "game start" and a network session open the match setup screen in place of the title menu. The classic title menu stays behind "Classic menus".
+
 ## Done
 
 - Quit to the launch menu (81bf33c).
@@ -75,17 +89,29 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
   - Drops, returns, stop and resume, spectators and private rooms, all from the server's log of final ticks.
   - The input delay setting and the connection line.
   - Fixes from a review: the classic two-computer game handed every fighter to the computer, keys of frames that ran no tick were lost (the cause of a random test failure), a catching-up client lost final ticks, and others.
+- The public link of the versions folder, and the versions 2026.10.25-30 (c1d1b40) and 2026.10.25-37 (29fdd48).
+- docs/architecture.md: the parts of the game in diagrams (78b8532).
+- Work of the day of 2026-10-25 (723d449 to 29fdd48):
+  - Equal players: anyone starts from the lobby, resumes, starts the fight and chooses for a dropped player.
+  - A dropped player: the game waits by default, with no 30-second rule.
+  - Catch-up progress: the game waits while a returning player or a resumed session catches up, and every player sees a progress bar (the server messages `progress` and `caught_up`).
+  - Escape in a network fight pauses it for everybody (F1), and closing the menu resumes it.
+  - The setup screen: a compact player list with "Set ready" and "Ready" buttons, an "I am ready" button, a hint for the next step, all arenas in two rows, the speed of the session, a Settings button. The reason why a fight cannot start replaces the summary.
+  - The setup screen in place of the title menu, in local games and in sessions, with buttons for Championship, Teams, Demo and Replay. The server keeps the values of the last match (`last_setup`), and it saves a stopped session as hex text.
+  - Sound: the Music switch on the launch options page and in the settings menu, and F11 and F12 by 10 per press.
+  - The engine draws progress bars and colored buttons.
+  - The camera design (docs/camera.md) and its first version: the dynamic camera (base/ui/camera_view.lua) through a scaled render area of the engine.
 
 ## Remaining work
 
 ### 1. Play with the friend
 
-1. Publish the version (the owner): create the public link of the versions folder, then run `~/programs/openlf2-windows/publish-version.sh`. A dry run of the night packed both builds (see the report).
-2. Play a real game over the internet and note what to tune.
+1. Play a real game over the internet and note what to tune.
 
 ### 2. Pre-game menus
 
-- The settings menu does not replace the launch options page yet: Display (filter, layout, shading, shadows), Controls and Language stay there.
+- The settings menu does not replace the launch options page yet: the upscaling filter, the shading, the shadows, Controls and Language stay there. The settings menu has the pages Game, Sound and Display, without Overlays, Controls and Language.
+- "Change fighters" after a fight sends every human slot back to the grid, not only the player who pressed it.
 - The arena cards show the first layer of each background, not a picture made from all layers. The stage cards have no boss portraits and no best result.
 - The setup screen marks a ready player's panel with ">" in front of its title, not with a colored frame. It has no tooltips, and it does not show who changed a value in a network game.
 - Battle mode's troop panel and the championships keep their classic screens.
@@ -93,26 +119,41 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 
 ### 3. Drops and returns
 
-- The server does not run the game. A return, a spectator and a resume run the session's ticks again from its start, about 8 times faster than real time in a fight and 40 ticks a frame in the menus. A session of an hour takes some minutes to catch up. A snapshot would need a way to copy the whole game state.
-- One saved session for each server computer (in its config.json); a second stopped session replaces the first, and every room can resume it.
-- If the room role itself drops, only the 30-second rule decides (the other players see no buttons).
+- The server does not run the game. A return, a spectator and a resume run the session's ticks again from its start, about 8 times faster than real time in a fight and 40 ticks a frame in the menus. The others wait with a progress bar meanwhile. A session of an hour takes some minutes to catch up. A snapshot would need a way to copy the whole game state.
+- One saved session for each server computer (in its config.json). A second stopped session replaces the first, and every room can resume it.
 - Spectators who turn into lobby players after a stop keep the resume from showing until they leave (the names must match).
 - A return in a Stage survival run is not tested.
 
 ### 4. Rooms
 
-- No presence, no invites beyond the code, no player rotation between matches.
+- No presence, no invites beyond the code, no kick and no player rotation between matches.
 
 ### 5. Measure and tune
 
 - The delay log (the time of each key event, the tick that read it, the frame on which the fighter reacted) is not built.
 - Tuning needs a real game over the internet: the automatic input delay, the clock lead.
 
-### 6. Leftovers
+### 6. Camera
+
+The first version of the dynamic camera is built (docs/camera.md, "What is built"). These steps of docs/camera.md stay open:
+
+- The test tools: `frame_hash=`, `--window WxH`, `view=` in the match description and `--camera-check`.
+- The engine's `world_view` block, the sky above row 128, `scale_y` and the `sharp` filter.
+- The mouse wheel and the middle drag, the Tab cycle and the follow choices, the edge indicators, and the camera of spectators and replays.
+- The sound listener of the view, for the dynamic mode only.
+- The HUD layouts (`hud_layout`, `hud_scale`) and the clamps of the names, the markers and the overlays.
+- The item culling and a separate world budget, measured in Battle mode on Linux and in Wine.
+- A case in tools/test-online.sh where the two clients use different camera configurations.
+- Split screen and the room limit (both optional), and the choice of the default camera after feedback from players.
+
+### 7. Leftovers
 
 - The championship rollback check, and a faster hash for battle mode.
 - Remove the old two-computer protocol once every player has the new engine.
 - The web build has no UDP and no network game.
+- Some comments of the code are out of date. They name the room role (base/game/online.lua, base/ui/online_lobby.lua), or they say that network games keep the classic screens (`setup_screen_used` in base/ui/flow.lua). `online.role_slot` and the session's `role_slot` have no use since the players are equal.
+- The summary in the start bar of the setup screen shows the local game speed (`speed.tenths`), not the speed of the session. The slider above it shows the speed of the session.
+- The leave question of the settings menu says "The others go on playing", but the game of the others waits for the player who left.
 
 ## Rules for all work
 

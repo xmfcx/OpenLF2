@@ -1,6 +1,6 @@
 # Netcode design
 
-This document designs how the fight runs over the network: smooth, responsive, true to the real result, and resilient against slow or dropping connections. It builds on docs/ui-network-architecture.md (the session model, commands, the local UI and the server program as the authority). docs/network.md describes the current two-computer lockstep, which this design replaces. Nothing here is built yet.
+This document designs how the fight runs over the network: smooth, responsive, true to the real result, and resilient against slow or dropping connections. It builds on docs/ui-network-architecture.md (the session model, commands, the local UI and the server program as the authority). docs/network.md describes the old two-computer lockstep, which this design replaces. Most of the design is built. The "Steps" section marks what is built, and notes in the sections say where the code differs from the design.
 
 ## Goals
 
@@ -63,13 +63,14 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 ### The clock
 
 - The server runs the session at a fixed tick rate (30.3 ticks per second, 33 ms, as the original). The game speed menu changes the tick rate of the server, and all clients follow it.
+- Built differently: the ticks always stay 33 ms. Any player sets the speed (`set_speed`), the server puts it into every final tick, and at N tenths a fight runs on N of each ten ticks (base/game/speed_gate.lua). The gate keeps its state in the fight, so a rollback restores it, and all clients skip the same ticks.
 - Each client measures the round-trip time (RTT, the time for a message to go to the server and back) and the jitter. It runs its own tick a little ahead of the server: half the RTT plus a margin for jitter. Then its input for a tick arrives at the server just before the server needs it.
 - To change its lead, a client runs its ticks a little faster or slower (up to about 3 %), never in jumps. Players do not see this.
 - The server program runs a frame on each arriving message and at least every 4 ms, and a message leaves at once (no wait for the next frame). The server tells how long it kept the echo of the client's time, and the client takes that off its round trip. On one machine the round trip went from 99 ms (one 33 ms frame on each side and at the server) to about 21 ms.
 
 ### Input from the client
 
-- Input delay: a client sends the keys of its current tick for tick T + d. A small delay d (0 to 2 ticks) means fewer rollbacks. The client chooses d from the RTT and the jitter, and the player can fix it in the options. At d = 2, connections with up to about 66 ms of extra travel time show no rollbacks.
+- Input delay: a client sends the keys of its current tick for tick T + d. A small delay d (0 to 2 ticks) means fewer rollbacks. The client chooses d from the RTT and the jitter, and the player can fix it in the options. Built: the Game page of the settings menu sets the input delay of this computer in a network game (Automatic, 0, 1 or 2), from the next fight. At d = 2, connections with up to about 66 ms of extra travel time show no rollbacks.
 - Each packet holds the inputs of all ticks that the server has not acknowledged yet, not only the newest. A lost packet then loses nothing, because the next packet repeats its inputs.
 - An input is the key state of a player slot for a tick: 7 bits, as today. The merge rule of lf2-arena runs on the client before it sends: with the key times of the engine, changes less than 50 ms apart become one state.
 
@@ -79,7 +80,7 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 - Each tick has a deadline on the clock of the server. At the deadline, the server makes the input of each player final: the received input, or, if none arrived, its prediction (the last known keys).
 - The server never waits for a player. One slow or lost player cannot stop the others.
 - After the deadline, the server sends the confirmed tick (the final inputs of all players and the commands of that tick) to all clients, again with the unacknowledged ticks repeated in each packet.
-- The server runs the fight itself on the confirmed ticks. Its state is the true state.
+- The server runs the fight itself on the confirmed ticks. Its state is the true state. Not built: the server program runs no game (see "A session"), and the truth is the agreement of the clients' hashes.
 - The server checks every input: a player can only send keys for the slots that the lobby gives them.
 
 ### The rollback engine on the client
@@ -101,12 +102,12 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 ### Truth
 
 - Every computer converges on the state of the server, because every computer runs the same confirmed inputs.
-- Every 30 ticks, each client sends a hash of its confirmed state for a tick, and the server compares it with its own. On a difference, the server sends a snapshot of the true state, the client takes it, and the client writes both states and the last inputs to the log. The game heals itself and the bug can be found.
+- Every 30 ticks, each client sends a hash of its confirmed state for a tick, and the server compares it with its own. On a difference, the server sends a snapshot of the true state, the client takes it, and the client writes both states and the last inputs to the log. The game heals itself and the bug can be found. Built: the clients send the hashes, and the server compares them with each other. It logs `hashes agree` or `difference at tick T` and tells the clients about a difference. It sends no snapshot.
 - The profile check stays: all clients and the server must run the same scripts and engine version. The versions feature delivers them.
 
 ### A session (built)
 
-The server program does not run the game itself yet. After the lobby, a session starts: the server sends its random state and the players' slots, and from then on it makes every tick of the whole game final, in the menus and in the fights. The clients run the original menus in lockstep on the final ticks (base/game/online `exchange`): each frame takes the next final tick, like the original's network game, so the menus have the delay of one round trip. A fight runs with rollback on the same ticks, counted from its first tick; once the tick that ends it is final, the menus go on from the next tick. Every 30 ticks of a fight, each client sends a hash of its final state, and the server compares the clients and logs a difference. To run the game on the server (for returning players and saved matches), the server needs the flow without a window.
+The server program does not run the game itself. After the lobby, a session starts: the server sends its random state, the players' slots and the values of the last match (`last_setup`), and from then on it makes every tick of the whole game final, in the menus and in the fights. The clients open the match setup screen in place of the title menu, or the original menus when the server runs with `--classic-menus`. They run the menus in lockstep on the final ticks (base/game/online `exchange`): each frame takes the next final tick, like the original's network game, so the menus have the delay of one round trip. A click on the setup screen goes to the server as a command, and the server puts it into the next final tick. A fight runs with rollback on the same ticks, counted from its first tick. Once the tick that ends it is final, the menus go on from the next tick. Every 30 ticks of a fight, each client sends a hash of its final state, and the server compares the clients and logs a difference. Returning players, spectators and saved sessions do not need the game on the server: they run the server's log of final ticks again (see "What is built" under "A dropped player").
 
 ## Bad connections
 
@@ -120,6 +121,8 @@ The server program does not run the game itself yet. After the lobby, a session 
 | A return | The client connects again with its player key. The server sends a snapshot of the current state and the ticks since then. The client takes the snapshot and joins at the current tick. If the match is paused, it goes on after a countdown. |
 | A server stop | The server writes the confirmed ticks as it goes. After a restart, it runs them up to the last tick and the clients join again. |
 
+Built: lost packets, jitter, a slow player and the 500 ms rule (base/game/authority.lua `neutral_ms`) work as the table says. A long drop holds the game after 3 seconds, and a return runs the log of final ticks (see "What is built" below). The server saves a session only at "Stop and resume later" or when everybody left, not as it goes. A saved session stays in the server's config.json, so it can go on also after a restart of the server.
+
 ## A dropped player
 
 When a player drops for more than about 2 seconds:
@@ -131,16 +134,16 @@ When a player drops for more than about 2 seconds:
    - Let the AI take over the fighter. The match goes on after the countdown. When the player returns, they take the fighter back without a pause.
    - Give the fighter to another person in the room, for example a spectator. That person controls the fighter until the player returns and takes it back.
    - Stop and resume later. The match ends now, and the autosave stays. A player can open it again from the room, and the match goes on from the paused tick when the players are back.
-4. Who decides: the player with the room role chooses, and the others see the choice. A room setting can choose without a question (for example "always wait 60 seconds, then let the AI take over").
+4. Who decides: the player with the room role chooses, and the others see the choice. A room setting can choose without a question (for example "always wait 60 seconds, then let the AI take over"). Changed (owner's decision, 723d449): no player has more rights. Any player chooses, and without a choice the game waits.
 
 Every pause, for a drop or for the pause key, ends with the same countdown, so that nobody loses a fighter to a sudden start.
 
 ### What is built
 
 - The server holds the session's ticks (each final tick carries `hold`) when a player is silent for 3 seconds or leaves. Nothing advances on a held tick: the menus skip it, and a fight does not run (base/game/speed_gate). Every computer sees the same held ticks, so the game stays the same everywhere.
-- The room role's screen shows the choices: wait, let the computer play, give the fighter to another player, or stop and resume later. The other players see who dropped. Without a choice, the computer plays the fighter after 30 seconds. The computer takes over with the letter `A` in the slot's keys (base/game/match `read_control`), and a key press of the returning player takes the fighter back.
-- The server keeps every final tick of the session (its log). A returning player (the same name) gets the start of the session and the log. Its computer runs all these ticks again, up to 40 menu ticks and 32 fight ticks a frame, and then plays on. The ticks are the same, so the state is the same: the server compares the hashes of the returning player with the others.
-- "Stop and resume later", and a session that everybody left, save the session in the configuration of the server's computer (`saved_session`: the random state, the slots by name and the final ticks in runs of equal ticks). When the same players are in the lobby, the room role sees "Resume the stopped game". Every client then runs the saved ticks to catch up, and the session goes on.
+- Every player sees who dropped and how long the game waited. The game waits for the player by default, without a time limit. Any player (not a spectator) can choose another way: let the computer play, give the fighter to another player, or stop and resume later. The computer takes over with the letter `A` in the slot's keys (base/game/match `read_control`), and a key press of the returning player takes the fighter back.
+- The server keeps every final tick of the session (its log). A returning player (the same name) gets the start of the session and the log. Its computer runs all these ticks again, up to 40 menu ticks and 32 fight ticks a frame, and then plays on. The ticks stay held meanwhile. The returning computer reports its progress (`progress`) and its end (`caught_up`), and every player sees a progress bar. The ticks are the same, so the state is the same: the server compares the hashes of the returning player with the others.
+- "Stop and resume later", and a session that everybody left, save the session in the configuration of the server's computer (`saved_session`: the random state, the slots by name, the game speed and the final ticks in runs of equal ticks, as hex text so that config.json stays valid UTF-8). When the same players are in the lobby, every player sees "Resume the stopped game", and any of them resumes it. Every client then runs the saved ticks to catch up while the game waits, and the session goes on.
 - This differs from the plan above in one point: there is no snapshot. The game has no way to copy its whole state (the menus, the fight and the modules), so a return and a resume run the ticks again from the start of the session. A long session takes longer to catch up: a fight runs about 8 times faster than real time.
 
 ## What players see
@@ -148,6 +151,8 @@ Every pause, for a drop or for the pause key, ends with the same countdown, so t
 - A connection line, which a key turns on: the RTT, the jitter, the lost packets, the input delay and the rollback length of each player.
 - A small mark on a fighter whose keys are predicted, so that players know why that fighter stands still.
 - Logs (with `engine.log`, Phase 1 of plan.md): the RTT, the rollbacks and the hash checks, so that the settings can be tuned.
+
+Built: a line in a server session shows the ping, and in a fight also the input delay, the rollbacks and the waits of this computer. It is on by default, and "Show the connection in network games" on the Display page of the settings menu turns it off. The mark on predicted fighters and the logs of the RTT and the rollbacks are not built. The server logs the hash checks.
 
 ## Testing
 
@@ -209,11 +214,13 @@ Two causes of differences showed up and are fixed: the flow wrote the unlock bit
 - Short signals without typing: a few fixed messages ("Good game", "Wait", "Ready") on keys.
 - Presence: the room list shows each room with its players, its mode and its state (lobby, match, results). A player sees who is online on the server.
 - Ready check: the room starts a match when the players with fighters are ready. The role that starts games can kick a player.
+- Built: the chat in the lobby and in a session (Enter or T opens it, at most 120 characters and 5 messages in 5 seconds), taunts (a message that is only a number from 1 to 42), the room list with the players, the spectators and the phase of each room, and the ready check (any player starts when everybody is ready). Not built: presence of all players on the server, kick and the fixed short messages.
 
 ### Identity
 
 - Each player has a name and a random player key that the game makes once and keeps in the configuration. The server uses the key to give a returning player their slots back, and to keep the same name across sessions.
 - Invites: a room has a short code. A player types the code or opens a link to join that room.
+- Built: the server knows a returning player by name, not by a player key. A private room has a code, and no link joins it yet.
 
 ### Later
 
@@ -225,13 +232,15 @@ Two causes of differences showed up and are fixed: the flow wrote the unlock bit
 1. Foundation: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode. Done except the championship check and a faster hash (see Measurements).
 2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here. Built: base/game/rollback_client.lua, base/game/authority.lua, base/game/net_link.lua and base/game/netsim.lua (`--net-sim`), with the overlays on final ticks and a rollback window that follows the round trip. Open: tuning by play.
 3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines. Built: `engine.messages`, `--server`, `--connect`, base/game/server.lua, base/game/online.lua and the lobby screen. Versus fights work with rollback over UDP.
-4. The rollback client against the server, with the hash checks and the snapshots.
-5. Drops and returns: the 500 ms rule, pause or AI, the session token, the return with a snapshot.
-6. Rooms, spectators, chat, presence, ready check and invites.
-7. Tuning: the automatic input delay, the clock lead, the connection line and the logs.
+4. The rollback client against the server, with the hash checks and the snapshots. Built without the snapshots: the clients run the whole game on the server's final ticks, and the server compares their hashes.
+5. Drops and returns: the 500 ms rule, pause or AI, the session token, the return with a snapshot. Built: the 500 ms rule, the hold after 3 seconds, the choices of any player, the return by name with the log of final ticks and a progress bar, stop and resume. Open: the session token and the snapshot.
+6. Rooms, spectators, chat, presence, ready check and invites. Built: a main room and private rooms with a code, spectators, chat and taunts, the ready check. Open: presence, kick, invite links and player rotation.
+7. Tuning: the automatic input delay, the clock lead, the connection line and the logs. Built: the connection line and a fixed input delay in the settings menu. Open: the logs, and tuning by a real game over the internet.
 
 ## Decisions
 
 1. Input delay: automatic, from 0 to 2 ticks, from the RTT and the jitter. The player can fix it in the options (owner's decision).
 2. A long drop: the match pauses, the server makes an autosave, and the players choose to wait, let the AI take over, give the fighter to another person, or stop and resume later (owner's decision, with the last two options added).
 3. ENet is the UDP library (owner's decision).
+4. No player has more rights than the others: any player starts, resumes and chooses for a dropped player (owner's decision, 723d449).
+5. A dropped player: the game waits for them by default, with no time limit (owner's decision, 723d449).

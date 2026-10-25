@@ -1,6 +1,6 @@
 # Camera design
 
-This document designs a modern camera for the fights. Each player sets it for their own screen: how much of the stage it shows, how close it zooms in, and whom it follows. The camera only draws. It never changes the fight state, so it cannot cause a desync (a difference in the fight state between two computers) in a network game. The original camera stays as the classic mode, and it matches the original exactly. Nothing here is built yet.
+This document designs a modern camera for the fights. Each player sets it for their own screen: how much of the stage it shows, how close it zooms in, and whom it follows. The camera only draws. It never changes the fight state, so it cannot cause a desync (a difference in the fight state between two computers) in a network game. The original camera stays as the classic mode, and it matches the original exactly. A first version of the dynamic camera is built (see "What is built (first version)" under "Implementation steps"). The rest of the design stays open. The study of the current camera describes the code before the first version.
 
 ## Goals
 
@@ -320,6 +320,8 @@ A first version takes a shorter way than steps 3 and 4. It reuses the render are
 - The world band keeps the art's rows 128 to 550. A wider view makes the band lower, at the bottom of the classic picture, and the HUD, the texts and the flow's overlays draw over it at the window's scale (`context.overlay(true)`).
 - The mode is the third value of the battlefield layout: `dynamic`, next to `classic` and `expand` (Wide). The settings menu's Display page sets it and the widest view. Page Up and Page Down zoom during a fight, and Home goes back to the automatic view.
 - Tests: the same trace gives the same fight description with the classic and the dynamic camera, and `--rollback-check` and `--net-sim` pass with it. Without a window (headless runs) the camera uses the classic picture's size.
+- An engine without `context.render_scale` (an older engine that gets these scripts) keeps the picture of the classic or the wide layout.
+- The probe line of a window (`OPENLF2_PROBE=1`) shows `camera=CENTER,WIDTH,zoom=Z`. The test tools of step 1 (`frame_hash=`, `--window WxH`, `view=`) and `--camera-check` are not built.
 
 The steps below stay the plan for the rest: the sky above row 128, the `sharp` filter, the mouse wheel and middle drag, the follow choices and edge indicators, the sound listener, the HUD layouts, culling and split screen.
 

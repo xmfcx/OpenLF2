@@ -1,6 +1,6 @@
 # A new pre-game UI
 
-This document proposes a new design for the menus between the title menu and the fight, for VS mode and Stage mode first. docs/pregame-ui-current.md describes the menus of today and lists their problems. Nothing here is built yet.
+This document proposes a new design for the menus between the title menu and the fight, for VS mode and Stage mode first. docs/pregame-ui-current.md describes the menus before the redesign and lists their problems. Most of this design is built. The "Steps" section marks what is built, and a "Built" note in a section says where the code differs from the design.
 
 The design uses Dear ImGui (base/ui/imgui.lua), as the network menu and the lobby do. It follows the split of docs/ui-network-architecture.md: the shared state changes only through commands, and each computer draws its own UI.
 
@@ -52,6 +52,8 @@ The championships and Demo keep their screens for now. Battle mode gets the new 
 
 The title menu gets mouse support: a hover highlights an entry and a click opens it.
 
+Built differently (60216e1): "game start" on the launch menu, and the start of a network session, open the match setup screen in place of the title menu. Its top buttons are the mode tabs (VS, Stage, Battle), Championship, Teams (the team championship), Demo and Replay (local games only), Settings and Exit. Exit goes back to the launch menu, or to the lobby in a network game. The title menu stays behind "Classic menus".
+
 ## The match setup screen
 
 ### Layout
@@ -82,6 +84,8 @@ The screen draws at the resolution of the window, as the lobby does. This layout
 
 On a narrow window (a phone, or a small window), the panels stack in one column: the roster, the fighters, the arena, the difficulty, then the start bar. The start bar stays at the bottom of the window. Buttons are at least 44 pixels high, so touch works.
 
+Built: one ImGui window over the 794 x 550 picture of the game, with the fighter grid on the left, the players on the right, and the arena, the rules and the start bar below. It has no layout for narrow windows yet.
+
 ### The roster
 
 The roster has one card for each of the eight slots. A card shows:
@@ -98,6 +102,8 @@ A click on a chip opens the list of the teams. The rule of the original about th
 
 The team line under the roster shows the sides, for example "Team 1 (2) vs Team 2 (1) vs Independent (1)". In Stage mode it says "Everybody fights on Team 1", and the chips are hidden.
 
+Built: a compact list with one row for each slot that plays: the number, the portrait, the name and the fighter, a team button (a click takes the next team), an amber "Set ready" or a green "Ready" button for a human, and a remove button. Under it are a row to join ("Press Attack to join" and Join) and a row with "+ Computer". In a network game, the join row is only for this computer's own slot. The cards have no owner and no round-trip time. A hint line under the panels says what the player in focus does next.
+
 ### The fighter grid
 
 The grid shows all fighters as portraits, in the order of data.txt, with Random first. The fighters that the original hid until the `lf2.net` word are in the grid from the start. The name shows under the portrait or in a tooltip. A fighter that a slot took has a small marker with the color of that slot. Two slots can still take the same fighter, as in the original.
@@ -108,6 +114,8 @@ The grid shows all fighters as portraits, in the order of data.txt, with Random 
 After a fighter, the player chooses a team with left and right on the chips, then attack. In Stage mode the team step does not exist.
 
 Random stays Random on the card ("Random" and a question mark) until the fight starts. Then the game picks the fighters, as `resolve_random` does today. A "Reroll random" button and the old Reset Random entry are not necessary, because the pick happens at the start. After a fight, the Results screen offers "Same random fighters" or "New random fighters".
+
+Built: a grid of seven columns with Random first. A cursor is a frame in the color of its slot, and a taken fighter has a gray frame. The names show on the roster, not under the portraits. "Same random fighters" and "New random fighters" are not built.
 
 ### The computers
 
@@ -125,6 +133,8 @@ Random keeps its rule of the original: it picks when the fight starts, with `eng
 
 The pictures are local: each computer draws them from its own copy of the data. The engine makes each picture once (see "Engine work").
 
+Built: all arenas show in two rows. A card shows the first layer of the background, not a picture of all layers, and it has no tooltip. The name of the chosen arena shows above the cards.
+
 ### The stage (Stage mode)
 
 In Stage mode, the arena panel becomes the stage panel. It has six cards: Stage 1 to Stage 5 and Survival. A card shows:
@@ -136,11 +146,15 @@ In Stage mode, the arena panel becomes the stage panel. It has six cards: Stage 
 
 The stage data and the parts do not change. A stage starts at its first part, as in the original. After a lost stage, the setup screen opens with the stage that the players reached.
 
+Built: six cards with the names only, without pictures, parts, bosses and best results. The return to the stage that the players reached is built.
+
 ### The difficulty
 
 The difficulty is a row of four buttons: Easy, Normal, Difficult, CRAZY!. A click chooses one, and left and right move with keys. The buttons no longer cycle in the odd order of the original (Difficult, Easy, Normal).
 
 All four buttons are available from the start. A tooltip says what each difficulty does. In Stage mode, for example: "CRAZY!: enemies have more hit points and come in larger groups." Battle mode hides CRAZY!, as in the original.
+
+Built, without the tooltips.
 
 ### Ready and start
 
@@ -150,9 +164,11 @@ The start replaces the countdown:
 2. The start bar shows a summary line and the button "Start the fight".
 3. The button is on when at least one slot is ready, nobody is still choosing, and the teams are valid. If the button is off, the bar says why, for example "Ann is still choosing".
 4. With keys, a ready player presses defend to start. This matches the lobby, where defend starts the game.
-5. In a network game, only the room role starts. The other players see "Waiting for mfc to start".
+5. In a network game, only the room role starts. The other players see "Waiting for mfc to start". Changed (owner's decision, 723d449): any player starts.
 
 When the button starts the fight, a short countdown of three seconds shows on all screens. Any player can stop it with jump or a click on "Wait". This keeps the chance of the original to change a choice at the last moment, but a player asks for it.
+
+Built: "Start the fight (Defend)" and the countdown with "Wait (Jump)". When the fight cannot start, the reason shows in place of the summary. A player in focus who is not ready also sees an "I am ready" button in the start bar.
 
 ### The mode tabs
 
@@ -171,6 +187,8 @@ The music becomes part of the configuration of each computer (config.json, next 
 
 The settings button in the corner of every menu opens the settings menu (see "The settings menu"). Its Sound page has these values. A change acts at once on this computer only, and it saves the configuration.
 
+Built (87bf8b4, 723d449): the options `music`, `music_track`, `music_volume` and `sound_volume` in config.json. The Music switch is on the launch options page and on the Sound page of the settings menu. The Settings button of the setup screen opens the Sound page. F11 and F12 change the music volume by 10 per press and save it.
+
 ### What changes in the code
 
 - The options panel of the character selection no longer calls `music_option`. `options.music` and `options.track` leave the shared state.
@@ -184,6 +202,8 @@ The settings button in the corner of every menu opens the settings menu (see "Th
 The change of the random track changes the random numbers of a VS fight that a trace starts. Headless traces with a fixed `--seed` that pass the options panel then give other fighters for Random slots. Update the expected results of these tests. Old .lfr recordings must still replay the same. Make sure of this with a replay test before and after the change.
 
 ## No locks
+
+Built (87bf8b4).
 
 The game starts unlocked. All fighters and all difficulties are available from the first start. The `lf2.net` word goes away, and so does the "Unlock hidden characters" switch of the launch options.
 
@@ -235,6 +255,8 @@ The game speed leaves the secret keys M, F and D. It becomes a normal setting wi
 - In the fight, on the Game page of the settings menu. A change acts on the next frame of the fight.
 - The launch options do not have it, because the speed belongs to a match.
 
+Built: the slider is in the rules area of the setup screen and on the Game page of the settings menu. `--game-speed 0.4` sets it for traces. The keys M, F and D stay only in the old two-computer TCP game.
+
 ### Who sets it
 
 The speed changes which frames of the fight run and how the queued keys merge, so in a network game it is shared.
@@ -242,6 +264,7 @@ The speed changes which frames of the fight run and how the queued keys merge, s
 - Local game: any player sets it. It stays for the next fight, as the other values of the setup stay.
 - Network game: any player sets it, in the setup and during the fight, with the command `set_speed(tenths)` (owner's decision). The last change wins. A short line on all screens says who changed it, for example "Ann set the speed to 0.4".
 - In a fight of the server program, the command goes into the tick stream with its tick. The server keeps its ticks of 33 ms. At a speed of N tenths, the fight runs on N of each ten ticks, with the same even spread and the same key queue that `fight_due` in base/ui/flow.lua uses today. All clients count the same ticks, so the rollback stays the same on all of them. This does not need a change of the tick time or of the clocks.
+- Built (9115dd6): `set_speed` goes to the server, which puts the speed into every final tick and sends a line to every screen. base/game/speed_gate.lua skips the ticks. The server also keeps the speed with the values of the last match.
 
 ### What goes away
 
@@ -256,6 +279,8 @@ One settings menu serves the whole game. The launch menu opens it with its optio
 ### Pages
 
 The menu has pages on the left. Each page shows only the values that apply where the menu opens.
+
+Built (base/ui/fight_menu.lua): the pages Game, Sound and Display, as tabs under the Resume button. Game has the computer control of this computer's fighters, pause, fast mode (local games), the cheat keys, the game speed, the input delay (network games) and the cheat keys button. Display has the camera (Classic, Wide, Dynamic zoom), the widest view of the dynamic camera, fullscreen, Show FPS, "Show the connection in network games" and "Classic menus". The upscaling filter, the shading and the shadows stay on the launch options page. The Overlays, Controls and Language pages are not built.
 
 | Page | Values | Shared or local |
 |---|---|---|
@@ -285,6 +310,7 @@ The pause depends on the game:
 
 - Local game: the menu pauses the fight while it is open, and the fight resumes when the menu closes. This replaces the dialog "Leave the fight?".
 - Network game: one player cannot stop the fight for the others. The fight goes on, and the keys of this computer are held back while the menu is open, as the leave dialog does today. "Pause for everyone" sends F1, so all computers pause on the same tick.
+- Changed (723d449): in a network fight, the menu sends F1 when it opens, so the fight pauses for everybody, and it sends F1 again when it closes. A fight that was paused before stays paused. In the menus of a network game, the game goes on. Step one frame (F2) and End the round (F4) have no button. A local fight has "End the fight" (F4) with a question.
 
 The Controls page shows the keys in a fight, but a change of the keys waits until the fight ends. A change in the middle of a fight can make a held key stick.
 
@@ -320,7 +346,7 @@ The setup screen uses the session model and the commands of docs/ui-network-arch
 | `add_computer(slot)`, `remove_computer(slot)` | Any player (owner's decision) |
 | `set_mode(mode)`, `set_arena(row)`, `set_stage(group)`, `set_difficulty(value)` | Any player (owner's decision). The last change wins |
 | `set_speed(tenths)` | Any player, also during a fight (owner's decision) |
-| `start()`, `wait()` | `start`: the room role. `wait`: any player during the countdown |
+| `start()`, `wait()` | `start`: the room role (changed: any player). `wait`: any player during the countdown |
 
 The model checks each command against its state. A command that the rules do not allow does nothing, on all computers alike.
 
@@ -329,6 +355,8 @@ Each computer shows its own screen of the setup. One player can look at the aren
 When a player changes the mode, the arena, the stage or the difficulty, the control shows the name of that player for a moment, so the others see who changed it.
 
 In the setup, the room role only starts the fight and can set the fighter and the team of any computer. All other shared values are open to every player.
+
+Built (4d55484, 723d449): a click becomes a command (`join`, `leave`, `fighter`, `team`, `ready`, `add_computer`, `remove_computer`, `mode`, `arena`, `stage`, `difficulty`, `start`, `wait` and the screen's buttons), which the server puts into the next final tick. A command acts for the sender's own slot or for a computer slot, so any player sets the computers. The keys of the players reach every client through the combined input. There is no room role: any player starts. The name of the player who changed a value does not show yet, except for the game speed.
 
 ## After the fight
 
@@ -341,7 +369,11 @@ The Results screen of the original stays (the table of kills, damage and the res
 
 In Stage mode, the buttons are "Try again" (the same stage group), "Setup" and "Title". After a cleared group, the next group still starts by itself, as in the original. After stage 5, the ending plays.
 
+Built: the setup screen comes back after the fight with the buttons Rematch, Change fighters, Setup and Close, in every mode. "Change fighters" sends every human slot back to the grid, not only the player who pressed it.
+
 ## Battle mode
+
+Built as described: the setup screen, then the classic troop panel.
 
 Battle mode uses the new setup screen for the fighters, with Team 1 and Team 2 only. The troop panel stays a second step. Later, it can become an ImGui panel too: one column for each side with a number field for each soldier type, the strategy preset as a list, the size and the defense. This design does not cover the troop panel in detail.
 
@@ -354,22 +386,27 @@ The design needs these additions to the engine and to base/ui/imgui.lua:
 3. Overlay frames: the screen draws colored frames over ImGui widgets for the cursors of the players. ImGui returns the rectangle of each widget, or the scripts give the frame to the widget as a flag.
 4. A check for older engines: a host can send scripts to an older engine. The scripts must check `if engine.<function> then` before they use a new function, and fall back to the classic screens.
 
+Built (bfa1e93, 723d449): the image widget (also as a button), frames in the colors of the players' cursors on images, the slider, progress bars and colored buttons. The scripts check `context.ui_kinds`. The arena pictures from all layers are not built. Panels without images mark a cursor with ">" in front of the title.
+
 ## The classic screens
 
 The new screen is the default (owner's decision). The classic screens stay. A value of the configuration, "Classic menus", chooses them. They give the look of the original for the players who want it, and the fallback for older engines. The existing input traces can keep the classic screens until the new screen has its own traces.
 
+Built: "Classic menus" on the Display page of the settings menu, and `--classic-menus`. In a server session the server decides for every client: `openlf2 --server --classic-menus` runs the classic screens, which the traces of tools/test-online.sh use.
+
 ## Steps
 
-1. Local sound and music: the configuration values, the local random track, and the removal of the music from the shared options. This step is small and stands alone. It also fixes the shared music in network games now.
-2. No locks: the characters flag on for new games, the `lf2.net` word off in live games, the replays unchanged.
-3. The settings menu in Dear ImGui, with the game speed and the cheat keys button on the Game page, in the menus and in the fight. Then remove the M, F, D sequence and the old options page.
-4. The game speed in fights of the server program, through the tick stream.
-5. The engine work: the image widget, the arena pictures and the overlay frames.
-6. The setup model and its commands for VS mode, with a local authority (step 1 of docs/ui-network-architecture.md). The new screen draws it. The classic screen stays.
-7. Stage mode on the new screen: the stage cards and the Stage rules.
-8. The Results buttons.
-9. The network game: the commands through the server program, and the start by the room role.
-10. Battle mode, then the championships.
+1. Local sound and music: the configuration values, the local random track, and the removal of the music from the shared options. This step is small and stands alone. It also fixes the shared music in network games now. Built (87bf8b4).
+2. No locks: the characters flag on for new games, the `lf2.net` word off in live games, the replays unchanged. Built (87bf8b4).
+3. The settings menu in Dear ImGui, with the game speed and the cheat keys button on the Game page, in the menus and in the fight. Then remove the M, F, D sequence and the old options page. Built (8a7cdc6, 9115dd6), except the removal of the old options page. The M, F, D sequence stays only in the old two-computer TCP game.
+4. The game speed in fights of the server program, through the tick stream. Built (9115dd6).
+5. The engine work: the image widget, the arena pictures and the overlay frames. Built (bfa1e93), except the arena pictures from all layers.
+6. The setup model and its commands for VS mode, with a local authority (step 1 of docs/ui-network-architecture.md). The new screen draws it. The classic screen stays. Built (dce58ad).
+7. Stage mode on the new screen: the stage cards and the Stage rules. Built (dce58ad), with stage cards that show the names only.
+8. The Results buttons. Built (dce58ad).
+9. The network game: the commands through the server program, and the start by the room role. Built (4d55484). Any player starts since 723d449.
+10. Battle mode, then the championships. Battle mode is built (the setup screen, then the classic troop panel). The championships open from the buttons of the setup screen and keep their classic screens.
+11. The setup screen in place of the title menu, after "game start" and at the start of a network session (not in the first plan). Built (60216e1).
 
 ## Decisions
 
@@ -383,3 +420,5 @@ These are the decisions of the owner:
 6. Battle mode keeps the difficulties of the original, without CRAZY!.
 7. In a network game, any player changes the game speed at any time, also during the fight.
 8. A replay plays the music of the viewer, not the track of the recording.
+9. No player of a network game has more rights than the others: any player starts the fight (723d449).
+10. "game start" opens the setup screen in place of the title menu. The title menu stays behind "Classic menus" (60216e1).
