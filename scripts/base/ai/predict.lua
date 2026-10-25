@@ -75,9 +75,9 @@ end
 
 -- The first tick on which `move` of `attacker` (a perception entry), from timeline index `from_tick` on this tick and
 -- facing `facing`, hits `defender`, within `horizon` ticks. `attacker_x`, `attacker_z` replace the attacker's
--- position (a planned move from another place). Returns ticks, the hit box of the move book and the timeline index,
--- or nil.
-function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, moving, attacker_x, attacker_z)
+-- position (a planned move from another place). `lead` (with `moving`) moves the defender that many ticks further, for
+-- a move that starts after its input latency. Returns ticks, the hit box of the move book and the timeline index, or nil.
+function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, moving, attacker_x, attacker_z, lead)
     horizon = horizon or predict.horizon
     local x, az, y = attacker_x or attacker.x, attacker_z or attacker.z, attacker.y
     local direction = facing == facing_left and -1 or 1
@@ -109,8 +109,9 @@ function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, 
         local list = t >= first and move.hits[t]
         if list then
             local ahead = t - from_tick
-            local shift_x = moving and defender.vx * (ahead + 1) or 0
-            local depth = az - (defender.z + (moving and defender.vz * (ahead + 1) or 0))
+            local steps = ahead + 1 + (lead or 0)
+            local shift_x = moving and defender.vx * steps or 0
+            local depth = az - (defender.z + (moving and defender.vz * steps or 0))
             for _, box in ipairs(list) do
                 if follows(box) and depth < box.zwidth and depth > -box.zwidth and touches(box, defender) then
                     local x0, x1
@@ -281,7 +282,8 @@ function predict.risk(state, world, self, move)
                     if candidate.kind == "basic" and candidate.first_hit and candidate.damage > 0 and candidate.mp == 0 then
                         local gap = math.max(math.abs(other.x - self.x) - candidate.reach, 0)
                         local arrive = delay + math.ceil(gap / speed) + candidate.first_hit
-                        if arrive <= busy and math.abs(other.z - self.z) < 40 and candidate.damage > worst then
+                        -- A punish needs the depth window of a hit (15 by default, base/game/combat).
+                        if arrive <= busy and math.abs(other.z - self.z) < 16 and candidate.damage > worst then
                             worst, who = candidate.damage, other.index
                         end
                     end

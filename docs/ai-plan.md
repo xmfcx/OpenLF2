@@ -281,6 +281,11 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 
 - The brain `tactician`: intents, tactics as behavior trees, the planner, combos from the move book. One generic persona for all fighters.
 - Tests: in the arena, with the senses and input limits of Crazy, the tactician beats classic on Crazy in at least 70% of the fights for each of the ten main fighters (SPRT). It keeps to the speed budget.
+- Status: built, but the 70% test is not met yet.
+    - base/ai/tree (behavior trees as data) and the brain `tactician`: reflexes on every tick, and on each think a tree of reflex, busy, combo, motion attack (jump, dash and run attacks from the fighter's speed), punish, attack, space, leap (a jump or a dash toward the target), zone and approach. The planner scores the punch and the special moves from standing by the expected damage (hit chance, damage, knockdown), less the punish risk and the mp. It leads the target by its speed over the delay of the view and the input latency.
+    - Results over 30 fights each (score of the tactician against classic with the same fighter): on Crazy, Henry 0.73, John 0.10, Louis 0.07, Rudolf 0.03, Firen 0.03, and 0.00 for Deep, Freeze, Dennis, Woody and Davis. On Superhuman: Henry 0.87, John 0.67, Louis 0.62, Dennis 0.53, Freeze 0.47, Davis 0.40, Deep 0.40, Firen 0.23, Woody 0.20, Rudolf 0.07. The AI costs 26 to 48 us for each fighter and tick (debug build).
+    - What limits it: the classic AI sees the present and starts a special move in one tick. On Crazy the tactician sees 4 ticks late and types a special in 4 ticks. Tests with one limit at a time (Davis): keys on every tick with the delay 0.10, no delay with the human rate 0.025, both limits 0.00, no limits 0.40. Close range is where the limits hurt: the classic AI punches with a chance of 1 in 3 on every tick in reach. Moves in motion (jump and run attacks) helped the most, and balls are useless (the classic AI defends every near ball on Crazy).
+    - Next steps for strength: the persona tuner (phase 13) on the arena, a prediction of the classic AI's triggers (its distance and depth windows are known from base/game/ai), better use of combos, and grabs.
 
 ### Phase 9: the development view
 

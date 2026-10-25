@@ -52,6 +52,8 @@ for level in easy crazy; do
         run "guard_${level}_$number" --scripts scripts --ai-log 10,11 --fight "davis/guard|firen;time=1800;difficulty=$level;first=$number" &
     done
 done
+run rollback_tactician --scripts "$WORK/scripts9" --seed 1234 --ai-brain tactician --rollback-check --input-trace "$VERSUS" &
+run netsim_tactician --scripts scripts --seed 1234 --ai-brain tactician --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$STAGE" &
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
@@ -81,14 +83,14 @@ for name in classic_versus classic_menus; do
 done
 
 # Rollback: no failure, and no error of the memory validator.
-for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_stage; do
+for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_tactician rollback_stage; do
     line=$(grep -o "rollback=checks:[0-9]*,failures:[0-9]*" "$WORK/$name.out" | tail -1)
     echo "$line" | grep -qE "checks:[1-9][0-9]*,failures:0$"; check "rollback: $name" $? "${line:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
 grep -q "screen=match.*stage=" "$WORK/rollback_stage.out"; check "rollback: the Stage trace reaches a stage fight" $? "$(description rollback_stage | cut -c1-120)"
 
 # The simulated network: both clients agree on every hash.
-for name in netsim_idle netsim_sentry netsim_guard; do
+for name in netsim_idle netsim_sentry netsim_guard netsim_tactician; do
     hashes=$(grep -o "hashes=[0-9]*/[0-9]*" "$WORK/$name.out" | tr '\n' ' ')
     echo "$hashes" | grep -qE "hashes=[1-9][0-9]*/0 hashes=[1-9][0-9]*/0"; check "net-sim: $name" $? "${hashes:-$(grep -m1 -i error "$WORK/$name.out")}"
 done

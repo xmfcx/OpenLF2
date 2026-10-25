@@ -76,7 +76,8 @@ function brains.validate(memory, name)
 end
 
 local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry"),
-    drill = require("base/ai/brains/drill"), guard = require("base/ai/brains/guard")}
+    drill = require("base/ai/brains/drill"), guard = require("base/ai/brains/guard"),
+    tactician = require("base/ai/brains/tactician")}
 
 -- The brains of the computer fighters of local fights when the match names none (--ai-brain, a developer option;
 -- base/ui/match_screen applies it): `default` for all of them, `by_index` for single item indices. nil means
