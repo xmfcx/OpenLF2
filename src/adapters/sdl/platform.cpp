@@ -33,6 +33,10 @@
 #ifdef __APPLE__
 #include <TargetConditionals.h>
 #endif
+#ifdef _WIN32
+#include <cstdio>
+#include <io.h>
+#endif
 
 namespace openlf2 {
 namespace {
@@ -1752,6 +1756,22 @@ Result<std::filesystem::path> settings_directory() {
     return std::filesystem::path(reinterpret_cast<const char8_t*>(path.get()));
 #endif
 }
+#if !(defined(__SWITCH__) || defined(__vita__) || defined(__EMSCRIPTEN__) || defined(__ANDROID__))
+namespace {
+// The output of a program that this one starts: this program's own, or none when it has none. A Windows game started
+// from the desktop has no console, and SDL refuses to start a program with a standard handle that does not exist (its
+// DuplicateHandle fails), so the game stayed at "Starting 2026.10.25-48..." and could not host either.
+SDL_ProcessIO inherited_output(bool errors) {
+#ifdef _WIN32
+    const int descriptor = _fileno(errors ? stderr : stdout);
+    if (descriptor < 0 || _get_osfhandle(descriptor) < 0) return SDL_PROCESS_STDIO_NULL;
+#else
+    (void)errors;
+#endif
+    return SDL_PROCESS_STDIO_INHERITED;
+}
+} // namespace
+#endif
 Result<void> launch_program(const std::filesystem::path& program, std::span<const std::string> arguments) {
 #if defined(__SWITCH__) || defined(__vita__) || defined(__EMSCRIPTEN__) || defined(__ANDROID__)
     (void)program;
@@ -1770,8 +1790,8 @@ Result<void> launch_program(const std::filesystem::path& program, std::span<cons
     const SDL_PropertiesID properties = SDL_CreateProperties();
     SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
     SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_APP);
-    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
-    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, inherited_output(false));
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, inherited_output(true));
     SDL_Process* process = SDL_CreateProcessWithProperties(properties);
     SDL_DestroyProperties(properties);
     if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
@@ -1815,8 +1835,8 @@ Result<std::unique_ptr<ChildProgram>> start_child_program(const std::filesystem:
     const SDL_PropertiesID properties = SDL_CreateProperties();
     SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
     SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_APP);
-    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
-    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, inherited_output(false));
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, inherited_output(true));
     SDL_Process* process = SDL_CreateProcessWithProperties(properties);
     SDL_DestroyProperties(properties);
     if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
