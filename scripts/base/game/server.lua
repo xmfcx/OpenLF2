@@ -2,7 +2,7 @@
 -- Copyright (c) 2026 OpenLF2 contributors
 
 -- The server program (OpenLF2 extension, docs/netcode.md and docs/ui-network-architecture.md; `openlf2 --server`).
--- It keeps a lobby of the connected players. When the player with the room role starts and everybody is ready, a
+-- It keeps a lobby of the connected players. When any player starts and everybody is ready, a
 -- session begins: the whole game (title menu, character selection, fights, results) runs on every client from the
 -- same ticks. The server is the authority of these ticks (base/game/authority): the clients send their keys, the
 -- server makes each tick final at its deadline, never waiting for a client, and sends the final ticks to everybody.
@@ -24,9 +24,9 @@ local start_delay_ms = 1000
 -- Chat: printable text up to 120 characters, at most 5 messages in 5 seconds for each player.
 local chat_length, chat_burst, chat_window_ms = 120, 5, 5000
 -- A dropped player (plan.md "Drops, returns and AI control"): after this long without a message from a player of a
--- session, the ticks are held (nothing advances) and the room role chooses: wait, the computer plays, another player
--- takes the fighter, or stop and resume later. Without a choice, the computer plays after `decide_ms`.
-local drop_ms, decide_ms = 3000, 30000
+-- session, the ticks are held (nothing advances) until the player comes back or any other player chooses: the
+-- computer plays, another player takes the fighter, or stop and resume later. Without a choice, the game waits.
+local drop_ms = 3000
 -- The final ticks of a session go to a returning player in parts of this many ticks.
 local log_chunk = 300
 local tick_ms = 33
@@ -116,7 +116,7 @@ local function back_to_lobby(state, reason)
     log(state, "session over: " .. reason)
 end
 
-local drop_player, save_session
+local drop_player, save_session, catching
 local function remove(state, peer)
     if state.spectators[peer] then
         log(state, "stopped watching: " .. state.spectators[peer].name)
@@ -204,6 +204,7 @@ local function start_session(state, now, saved)
     broadcast(state, session_message(state))
     if first > 0 then
         for _, peer in ipairs(state.order) do send_log(state, peer) end
+        for slot, entry in pairs(slots) do catching(state, slot, entry.name, now) end
     end
     log(state, (saved and "session resumed with " or "session started with ") .. #state.order .. " players")
 end
@@ -283,7 +284,8 @@ local function hold_update(state)
     end
     state.authority.hold = held
 end
--- A player of the session is gone (left, or silent for a while): the ticks are held until the room role decides.
+-- A player of the session is gone (left, or silent for a while): the ticks are held until it comes back or another
+-- player decides.
 drop_player = function(state, slot, now)
     local session = state.session
     if not session or not slot or session.drops[slot] then return end
@@ -291,8 +293,15 @@ drop_player = function(state, slot, now)
     session.drops[slot] = {slot = slot, name = entry and entry.name or tostring(slot + 1), since = now}
     if entry then entry.peer = nil end
     hold_update(state)
-    broadcast(state, {type = "drop", slot = slot, name = session.drops[slot].name, decide_ms = decide_ms})
+    broadcast(state, {type = "drop", slot = slot, name = session.drops[slot].name}) 
     log(state, "dropped: " .. session.drops[slot].name)
+end
+-- A player whose computer runs the session's ticks to catch up (a return or a resume): the ticks are held until it
+-- reports that it caught up (handlers.caught_up), and its progress goes to everybody.
+catching = function(state, slot, name, now)
+    state.session.drops[slot] = {slot = slot, name = name, since = now, catching = true, percent = 0}
+    hold_update(state)
+    broadcast(state, {type = "drop", slot = slot, name = name, catching = true, percent = 0})
 end
 local function end_drop(state, slot, text)
     state.session.drops[slot] = nil
@@ -353,7 +362,8 @@ function handlers.ready(state, peer, message)
     broadcast_lobby(state)
 end
 function handlers.start(state, peer, message, now)
-    if state.order[1] ~= peer or state.phase ~= "lobby" then return end
+    -- Every player has the same rights: any of them starts when everybody is ready.
+    if not state.players[peer] or state.phase ~= "lobby" then return end
     if message.resume then
         -- The stopped session of these players goes on.
         if not server.can_resume(state) then return end
@@ -373,10 +383,11 @@ function handlers.start(state, peer, message, now)
     end
     start_session(state, now)
 end
--- The room role's choice for a dropped player: "wait", "computer", "give" (to = the player who takes the fighter),
+-- A player's choice for a dropped player: "wait", "computer", "give" (to = the player who takes the fighter),
 -- or "stop" (the session is saved and the players go back to the lobby, where they can resume it).
 function handlers.drop_choice(state, peer, message, now)
-    if state.phase ~= "session" or state.order[1] ~= peer then return end
+    -- Any player of the session chooses (spectators do not).
+    if state.phase ~= "session" or not state.players[peer] then return end
     local slot = tonumber(message.slot)
     local drop = slot and state.session.drops[slot]
     if not drop then return end
@@ -431,7 +442,20 @@ function handlers.command(state, peer, message)
     local value = command.value
     if type(value) ~= "number" and type(value) ~= "boolean" then value = nil end
     state.authority.commands[#state.authority.commands + 1] = {type = command.type, slot = tonumber(command.slot),
-        value = value, from = state.players[peer].slot, role = state.order[1] == peer or nil}
+        value = value, from = state.players[peer].slot}
+end
+-- The progress of a player who catches up, for every screen, and its end.
+function handlers.progress(state, peer, message)
+    local player = state.players[peer]
+    local drop = player and state.phase == "session" and state.session.drops[player.slot]
+    if not drop or not drop.catching then return end
+    drop.percent = math.max(0, math.min(100, math.floor(tonumber(message.percent) or 0)))
+    broadcast(state, {type = "drop", slot = player.slot, name = drop.name, catching = true, percent = drop.percent})
+end
+function handlers.caught_up(state, peer)
+    local player = state.players[peer]
+    local drop = player and state.phase == "session" and state.session.drops[player.slot]
+    if drop and drop.catching then end_drop(state, player.slot, player.name .. " caught up") end
 end
 function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end
@@ -509,8 +533,9 @@ function server.rejoin(state, peer, slot)
     -- The log tells again when the hashes agree, now with the returning player.
     state.agreed = 0
     send_log(state, peer)
-    if session.drops[slot] then end_drop(state, slot, entry.name .. " is back")
-    else log(state, entry.name .. " is back") end
+    -- The game waits while the player's computer runs the ticks so far; everybody sees its progress.
+    catching(state, slot, entry.name, engine.network_time())
+    log(state, entry.name .. " is back and catches up")
     broadcast_lobby(state)
 end
 
@@ -546,14 +571,12 @@ local function room_update(state, now)
         local plays = session.slots[player.slot] and session.slots[player.slot].peer == peer
         if plays and client and client.heard ~= 0 and now - state.start_at - client.heard > drop_ms then
             drop_player(state, player.slot, now)
-        elseif client and client.heard ~= 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
+        elseif client and client.heard ~= 0 and session.drops[player.slot] and not session.drops[player.slot].decided
+           and not session.drops[player.slot].catching then
             -- Its messages arrive again (it was only slow).
             session.slots[player.slot].peer = peer
             end_drop(state, player.slot, player.name .. " is back")
         end
-    end
-    for slot, drop in pairs(session.drops) do
-        if not drop.waiting and not drop.decided and now - drop.since > decide_ms then computer_plays(state, slot) end
     end
     if state.authority.tick ~= state.sent_tick then
         state.sent_tick = state.authority.tick

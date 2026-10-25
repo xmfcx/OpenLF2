@@ -1087,9 +1087,19 @@ private:
             }
             case UiCommand::Kind::button: {
                 ImGui::BeginDisabled((element.flags & ui_disabled) != 0);
+                // A button with a color (a state that the player must see, for example ready or not ready).
+                const bool colored = element.color >= 0;
+                if (colored) {
+                    const int red = (element.color >> 16) & 0xff, green = (element.color >> 8) & 0xff, blue = element.color & 0xff;
+                    ImGui::PushStyleColor(ImGuiCol_Button, shade(red * 3 / 4, green * 3 / 4, blue * 3 / 4));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, shade(red, green, blue));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, shade(red / 2, green / 2, blue / 2));
+                    ImGui::PushStyleColor(ImGuiCol_Text, shade(16, 16, 24));
+                }
                 if (ImGui::Button(labelled.c_str(), {size(element.width), size(element.height)})) {
                     ui_events_.push_back({UiEvent::Kind::clicked, element.id, {}});
                 }
+                if (colored) ImGui::PopStyleColor(4);
                 ImGui::EndDisabled();
                 break;
             }
@@ -1165,6 +1175,11 @@ private:
             }
             case UiCommand::Kind::image:
                 draw_ui_image(element, size);
+                break;
+            case UiCommand::Kind::progress:
+                ImGui::ProgressBar(static_cast<float>(std::clamp(element.x, 0, 1000)) / 1000.0f,
+                                   {element.width > 0 ? size(element.width) : -1.0f, element.height > 0 ? size(element.height) : 0.0f},
+                                   element.label.empty() ? nullptr : element.label.c_str());
                 break;
             }
         }

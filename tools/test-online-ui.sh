@@ -150,9 +150,12 @@ press 95 Return
 expect "host: chat in a fight sends and closes" host "screen=match .*chat_open=false chat_lines=2"
 press 95 Escape
 expect "host: Escape opens the settings menu" host "settings=game"
-expect "host: the fight goes on behind the menu" host "screen=match online=session"
+expect "host: the menu pauses the fight" host "screen=match online=session.* paused"
+expect "join: the fight pauses for the other player too" join "screen=match online=session.* paused"
 press 95 Escape
 expect_not "host: Escape again closes the menu" host "settings="
+expect_not "host: closing the menu resumes the fight" host "paused"
+expect_not "join: the fight resumes for the other player too" join "paused"
 press 95 Escape; sleep 0.5; shot 95 settings; click 95 "$(gx 395)" "$(gy 98)"
 expect_not "host: Resume closes the menu" host "settings="
 expect "host: still in the fight after Resume" host "screen=match online=session"

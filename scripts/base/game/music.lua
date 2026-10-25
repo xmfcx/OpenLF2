@@ -4,7 +4,7 @@
 -- Music controls and host requests follow the original game's music routines.
 local constants = require("base/game/constants")
 local music_volume = constants.music_volume
-local music = {enabled = true, selected = nil, master = music_volume.maximum, queue = {}, sent_volume = nil,
+local music = {enabled = nil, selected = nil, master = music_volume.maximum, queue = {}, sent_volume = nil,
     choice = 0, effects = music_volume.maximum}
 
 music.tracks = {"bgm/main.wma", "bgm/stage1.wma", "bgm/stage2.wma", "bgm/stage3.wma", "bgm/stage4.wma",
@@ -27,9 +27,14 @@ local function random_track()
     local_random = local_random * 16807 % 2147483647
     return local_random % #music.tracks + 1
 end
+-- values.music: the music switch of this computer (off: no music at all); music_track: the VS track.
 function music.configure(values)
+    local was = music.enabled
     music.choice = values.music_track or 0
-    music.enabled = music.choice ~= -1
+    music.enabled = values.music ~= false and music.choice ~= -1
+    if was and not music.enabled then music.stop() end
+    -- Turned on again: the main theme plays until a fight or a screen chooses another track.
+    if music.enabled and was == false then music.play("bgm/main.wma") end
     music.master = values.music_volume or music.master
     music.effects = values.sound_volume or music.effects
 end

@@ -21,7 +21,8 @@ local track_names = {[-1] = "Off", [0] = "Random", "Main Theme", "Stage 1", "Sta
 local cheats = {{key = "6", label = "Unlimited mana (F6)"}, {key = "7", label = "Heal all (F7)"},
     {key = "8", label = "Weapons (F8)"}, {key = "9", label = "No weapons (F9)"}}
 
-function menu.create() return {page = "game", confirm = nil} end
+-- page: the page that shows first ("game", "sound" or "display").
+function menu.create(page) return {page = page or "game", confirm = nil} end
 
 -- env: online (a server's session), fight (a fight runs), mode, fighters = {{slot, name, ai}} of this computer's
 -- human fighters, speed (tenths), speed_shared (any player of a network game sets it), cheat_keys (the word's flag),
@@ -71,8 +72,12 @@ function menu.update(state, input, env)
     if tenths and tenths ~= env.speed then return {speed = tenths} end
     -- Sound and display: this computer's configuration, saved at once.
     local values, changed = user_options.current(), false
-    for track = -1, 8 do
+    for track = 0, 8 do
         if clicked["track_" .. (track + 1)] then values.music_track, changed = track, true end
+    end
+    if clicked.music_switch then
+        values.music, changed = not values.music, true
+        if values.music and values.music_track == -1 then values.music_track = 0 end
     end
     local volume = imgui.slider_value(events, "music_volume", values.music_volume, 0, 100)
     if volume and volume ~= values.music_volume then values.music_volume, changed = volume, true end
@@ -85,11 +90,7 @@ function menu.update(state, input, env)
     for delay = -1, 2 do
         if clicked["input_delay_" .. (delay + 1)] then values.input_delay, changed = delay, true end
     end
-    if changed then
-        local stopped = values.music_track == -1 and music.choice ~= -1
-        user_options.save(values)
-        if stopped then music.stop() end
-    end
+    if changed then user_options.save(values) end
     return nil
 end
 
@@ -135,8 +136,11 @@ end
 
 local function sound_page(context)
     local values = user_options.current()
-    imgui.text(context, i18n.tr("Music in VS mode") .. "  " .. i18n.tr("[only on this computer]"))
-    for track = -1, 8 do
+    imgui.text(context, i18n.tr("[only on this computer, kept for the next start]"), 0x8090c0)
+    imgui.button(context, "music_switch", values.music and i18n.tr("Music: on (click to turn off)") or i18n.tr("Music: off (click to turn on)"),
+        -1, 26, false, values.music and 0x6fdc8c or 0xffb347)
+    imgui.text(context, i18n.tr("Music in VS mode"))
+    for track = 0, 8 do
         imgui.selectable(context, "track_" .. (track + 1), i18n.tr(track_names[track]), values.music_track == track, 0, 0)
     end
     imgui.spacing(context, 4)

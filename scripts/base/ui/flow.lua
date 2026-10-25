@@ -231,6 +231,10 @@ local function route(state, input, context)
         state.characters = require("base/ui/setup_screen").selection(state.setup)
         if state.characters.mode == constants.modes.versus then music.play_selected() end
     end
+    if requested == "settings" then
+        state.fight_menu = fight_menu.create("sound")
+        return
+    end
     if requested == "versions" then
         state.versions = require("base/ui/versions").create(state.options)
         state.active = "versions"
@@ -283,8 +287,10 @@ local function route(state, input, context)
         local session = state.session and state.session.online and state.session
         state.setup = require("base/ui/setup_screen").create(constants.modes[requested], state.setup, session and {
             send = function(command) online.send(session, {type = "command", command = command}) end,
-            slot = session.slot, names = session.names, role_slot = online.role_slot(session), set_speed = function(tenths)
-                online.send(session, {type = "set_speed", tenths = tenths}) end, speed = session.speed})
+            slot = session.slot, names = session.names, set_speed = function(tenths)
+                online.send(session, {type = "set_speed", tenths = tenths}) end,
+            -- The session's speed as the server announced it to every client (base/game/online "notice").
+            get_speed = function() return session.speed or 10 end})
         state.active = "setup"
         state.wait_release = true
     elseif requested == "versus" or requested == "stage" or requested == "battle" then
@@ -365,8 +371,7 @@ local function route(state, input, context)
             state.active = "match"
         elseif state.setup and setup_screen_used(state) then
             -- The setup screen again, with the Results buttons; a lost stage starts at the stage the players reached.
-            state.setup = require("base/ui/setup_screen").after_fight(state.setup, state.session and state.session.online
-                and state.session.speed)
+            state.setup = require("base/ui/setup_screen").after_fight(state.setup)
             if outcome.stage_level then state.setup.setup.stage_level = outcome.stage_level - outcome.stage_level % 10 end
             state.active = "setup"
         else
@@ -444,32 +449,36 @@ local function online_connection(state)
     if state.active == "online_lobby" and state.online_lobby then return state.online_lobby.online, false end
     return nil
 end
--- A dropped player: the game waits, and the room role chooses what happens (base/game/server "drop_choice").
-local function room_role(connection)
-    for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
-        if player.id == connection.id then return player.role end
-    end
-    return connection.host
-end
+-- A dropped player: the game waits for them, and any player can choose another way (base/game/server "drop_choice").
 local function draw_drops(state, context, connection)
+    imgui.window(context, "drops", i18n.tr("The game waits"), 197, 0, 400, 0)
     for slot, drop in pairs(connection.drops) do
-        imgui.window(context, "drop_" .. slot, i18n.tr("A player lost the connection"), 197, 0, 400, 0)
-        local left = drop.waiting and "" or i18n.tr(" The computer plays it in %d s.",
-            math.max(0, math.ceil(((drop.decide_ms or 30000) - (engine.network_time() - drop.since)) / 1000)))
-        imgui.text(context, i18n.tr("%s lost the connection. The game waits.", drop.name) .. left, nil, imgui.wrap)
-        if room_role(connection) then
-            imgui.button(context, "drop_wait_" .. slot, i18n.tr("Wait for %s", drop.name), -1, 26)
-            imgui.button(context, "drop_computer_" .. slot, i18n.tr("Let the computer play"), -1, 26)
-            for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
-                imgui.button(context, "drop_give_" .. slot .. "_" .. player.id, i18n.tr("Give the fighter to %s", player.name), -1, 26)
-            end
-            imgui.button(context, "drop_stop_" .. slot, i18n.tr("Stop and resume later"), -1, 26)
+        if drop.catching then
+            -- A player who came back (or a resumed game): its computer runs the ticks so far.
+            imgui.text(context, i18n.tr("%s is back. Their game catches up:", drop.name), nil, imgui.wrap)
+            imgui.progress(context, (drop.percent or 0) / 100, string.format("%d %%", drop.percent or 0), -1)
         else
-            imgui.text(context, i18n.tr("The room role decides."), 0x8090c0)
+            local waited = math.floor((engine.network_time() - drop.since) / 1000)
+            imgui.text(context, i18n.tr("%s lost the connection. The game waits for them (%d s).", drop.name, waited), nil, imgui.wrap)
+            if not connection.spectator then
+                imgui.text(context, i18n.tr("Or any player chooses:"), 0x8090c0)
+                imgui.button(context, "drop_computer_" .. slot, i18n.tr("Let the computer play"), -1, 26)
+                for _, player in ipairs(connection.lobby and connection.lobby.players or {}) do
+                    imgui.button(context, "drop_give_" .. slot .. "_" .. player.id, i18n.tr("Give the fighter to %s", player.name), -1, 26)
+                end
+                imgui.button(context, "drop_stop_" .. slot, i18n.tr("Stop and resume later"), -1, 26)
+            end
         end
-        imgui.end_window(context)
-        return
+        imgui.spacing(context, 4)
     end
+    imgui.end_window(context)
+end
+-- This computer runs the session's ticks so far: a window with its progress.
+local function draw_catch_up(context, fraction)
+    imgui.window(context, "catch_up", i18n.tr("Catching up with the game"), 197, 0, 400, 0)
+    imgui.text(context, i18n.tr("Your game runs the moves of the session so far. The others wait."), nil, imgui.wrap)
+    imgui.progress(context, fraction, string.format("%d %%", math.floor(fraction * 100)), -1)
+    imgui.end_window(context)
 end
 -- What the settings menu (base/ui/fight_menu) shows: this computer's human fighters, the speed, the cheat keys.
 local function menu_env(state)
@@ -510,6 +519,7 @@ function flow.probe(state)
             if fight.items[slot] and fight.items[slot].ai_control then computer[#computer + 1] = tostring(slot) end
         end
         if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
+        if fight.paused then parts[#parts + 1] = "paused" end
     end
     return table.concat(parts, " ")
 end
@@ -575,7 +585,11 @@ function flow.draw(state, context)
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
     if state.fight_menu then fight_menu.draw(state.fight_menu, context, menu_env(state)) end
-    if fighting and connection.drops and next(connection.drops) then draw_drops(state, context, connection) end
+    if fighting and connection.catch_fraction then
+        draw_catch_up(context, connection.catch_fraction)
+    elseif fighting and connection.drops and next(connection.drops) then
+        draw_drops(state, context, connection)
+    end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
     if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
@@ -694,7 +708,7 @@ local function hold_functions(state, input, again)
     hold.frames = hold.frames - 1
     if hold.frames <= 0 then state.function_hold = nil end
 end
--- The room role's choices for a dropped player (base/game/server "drop_choice").
+-- A player's choice for a dropped player (base/game/server "drop_choice").
 local function drop_choices(state, events)
     local session = state.session
     for slot in pairs(session.drops or {}) do
@@ -886,8 +900,10 @@ update_frame = function(state, raw, context)
         -- This run of the frame repeats one that waited for the server's tick (its menu clicks repeat in traces).
         local again = state.exchange_waited
         state.exchange_waited = nil
-        -- Escape opens the settings menu (base/ui/fight_menu); the game goes on meanwhile, with this computer's keys
-        -- held back. Escape closes it again, or its question first.
+        -- Escape opens the settings menu (base/ui/fight_menu), with this computer's keys held back. Escape closes it
+        -- again, or its question first. In a fight the menu pauses the fight for everybody (F1, as the original's
+        -- pause key) and closing it resumes, so that nobody misses a moment; a fight that was paused stays paused.
+        local was_open = state.fight_menu ~= nil
         local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
         if escape and not state.escape_held then
             if not state.fight_menu then state.fight_menu = fight_menu.create()
@@ -905,11 +921,25 @@ update_frame = function(state, raw, context)
             if answer and answer.speed and not again then online.send(session, {type = "set_speed", tenths = answer.speed}) end
             if answer and answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer and answer.close then state.fight_menu = nil end
+            -- The menu's own Pause button keeps the fight paused after the menu closes.
+            if answer and answer.functions == "1" then state.menu_paused = nil end
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses = "", ""
         end
+        local fight = state.active == "match" and state.match.online and state.match.match
+        if fight and not again then
+            if state.fight_menu and not was_open and not fight.paused then
+                state.function_hold, state.menu_paused = {keys = "1", frames = 3}, true
+            elseif not state.fight_menu and was_open and state.menu_paused then
+                if fight.paused then state.function_hold = {keys = "1", frames = 3} end
+                state.menu_paused = nil
+            end
+        elseif not fight then
+            state.menu_paused = nil
+        end
         hold_functions(state, input, again)
         drop_choices(state, imgui.events(input))
+        session.catch_fraction = online.catch_up(session)
         -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
         if not (state.active == "match" and state.match.online) then
             -- This computer's clicks stay with the input: the setup screen sends them to the server as commands. The
@@ -1036,10 +1066,14 @@ update_frame = function(state, raw, context)
     -- The input timeline watches this computer's first player with a fighter: the keys as held, and as the fight
     -- read them.
     local fight = state.active == "match" and state.match.match
-    local first_local = state.session and not state.session.host and 4 or 0
+    -- The old two-computer game gives the joiner slots 4 to 7; a server's session keeps this computer's keys in
+    -- player 1's place of the input (its fight runs in base/game/online).
+    local first_local = state.session and not state.session.online and not state.session.host and 4 or 0
     local watched = first_local
-    for slot = first_local, first_local + 3 do
-        if fight and fight.items[slot] and fight.items[slot].human then watched = slot; break end
+    if not (state.session and state.session.online) then
+        for slot = first_local, first_local + 3 do
+            if fight and fight.items[slot] and fight.items[slot].human then watched = slot; break end
+        end
     end
     local held_keys, frame_before = input[watched], fight and fight.frame_number
     local reads = fight and (fight.input_phase + 1) % 2 == 0
@@ -1053,7 +1087,9 @@ update_frame = function(state, raw, context)
         if request then
             local slot = state.session and state.session.online and 0 or request.slot
             input[slot] = (input[slot] or "") .. request.letter
-            request.frames = request.frames - 1
+            -- A paused fight reads no keys: the letter waits until it runs (the settings menu pauses it).
+            local current = state.match.match
+            if not (current and current.paused) then request.frames = request.frames - 1 end
             if request.frames <= 0 then state.control_request = nil end
         elseif state.active ~= "match" then
             state.control_request = nil
@@ -1073,11 +1109,18 @@ update_frame = function(state, raw, context)
         -- CLI traces start at the title; the handshake consumes no trace frames.
         return false
     end
+    -- F11 and F12: a press changes the music volume by 10; a held key goes on by 2 a frame after a third second.
     local step = 0
-    if local_keys[virtual_keys.f11] then step = -1 end
-    if local_keys[virtual_keys.f12] then step = 1 end
-    if step ~= 0 then
-        music.change_volume(step)
+    local direction = local_keys[virtual_keys.f11] and -1 or local_keys[virtual_keys.f12] and 1 or 0
+    if direction ~= 0 then
+        state.volume_held = (state.volume_held or 0) + 1
+        if state.volume_held == 1 then step = 10 * direction
+        elseif state.volume_held > 10 then step = 2 * direction end
+    else
+        state.volume_held = nil
+    end
+    if direction ~= 0 then
+        if step ~= 0 then music.change_volume(step) end
         state.volume_frames = 100
         state.volume_changed = true
     elseif state.volume_changed then

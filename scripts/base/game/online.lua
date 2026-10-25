@@ -120,6 +120,7 @@ function handlers.session(state, message)
     state.finals, state.next_tick, state.local_inputs, state.sent_tick, state.speed = {}, 0, {}, -1, nil
     state.input_acknowledged, state.frames, state.client, state.base = -1, 0, nil, nil
     state.drops, state.slots, state.rejoin = {}, nil, message.rejoin == true
+    state.catching, state.newest_final = nil, nil
     state.classic = message.classic == true
     state.events[#state.events + 1] = message
 end
@@ -148,7 +149,27 @@ end
 local function store_finals(state, message)
     for tick, input in pairs(message.ticks or {}) do
         if tick >= state.next_tick and not state.finals[tick] then state.finals[tick] = input end
+        if tick > (state.newest_final or -1) then state.newest_final = tick end
     end
+end
+-- A computer that runs the session's ticks so far (a return, a resume or a spectator): how far it is (0 to 1), or
+-- nil once it caught up. It tells the server (which holds the game meanwhile) every few hundred milliseconds.
+function online.catch_up(state)
+    if not state.catching then return nil end
+    local done = state.client and state.base + 1 + state.client.tick or state.next_tick
+    local newest = state.newest_final or 0
+    local fraction = newest > 0 and math.min(1, done / newest) or 0
+    local now = engine.network_time()
+    if newest - done <= 5 then
+        state.catching = nil
+        online.send(state, {type = "caught_up"})
+        return nil
+    end
+    if now - (state.progress_sent or 0) > 300 then
+        state.progress_sent = now
+        online.send(state, {type = "progress", percent = math.floor(fraction * 100)})
+    end
+    return fraction
 end
 function handlers.ticks(state, message)
     if state.phase ~= "session" then return end
@@ -163,6 +184,7 @@ end
 -- The session's final ticks so far (a return, or a resumed session): this computer runs them to catch up.
 function handlers.log(state, message)
     if state.phase ~= "session" then return end
+    state.catching = true
     store_finals(state, message)
     if state.client then
         local converted = fight_message(state, {server_time = 0, ticks = message.ticks})
@@ -177,7 +199,8 @@ function handlers.drop(state, message)
     local slot = tonumber(message.slot)
     if not slot then return end
     local drop = state.drops[slot] or {since = engine.network_time()}
-    drop.name, drop.waiting, drop.decide_ms = tostring(message.name), message.waiting == true, tonumber(message.decide_ms) or drop.decide_ms
+    drop.name, drop.waiting = tostring(message.name), message.waiting == true
+    drop.catching, drop.percent = message.catching == true, tonumber(message.percent) or 0
     state.drops[slot] = drop
 end
 function handlers.drop_end(state, message)

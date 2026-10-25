@@ -111,6 +111,9 @@ function chart.observe(state, match)
     end
     local over = (match.round_counter or 0) > 0
     if match.frame_number == state.last_frame or over and state.closed then return end
+    -- A sample every `sample_frames` frames of the fight, also when one look covers many frames (a network game
+    -- that catches up runs many ticks a frame).
+    local due = not state.last_frame or math.floor(match.frame_number / sample_frames) ~= math.floor(state.last_frame / sample_frames)
     state.last_frame = match.frame_number
     local list = fighters(match)
     for _, fighter in ipairs(list) do
@@ -120,7 +123,7 @@ function chart.observe(state, match)
         state.kill_counts[fighter.slot] = kills
     end
     state.closed = over
-    if #state.samples == 0 or over or match.frame_number % sample_frames == 0 then
+    if #state.samples == 0 or over or due then
         local sample = {}
         for _, fighter in ipairs(list) do sample[fighter.slot] = math.max(fighter.value.damage_dealt or 0, 0) end
         state.samples[#state.samples + 1] = sample

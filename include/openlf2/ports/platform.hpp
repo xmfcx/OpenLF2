@@ -152,8 +152,9 @@ struct ScreenExtent { int left = 0; int top = 0; int right = 0; int bottom = 0; 
 struct UiCommand {
     // slider: an integer from x to y (value as text); image: the bitmap `value`, the source rectangle "x,y,w,h" in
     // `label` (empty: the whole bitmap), then "|" and the colors (RRGGBB hex, comma separated) of cursor frames.
+    // progress: a bar filled to x per mille, with `label` on it.
     enum class Kind { window, end_window, text, button, input, selectable, same_line, separator, spacing, child, end_child,
-        slider, image };
+        slider, image, progress };
     Kind kind = Kind::text;
     std::string id;    // letters, digits and '_'; the events name it
     std::string label; // the text shown (an input's hint)

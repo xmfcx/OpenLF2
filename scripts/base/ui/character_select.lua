@@ -491,7 +491,7 @@ end
 -- part of the shared options, so a network game and a recording do not depend on it. In a network game the row only
 -- shows the choice: the keys of the panel come from another player too.
 local function music_option(state, left, right)
-    local index = music.choice
+    local index = music.enabled and music.choice or -1
     local label
     if state.network then left, right = false, false end
     if state.mode == constants.modes.stage then
@@ -504,11 +504,12 @@ local function music_option(state, left, right)
         if index < -1 then index = 8 end
         label = index == -1 and "OFF" or music_names[index]
     end
-    if index ~= music.choice then
+    if index ~= (music.enabled and music.choice or -1) then
+        -- OFF is the music switch of the configuration; a track also turns the music on.
         local values = user_options.current()
-        values.music_track = index
+        values.music = index ~= -1
+        if index ~= -1 then values.music_track = index end
         user_options.save(values)
-        if index == -1 then music.stop() end
     end
     text(state, i18n.tr("Music: %s", i18n.tr(label)), 603, 3, music_title)
     text(state, i18n.tr("(Press Left/Right to change)"), 603, 20, music_hint)

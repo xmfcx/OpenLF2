@@ -34,7 +34,7 @@ local panels = {"arena", "difficulty", "computers", "start"}
 -- mode: constants.modes.versus, stage or battle; previous: the screen of the last visit (its setup stays).
 -- network: a server's session ({send, slot, names, set_speed, speed}): clicks go to the server as commands, which
 -- come back in a final tick for every client (input.commands); keys act on every client alike, as they come in the
--- combined input. Only the room role starts the fight.
+-- combined input. Any player starts the fight.
 function screen.create(mode, previous, network)
 
     local fighters = catalog.load()
@@ -56,8 +56,7 @@ function screen.create(mode, previous, network)
 end
 
 -- After a fight: the setup again, with the Results buttons.
-function screen.after_fight(previous, speed_tenths)
-    if previous.network then previous.network.speed = speed_tenths end
+function screen.after_fight(previous)
     local state = screen.create(previous.setup.mode, previous, previous.network)
     state.results = true
     return state
@@ -132,10 +131,8 @@ local function last_computer(state)
     return nil
 end
 
--- In a server's session only the room role starts the fight.
-local function may_start(state, slot)
-    return not state.network or (state.network.role_slot == nil and slot == 0) or state.network.role_slot == slot
-end
+-- Every player may start the fight (no player has more rights than the others).
+local function may_start(state, slot) return true end
 -- One slot's key presses: the cursor of that slot, and the commands it gives.
 local function slot_keys(state, slot, pressed, context)
     local model = state.setup
@@ -270,13 +267,15 @@ local function clicks(state, events, context)
     for _, mode in ipairs({modes.versus, modes.stage, modes.battle}) do
         if clicked["mode_" .. mode] then apply(state, {type = "mode", value = mode}) end
     end
-    local current = state.network and (state.network.speed or 10) or speed.tenths
+    local current = state.network and state.network.get_speed() or speed.tenths
     local tenths = imgui.slider_value(events, "setup_speed", current, 1, 10)
     if tenths and tenths ~= current then
         if state.network then state.network.set_speed(tenths) else speed.tenths = tenths end
     end
     if clicked.start then apply(state, {type = "start"}) end
     if clicked.wait then apply(state, {type = "wait"}) end
+    -- The settings menu (base/ui/fight_menu) on its Sound page: music, volumes, and the speed on the Game page.
+    if clicked.settings then context.action("settings") return true end
     if clicked.exit or clicked.result_title then
         if state.network then state.network.send({type = "exit"}) return false end
         context.action("title")
@@ -307,8 +306,7 @@ local function screen_command(state, command, context)
     elseif command.type == "results_setup" then
         state.results = nil
     else
-        -- In a server's session only the room role starts, and a player acts for its own slot (or a computer's).
-        if command.type == "start" and state.network and command.role ~= true then return false, false end
+        -- In a server's session a player acts for its own slot (or a computer's); any player starts.
         local slot = command.slot
         if state.network and slot then
             local entry = model.slots[slot]
@@ -339,8 +337,7 @@ apply_click = function(state, command, context)
         state.network.send(command)
         return false
     end
-    -- A local game: the click acts now; the room role is this computer.
-    command.role = true
+    -- A local game: the click acts now.
     local _, applied = screen_command(state, command, context)
     return applied
 end
@@ -385,37 +382,61 @@ function screen.update(state, input, context)
     for _, sound in ipairs(sounds.flush(state)) do context.sound(sound.resource, sound.volume, sound.pan) end
 end
 
+-- The players: a row for each slot that plays, then a row to join (this computer's own slot in a network game, the
+-- next free slot in a local one) and a row to add a computer player. Buttons have their natural height, so that
+-- their text sits in the middle.
 local function roster(state, context)
     local model = state.setup
     imgui.text(context, i18n.tr("Players"), 0xa8b8e8)
+    local free
     for slot = 0, 7 do
         local entry = model.slots[slot]
         local color = slot_colors[slot]
-        imgui.selectable(context, "card_" .. slot, string.format("%d", slot + 1), state.focus == slot, 14, 20)
-        imgui.same_line(context)
         if entry.kind then
-            imgui.image(context, "face_" .. slot, portrait(state, entry.fighter), nil, 20, 20, {color})
+            imgui.selectable(context, "card_" .. slot, string.format("%d", slot + 1), state.focus == slot, 14, 24)
             imgui.same_line(context)
-            local who = entry.kind == "computer" and i18n.tr("CPU") or name_of(slot):sub(1, 8)
-            imgui.text(context, string.format("%s: %s", who, fighter_name(state, entry.fighter)), color)
+            imgui.image(context, "face_" .. slot, portrait(state, entry.fighter), nil, 24, 24, {color})
+            imgui.same_line(context)
+            local who = entry.kind == "computer" and i18n.tr("CPU") or name_of(slot):sub(1, 6)
+            imgui.text(context, string.format("%s: %s", who, fighter_name(state, entry.fighter):sub(1, 7)), color)
             if model.mode ~= modes.stage then
-                imgui.same_line(context, 170)
-                imgui.button(context, "team_" .. slot, entry.team == teams.independent and i18n.tr("No team")
-                    or team_name(entry.team), 80, 20)
+                -- The team: a click takes the next one; a cursor on the team step shows arrows (left and right).
+                local label = entry.team == teams.independent and i18n.tr("No team") or team_name(entry.team)
+                local cursor = state.cursors[slot]
+                if cursor and cursor.panel == "team" then label = "< " .. label .. " >" end
+                imgui.same_line(context, 164)
+                imgui.button(context, "team_" .. slot, label, 92, 0)
             end
             if entry.kind == "human" then
-                imgui.same_line(context, 254)
-                imgui.button(context, "ready_" .. slot, entry.ready and i18n.tr("Ready") or i18n.tr("Choosing"), 62, 20)
+                -- Not ready: an amber button to press; ready: a green one (a click makes the player choose again).
+                imgui.same_line(context, 262)
+                imgui.button(context, "ready_" .. slot, entry.ready and i18n.tr("Ready") or i18n.tr("Set ready"), 74, 0,
+                    false, entry.ready and 0x6fdc8c or 0xffb347)
             end
-            imgui.same_line(context, 320)
-            imgui.button(context, "remove_" .. slot, "x", 20, 20)
-        else
-            imgui.text(context, i18n.tr("Attack joins"), 0x8090c0)
-            imgui.same_line(context, 170)
-            imgui.button(context, "join_" .. slot, i18n.tr("Join"), 80, 20)
-            imgui.same_line(context, 254)
-            imgui.button(context, "computer_" .. slot, i18n.tr("+ CPU"), 86, 20)
+            imgui.same_line(context, 342)
+            imgui.button(context, "remove_" .. slot, "x", -1, 0)
+        elseif not free then
+            free = slot
         end
+    end
+    local own = state.network and state.network.slot
+    local join = own and not model.slots[own].kind and own or (not own and free)
+    if join then
+        imgui.text(context, i18n.tr("Press Attack to join"), 0x8090c0)
+        imgui.same_line(context, 150)
+        imgui.button(context, "join_" .. join, i18n.tr("Join"), 100, 0)
+    end
+    local computer = free
+    if computer == join then
+        computer = nil
+        for slot = join + 1, 7 do
+            if not model.slots[slot].kind then computer = slot break end
+        end
+    end
+    if computer then
+        imgui.text(context, i18n.tr("A computer player"), 0x8090c0)
+        imgui.same_line(context, 150)
+        imgui.button(context, "computer_" .. computer, i18n.tr("+ Computer"), 100, 0)
     end
 end
 
@@ -434,9 +455,17 @@ local function fighter_grid(state, context)
         end
         imgui.image(context, "fighter_" .. position, portrait(state, value), nil, 42, 42, frames, imgui.clickable)
     end
+    -- What the player in focus does next, with keys or the mouse.
     local focus = state.setup.slots[state.focus]
-    imgui.text(context, i18n.tr("A click chooses the fighter of player %d (%s).", state.focus + 1,
-        focus.kind == "computer" and i18n.tr("Computer") or name_of(state.focus)), 0x8090c0)
+    local cursor = state.cursors[state.focus]
+    local hint
+    if not focus.kind then hint = i18n.tr("%s: press Attack or click Join.", name_of(state.focus))
+    elseif focus.kind == "computer" then hint = i18n.tr("A click on a fighter sets the fighter of this computer player.")
+    elseif focus.ready then hint = i18n.tr("%s is ready. Defend or the Start button starts; Jump: choose again.", name_of(state.focus))
+    elseif cursor and cursor.panel == "team" then
+        hint = i18n.tr("%s: Left/Right choose the team, Attack: ready, Jump: back.", name_of(state.focus))
+    else hint = i18n.tr("%s: arrows or a click choose a fighter, Attack takes it.", name_of(state.focus)) end
+    state.hint = hint
 end
 
 local function cursor_frames(state, panel)
@@ -463,15 +492,17 @@ local function arena_panel(state, context)
         return
     end
     imgui.text(context, marked(state, "arena", i18n.tr("Arena")) .. ": " .. arena_name(state, model.background), 0xa8b8e8)
-    imgui.child(context, "arenas", 0, 58, false)
+    -- Every arena shows: two rows of cards.
+    local per_row = math.ceil(#state.arenas / 2)
+    imgui.child(context, "arenas", 0, 84, false)
     for position, row in ipairs(state.arenas) do
-        if position > 1 then imgui.same_line(context) end
+        if (position - 1) % per_row ~= 0 then imgui.same_line(context) end
         local picture = arena_picture(state, row)
         local frames = row == model.background and {0xffd24a} or {}
         if picture then
-            imgui.image(context, "arena_" .. position, picture, nil, 84, 40, frames, imgui.clickable)
+            imgui.image(context, "arena_" .. position, picture, nil, 70, 32, frames, imgui.clickable)
         else
-            imgui.button(context, "arena_" .. position, arena_name(state, row), 84, 40)
+            imgui.button(context, "arena_" .. position, arena_name(state, row), 70, 32)
         end
     end
     imgui.end_child(context)
@@ -480,19 +511,21 @@ end
 local function rules_panel(state, context)
     local model = state.setup
     imgui.text(context, marked(state, "difficulty", i18n.tr("Difficulty")), 0xa8b8e8)
-    imgui.same_line(context, 110)
+    imgui.same_line(context, 100)
     for index, value in ipairs(setup.difficulty_order) do
         if not (model.mode == modes.battle and value == constants.difficulties.crazy) then
             if index > 1 then imgui.same_line(context) end
-            imgui.selectable(context, "difficulty_" .. (value + 1), i18n.tr(difficulty_names[value]), model.difficulty == value, 84, 0)
+            imgui.selectable(context, "difficulty_" .. (value + 1), i18n.tr(difficulty_names[value]), model.difficulty == value, 64, 0)
         end
     end
-    local tenths = state.network and (state.network.speed or 10) or speed.tenths
-    imgui.text(context, i18n.tr("Game speed: %s", tenths == 10 and "1.0" or "0." .. tenths)
-        .. (tenths == 4 and " " .. i18n.tr("(recommended)") or ""), 0xa8b8e8)
-    imgui.same_line(context, 230)
-    imgui.slider(context, "setup_speed", "", tenths, 1, 10, 200)
-    imgui.text(context, marked(state, "computers", i18n.tr("Computers: Attack adds one, Defend removes the last")), 0x8090c0)
+    local tenths = state.network and state.network.get_speed() or speed.tenths
+    imgui.same_line(context, 400)
+    imgui.text(context, i18n.tr("Speed %s", tenths == 10 and "1.0" or "0." .. tenths), 0xa8b8e8)
+    imgui.same_line(context, 480)
+    imgui.slider(context, "setup_speed", "", tenths, 1, 10, -1)
+    if #cursor_frames(state, "computers") > 0 then
+        imgui.text(context, "> " .. i18n.tr("Computers: Attack adds one, Defend removes the last"), 0x8090c0)
+    end
 end
 
 local function start_bar(state, context)
@@ -516,7 +549,15 @@ local function start_bar(state, context)
     end
     imgui.text(context, table.concat(summary, " - "))
     local problem = setup.problem(model, names())
-    imgui.same_line(context, 500)
+    local focus = model.slots[state.focus]
+    if focus.kind == "human" and not focus.ready then
+        -- The step that players miss: they must say that they are ready.
+        imgui.same_line(context, 330)
+        imgui.button(context, "ready_" .. state.focus, i18n.tr("I am ready (Attack)"), 160, 30, false, 0xffb347)
+        imgui.same_line(context)
+    else
+        imgui.same_line(context, 500)
+    end
     imgui.button(context, "start", marked(state, "start", i18n.tr("Start the fight (Defend)")), -1, 30, problem ~= nil)
     if problem then imgui.text(context, i18n.tr(problem), 0xff9b9b) end
 end
@@ -532,7 +573,9 @@ function screen.draw(state, context)
         imgui.selectable(context, "mode_" .. mode, i18n.tr(setup.mode_names[mode]), model.mode == mode, 70, 22)
         imgui.same_line(context)
     end
-    imgui.same_line(context, 700)
+    imgui.same_line(context, 600)
+    imgui.button(context, "settings", i18n.tr("Settings"), 90, 22)
+    imgui.same_line(context)
     imgui.button(context, "exit", i18n.tr("Exit"), -1, 22)
     if state.results then
         imgui.separator(context)
@@ -545,13 +588,14 @@ function screen.draw(state, context)
         imgui.button(context, "result_title", i18n.tr("Title"), -1, 28)
     end
     imgui.separator(context)
-    imgui.child(context, "grid", 372, 240, false)
+    imgui.child(context, "grid", 372, 220, false)
     fighter_grid(state, context)
     imgui.end_child(context)
     imgui.same_line(context)
-    imgui.child(context, "roster", 0, 240, false)
+    imgui.child(context, "roster", 0, 220, false)
     roster(state, context)
     imgui.end_child(context)
+    if state.hint then imgui.text(context, state.hint, 0xffd24a) end
     imgui.separator(context)
     arena_panel(state, context)
     rules_panel(state, context)

@@ -197,6 +197,7 @@ local option_rows = {
         available = function(features) return features.text end},
     {key = "font_antialiasing", label = "Font antialiasing",
         available = function(_, values) return values.language ~= "default" end},
+    {key = "music", label = "Music"},
     {key = "upscaling_filter", label = "Upscaling filter", choices = options.available_filters},
     {key = "battlefield_layout", label = "Battlefield layout", choices = function() return options.battlefield_layouts end},
     {key = "fullscreen", label = "Fullscreen", available = function(features) return features.window end},

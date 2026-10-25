@@ -36,8 +36,9 @@ end
 function imgui.end_window(context) context.ui("end_window") end
 -- color: 0xRRGGBB or nil; flags: imgui.wrap, imgui.large.
 function imgui.text(context, text, color, flags) context.ui("text", "", text, "", 0, 0, 0, 0, color or -1, flags or 0) end
-function imgui.button(context, id, label, width, height, disabled)
-    context.ui("button", id, label, "", 0, 0, width or 0, height or 0, -1, disabled and imgui.disabled or 0)
+-- color: 0xRRGGBB for a button that shows a state (older engines draw it in the theme's color).
+function imgui.button(context, id, label, width, height, disabled, color)
+    context.ui("button", id, label, "", 0, 0, width or 0, height or 0, color or -1, disabled and imgui.disabled or 0)
 end
 -- value: the text as the screen knows it (a change replaces what is typed); hint: shown while empty.
 function imgui.input(context, id, value, hint, width, focus)
@@ -56,6 +57,15 @@ function imgui.child(context, id, width, height, border)
     context.ui("child", id, "", "", 0, 0, width or 0, height or 0, -1, border and imgui.border or 0)
 end
 function imgui.end_child(context) context.ui("end_child") end
+-- A bar filled to `fraction` (0 to 1) with `label` on it (older engines show the label alone).
+function imgui.progress(context, fraction, label, width)
+    local permille = math.max(0, math.min(1000, math.floor(fraction * 1000)))
+    if not (context.ui_kinds and context.ui_kinds.progress) then
+        imgui.text(context, label or string.format("%d %%", math.floor(permille / 10)))
+        return
+    end
+    context.ui("progress", "", label or "", "", permille, 0, width or 0, 0, -1, 0)
+end
 -- An integer from `low` to `high`; a moved knob comes back as changed[id] = the value as text.
 function imgui.slider(context, id, label, value, low, high, width, disabled)
     if not (context.ui_kinds and context.ui_kinds.slider) then

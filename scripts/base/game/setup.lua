@@ -149,7 +149,7 @@ function setup.problem(state, names)
         if entry.kind then
             fighters = fighters + 1
             if entry.kind == "human" and not entry.ready then
-                return string.format("%s is still choosing", names and names[slot] or ("Player " .. (slot + 1)))
+                return string.format("%s is not ready yet: Attack, or the Set ready button", names and names[slot] or ("Player " .. (slot + 1)))
             end
             if entry.kind == "human" then ready = ready + 1 end
             sides[entry.team == teams.independent and (100 + slot) or entry.team] = true

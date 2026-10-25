@@ -78,12 +78,12 @@ function screen.update(state, input, context)
     end
     local me = connection.phase == "lobby" and own_player(state)
     if not me then return end
-    -- Player 1's keys work too (keyboard players, headless tests): attack says ready, the room role's defend starts.
+    -- Player 1's keys work too (keyboard players, headless tests): attack says ready, defend starts.
     local fresh = input.ui_keyboard and {} or presses(state, input[0] or "")
     if events.clicked.ready or fresh.c then online.send(connection, {type = "ready", value = not me.ready}) end
     -- A stopped session of these players goes on (base/game/server "can_resume").
-    if me.role and events.clicked.resume and connection.lobby.resume then online.send(connection, {type = "start", resume = true}) end
-    if me.role and (events.clicked.start or fresh.f) and everybody_ready(connection.lobby) then
+    if events.clicked.resume and connection.lobby.resume then online.send(connection, {type = "start", resume = true}) end
+    if (events.clicked.start or fresh.f) and everybody_ready(connection.lobby) then
         online.send(connection, {type = "start"})
     end
 end
@@ -123,20 +123,12 @@ function screen.draw(state, context)
                 player.id == connection.id and 0xffffff or 0xd0d8f0)
             imgui.same_line(context, 260)
             imgui.text(context, player.ready and "Ready" or "Not ready", player.ready and 0x8fef8f or 0x8090c0)
-            if player.role then
-                imgui.same_line(context, 370)
-                imgui.text(context, "room role", 0xffd24a)
-            end
         end
         imgui.end_child(context)
         imgui.button(context, "ready", me and me.ready and "I am not ready" or "I am ready", 250, 32)
         imgui.same_line(context)
-        if me and me.role then
-            imgui.button(context, "start", "Start the game", -1, 32, not everybody_ready(lobby))
-            if lobby.resume then imgui.button(context, "resume", "Resume the stopped game", -1, 32) end
-        else
-            imgui.text(context, "The room role starts the game.", 0x8090c0)
-        end
+        imgui.button(context, "start", "Start the game", -1, 32, not everybody_ready(lobby))
+        if lobby.resume then imgui.button(context, "resume", "Resume the stopped game", -1, 32) end
         imgui.spacing(context, 4)
         imgui.separator(context)
         -- The other open rooms, a private room, and a room by its code.
