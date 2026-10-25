@@ -12,6 +12,7 @@ local i18n = require("base/i18n/i18n")
 local sounds = require("base/game/sounds")
 local controls = require("base/ui/controls")
 local music = require("base/game/music")
+local user_options = require("base/game/options")
 local selection = {}
 local idle_countdown = 150
 local computer_phase, computer_team_phase, computer_done = slot_phases.computer_fighter, slot_phases.computer_team, slot_phases.computer_ready
@@ -62,7 +63,7 @@ function selection.create(options)
         difficulty = 0, music = 0, stage_level = 0}
     return {mode = mode, fighters = catalog.load(), backgrounds = catalog.backgrounds(),
         slots = slots, menu = menus.human_slots, last_menu = menus.human_slots, options = options,
-        countdown = idle_countdown, computers = previous.computers or -100,
+        countdown = idle_countdown, computers = previous.computers or -100, network = options.network,
         order = {}, cursor = 0, previous_random = false, blink = 0, display = {}}
 end
 
@@ -486,10 +487,13 @@ local function background_name(state, row)
     return entry and background.load(entry.path).name or ""
 end
 
+-- The music row shows this computer's own choice (base/game/music), which Left and Right change and save; it is not
+-- part of the shared options, so a network game and a recording do not depend on it. In a network game the row only
+-- shows the choice: the keys of the panel come from another player too.
 local function music_option(state, left, right)
-    local options = state.options
-    local index = options.music
+    local index = music.choice
     local label
+    if state.network then left, right = false, false end
     if state.mode == constants.modes.stage then
         if left or right then index = index == -1 and 0 or -1 end
         label = index == -1 and "OFF" or "ON"
@@ -498,18 +502,13 @@ local function music_option(state, left, right)
         if index > 8 then index = -1 end
         if left then index = index - 1 end
         if index < -1 then index = 8 end
-        if index == 0 then options.track = engine.random(8) + 1
-        elseif index > 0 then options.track = index
-        else options.track = nil end
-        music.selected = options.track and music.tracks[options.track] or nil
         label = index == -1 and "OFF" or music_names[index]
     end
-    options.music = index
-    if index == -1 then
-        music.enabled = false
-        music.stop()
-    else
-        music.enabled = true
+    if index ~= music.choice then
+        local values = user_options.current()
+        values.music_track = index
+        user_options.save(values)
+        if index == -1 then music.stop() end
     end
     text(state, i18n.tr("Music: %s", i18n.tr(label)), 603, 3, music_title)
     text(state, i18n.tr("(Press Left/Right to change)"), 603, 20, music_hint)

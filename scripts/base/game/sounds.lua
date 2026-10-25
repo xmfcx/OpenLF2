@@ -76,7 +76,8 @@ function sounds.direct(state, name)
 end
 
 function sounds.flush(state, master)
-    master = master or require("base/game/music").master
+    -- The sound effects follow this computer's effects volume (OpenLF2 extension; the original's master volume).
+    master = master or require("base/game/music").effects
     local output = {}
     for _, resource in ipairs(state.direct_sounds or {}) do
         -- A ready command (sounds.buffer_play) keeps its own volume and pan.

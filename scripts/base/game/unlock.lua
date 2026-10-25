@@ -4,7 +4,9 @@
 local sounds = require("base/game/sounds")
 local unlock = {}
 
-unlock.flags = {characters = 0, function_keys = 0}
+-- The game starts unlocked (OpenLF2 extension, docs/pregame-ui-redesign.md "No locks"): every fighter, every
+-- difficulty and the fight rules of `lf2.net` from the first start. A replay still uses the flags of its recording.
+unlock.flags = {characters = 1, function_keys = 0}
 
 -- Virtual-key codes of each word (0xbe is the period key) with its record bit, flag and buffer.
 local words = {
@@ -23,7 +25,9 @@ local previous_keys = {}
 local function key_down(code)
     for index, word in ipairs(words) do
         local place = progress[index]
-        if code == word.keys[place + 1] then
+        -- The `lf2.net` word does nothing in a live game: its flag is always on.
+        if word.flag == "characters" then
+        elseif code == word.keys[place + 1] then
             if place + 1 == #word.keys then marked[word.bit] = true
             else progress[index] = place + 1 end
         elseif place == 0 or code ~= word.keys[place] then
@@ -53,6 +57,9 @@ function unlock.observe(input)
     for _, code in ipairs(presses) do key_down(code) end
 end
 
+-- The settings menu's cheat keys button: the same as typing `herofighter.com`, on the next frame.
+function unlock.mark_function_keys() marked[2] = true end
+
 function unlock.take_pending()
     local bits = 0
     for _, word in ipairs(words) do
@@ -68,7 +75,7 @@ end
 -- A new network session starts with equal flags and empty word recognizers on both peers.
 function unlock.reset_session()
     unlock.end_replay()
-    unlock.flags.characters, unlock.flags.function_keys = 0, 0
+    unlock.flags.characters, unlock.flags.function_keys = 1, 0
     progress, marked, previous_keys = {0, 0}, {}, {}
 end
 
@@ -91,9 +98,9 @@ function unlock.end_replay()
     saved = nil
 end
 
--- For headless descriptions: "characters:function_keys" when either is set.
+-- For headless descriptions: "characters:function_keys" when either differs from a new game.
 function unlock.describe()
-    if unlock.flags.characters == 0 and unlock.flags.function_keys == 0 then return nil end
+    if unlock.flags.characters == 1 and unlock.flags.function_keys == 0 then return nil end
     return unlock.flags.characters .. ":" .. unlock.flags.function_keys
 end
 return unlock

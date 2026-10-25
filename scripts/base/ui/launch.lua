@@ -197,7 +197,6 @@ local option_rows = {
         available = function(features) return features.text end},
     {key = "font_antialiasing", label = "Font antialiasing",
         available = function(_, values) return values.language ~= "default" end},
-    {key = "unlock_characters", label = "Unlock hidden characters"},
     {key = "upscaling_filter", label = "Upscaling filter", choices = options.available_filters},
     {key = "battlefield_layout", label = "Battlefield layout", choices = function() return options.battlefield_layouts end},
     {key = "fullscreen", label = "Fullscreen", available = function(features) return features.window end},
@@ -724,7 +723,6 @@ function screen.describe(state)
     if state.nav.mode == "focus" then parts[#parts + 1] = "focus=" .. state.nav.page .. ":" .. state.nav.focus end
     parts[#parts + 1] = "source=" .. tostring(settings.source)
     local shown = state.options or options.current()
-    parts[#parts + 1] = "unlock_characters=" .. tostring(shown.unlock_characters)
     parts[#parts + 1] = "upscaling_filter=" .. shown.upscaling_filter
     parts[#parts + 1] = "fullscreen=" .. tostring(shown.fullscreen)
     parts[#parts + 1] = "show_fps=" .. tostring(shown.show_fps)

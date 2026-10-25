@@ -66,6 +66,7 @@ function flow.create(options)
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
     user_options.start()
+    music.seed(options.menu_seed)
     local state = {active = "launch", title = title.create(options), options = options,
         launch = require("base/ui/launch").create({menu_seed = options.menu_seed, problem = settings.problem}),
         pointer_x = 0, pointer_y = 0, previous_button = false, volume_frames = 0,
@@ -125,10 +126,8 @@ local function start_replay(state, block)
     end
     controls.replace_names(replay.names)
     unlock.begin_replay(replay.unlock_characters, replay.unlock_function_keys)
-    if replay.mode ~= constants.modes.stage and replay.music ~= "" then
-        music.selected = replay.music:gsub("\\", "/"):lower()
-        music.play_selected()
-    end
+    -- A replay plays the music of this computer's configuration, not the track of the recording (owner's decision).
+    if replay.mode ~= constants.modes.stage and replay.music ~= "" then music.play_selected() end
     local options = {mode = replay.mode, difficulty = replay.difficulty, background = replay.background,
         stage_level = replay.stage_level, fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = {},
         replay = replay, battle = replay.battle}
@@ -242,7 +241,8 @@ local function route(state, input, context)
             constants.fighter_ids.woody, constants.fighter_ids.freeze, constants.fighter_ids.firen}, -1)
         require("base/ui/demo").reset()
         recording.status = nil
-        music.enabled, music.selected = true, nil
+        music.configure(user_options.current())
+        music.selected = nil
         speed.fast = false
         music.play("bgm/main.wma")
     elseif requested == "online_connect" then
@@ -261,7 +261,7 @@ local function route(state, input, context)
     elseif requested == "versus" or requested == "stage" or requested == "battle" then
         -- The previous visit's state carries the values the original keeps in globals.
         state.characters = require("base/ui/character_select").create({mode = requested,
-            previous = state.characters})
+            previous = state.characters, network = state.session ~= nil})
         state.active = "characters"
         state.wait_release = true
     elseif requested == "start_match" then
@@ -864,10 +864,17 @@ function flow.update(state, raw, context)
     if step ~= 0 then
         music.change_volume(step)
         state.volume_frames = 100
+        state.volume_changed = true
+    elseif state.volume_changed then
+        -- F11 and F12 change the music volume of this computer's configuration, saved once the keys are let go.
+        local values = user_options.current()
+        values.music_volume = music.master
+        user_options.save(values)
+        state.volume_changed = nil
     end
     state.volume_text = nil
     if state.volume_frames > 0 then
-        state.volume_text = i18n.tr("Volume: %d", music.master)
+        state.volume_text = i18n.tr("Music volume: %d", music.master)
         state.volume_frames = state.volume_frames - 1
     end
     music.flush(context)

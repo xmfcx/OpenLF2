@@ -69,8 +69,8 @@ end
 -- The taunts that arrived since the last call.
 function chat.play_taunts(connection, context)
     for _, number in ipairs(connection.taunts) do
-        if music.master > 0 then
-            context.sound(string.format("mods/base/taunts/%02d.wav", number), math.floor((music.master - 100) * 3800 / 100), 0)
+        if music.effects > 0 then
+            context.sound(string.format("mods/base/taunts/%02d.wav", number), math.floor((music.effects - 100) * 3800 / 100), 0)
         end
         connection.taunts_played = (connection.taunts_played or 0) + 1
     end

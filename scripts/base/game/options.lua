@@ -3,7 +3,6 @@
 
 -- OpenLF2's own settings, which the original game does not have. They
 -- live in config.json's "options" member, next to the original's controls and recording values.
-local unlock = require("base/game/unlock")
 local i18n = require("base/i18n/i18n")
 local options = {}
 
@@ -54,9 +53,10 @@ local gamepad_defaults = {
     dj = {right = 72, bottom = 165, radius = 26},
     daj = {right = 72, bottom = 80, radius = 26},
 }
-local defaults = {battlefield_layout = "classic", gamepad = gamepad_defaults, unlock_characters = false, upscaling_filter = "linear", fullscreen = false, digipad = true, show_fps = false,
+local defaults = {battlefield_layout = "classic", gamepad = gamepad_defaults, upscaling_filter = "linear", fullscreen = false, digipad = true, show_fps = false,
     rumble = false, show_gamepad = false, language = "default", font_antialiasing = true,
     character_shading = false, projected_shadows = false,
+    music_track = 0, music_volume = 100, sound_volume = 100,
     light_azimuth = -50, light_elevation = 70, shadow_blur = 2, shadow_opacity = 0.275}
 local current
 
@@ -84,9 +84,13 @@ local function angle(value, default, low, high)
     if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return default end
     return math.max(low, math.min(high, value))
 end
+local function whole(value, default, low, high)
+    if type(value) ~= "number" or value ~= value then return default end
+    return math.max(low, math.min(high, math.floor(value)))
+end
 local function copy(values)
     return {battlefield_layout = values.battlefield_layout == "expand" and "expand" or defaults.battlefield_layout,
-        gamepad = copy_gamepad(values.gamepad),unlock_characters = values.unlock_characters,
+        gamepad = copy_gamepad(values.gamepad),
         upscaling_filter = valid_filter(values.upscaling_filter) and values.upscaling_filter or defaults.upscaling_filter,
         fullscreen = values.fullscreen, digipad = values.digipad, show_fps = values.show_fps, rumble = values.rumble,
         show_gamepad = values.show_gamepad, font_antialiasing = values.font_antialiasing,
@@ -96,7 +100,10 @@ local function copy(values)
         light_elevation = angle(values.light_elevation, defaults.light_elevation, 12, 89),
         shadow_blur = math.floor(angle(values.shadow_blur, defaults.shadow_blur, 0, 8)),
         shadow_opacity = angle(values.shadow_opacity, defaults.shadow_opacity, 0, 1),
-        language = i18n.is_language(values.language) and values.language or defaults.language}
+        language = i18n.is_language(values.language) and values.language or defaults.language,
+        music_track = whole(values.music_track, defaults.music_track, -1, 8),
+        music_volume = whole(values.music_volume, defaults.music_volume, 0, 100),
+        sound_volume = whole(values.sound_volume, defaults.sound_volume, 0, 100)}
 end
 
 -- The saved options, or the defaults for anything missing or invalid.
@@ -111,9 +118,6 @@ function options.load()
         values.light_elevation = angle(saved.light_elevation, defaults.light_elevation, 12, 89)
         values.shadow_blur = math.floor(angle(saved.shadow_blur, defaults.shadow_blur, 0, 8))
         values.shadow_opacity = angle(saved.shadow_opacity, defaults.shadow_opacity, 0, 1)
-    end
-    if type(saved) == "table" and type(saved.unlock_characters) == "boolean" then
-        values.unlock_characters = saved.unlock_characters
     end
     if type(saved) == "table" and valid_filter(saved.upscaling_filter) then
         values.upscaling_filter = saved.upscaling_filter
@@ -140,6 +144,11 @@ function options.load()
         values.language = saved.language
     end
     if type(saved) == "table" then values.gamepad = copy_gamepad(saved.gamepad) end
+    if type(saved) == "table" then
+        values.music_track = whole(saved.music_track, defaults.music_track, -1, 8)
+        values.music_volume = whole(saved.music_volume, defaults.music_volume, 0, 100)
+        values.sound_volume = whole(saved.sound_volume, defaults.sound_volume, 0, 100)
+    end
     if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand") then
         values.battlefield_layout = saved.battlefield_layout
     end
@@ -153,11 +162,7 @@ end
 
 local function apply(before, after)
     i18n.use(after.language, after.font_antialiasing)
-    if after.unlock_characters and not (before and before.unlock_characters) then
-        unlock.flags.characters = 1
-    elseif before and before.unlock_characters and not after.unlock_characters then
-        unlock.flags.characters = 0
-    end
+    require("base/game/music").configure(after)
 end
 
 local function same(a, b)
