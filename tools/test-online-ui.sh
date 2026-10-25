@@ -171,6 +171,13 @@ expect_not "host: Resume closes the menu" host "settings="
 expect "host: still in the fight after Resume" host "screen=match online=session"
 expect "join: the other player is still in the fight" join "screen=match online=session"
 
+# The development view of the AI (F10) opens in a session, shows the inspector, and the fight goes on.
+press 95 F10; sleep 0.5; shot 95 ai-view
+expect "host: F10 opens the AI view in a session" host "ai_view=on"
+expect "join: the other player is still in the fight with the view open" join "screen=match online=session"
+press 95 F10
+expect_not "host: F10 closes the AI view" host "ai_view=on"
+
 # The computer plays the host's fighter, on both computers, and a key of the host takes it back.
 press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 177)"
 expect "host: the computer plays the host's fighter" host "computer_controls="

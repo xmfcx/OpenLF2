@@ -18,6 +18,7 @@
 -- It sees the other fighters through the delayed view of its difficulty and types through the actuator, like a player.
 -- Scores are whole numbers. The persona numbers (base/ai/personas, phase 11) default to a generic fighter.
 local actuator = require("base/ai/actuator")
+local trace = require("base/ai/trace")
 local reflex = require("base/ai/reflex")
 local predict = require("base/ai/predict")
 local perception = require("base/ai/perception")
@@ -120,6 +121,10 @@ local function best_attack(context, board)
     local best, best_value, best_ticks, best_sure
     for _, candidate in ipairs(candidates_of(context.book)) do
         local value, ticks, sure = score(context, board, candidate)
+        if value and board.scores then
+            board.scores[#board.scores + 1] = {name = candidate.move.name, start = candidate.move.start, value = value,
+                ticks = ticks, sure = sure}
+        end
         if value and (not best_value or value > best_value) then
             best, best_value, best_ticks, best_sure = candidate, value, ticks, sure
         end
@@ -360,7 +365,8 @@ function tactician.tick(context)
     local memory, state = context.memory, context.state
     local now = state.frame_number
     for key in pairs(board) do board[key] = nil end
-    board.persona = generic
+    -- The persona: the match's copy (live edits in the development view), or the generic one.
+    board.persona = (state.ai_persona_values and state.ai_persona_values[context.index]) or generic
     -- The hits that it takes, with its class and intent on the tick before.
     if context.self.hp < memory.hp and context.log then
         context.log(state, context.index, string.format("ev=hurt hit=%d dmg=%d class=%s intent=%s", now - 1,
@@ -378,7 +384,25 @@ function tactician.tick(context)
         board.tx = math.floor(target.x + target.vx * board.delay + 0.5)
         board.tz = math.floor(target.z + target.vz * board.delay + 0.5)
         local before = memory.path[2] or 0
+        -- The view and the log keep the scores of the candidates.
+        if context.log then board.scores = {} end
         tree.run(root, context, board, memory.path)
+        if context.log then
+            local path = {}
+            for position, id in ipairs(memory.path) do path[position] = id end
+            table.sort(board.scores, function(a, b)
+                if a.value ~= b.value then return a.value > b.value end
+                return a.start < b.start
+            end)
+            local best = board.scores[1]
+            local intent = memory.path[2] or 0
+            local frame = {intent = intent, intent_name = tactician.names[intent] or "-", path = path, target = target.index,
+                dx = board.tx - context.me.x, dz = board.tz - context.me.z, delay = board.delay, scores = board.scores,
+                hp = context.self.hp, mp = context.self.mp, program = memory.act_program, persona = board.persona}
+            trace.frame(state, context.index, frame, string.format("intent=%s target=%d dx=%d dz=%d best=%s value=%d hp=%d mp=%d path=%s",
+                frame.intent_name:gsub(" ", "_"), target.index, frame.dx, frame.dz, best and (best.name .. "/" .. best.start) or "-",
+                best and best.value or 0, frame.hp, frame.mp, table.concat(path, ".")))
+        end
         memory.thinks = memory.thinks + 1
         local chosen = memory.path[2] or 0
         if chosen ~= before and context.log and chosen ~= 5 then

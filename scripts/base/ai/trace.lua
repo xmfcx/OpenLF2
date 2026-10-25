@@ -5,7 +5,12 @@
 -- write and the AI log and the development view read. It lives outside the match table on purpose: a brain never
 -- reads it, so it cannot change a fight. It follows one fight (the one that the screen shows). A tick that runs again
 -- after a rollback drops the entries of that tick and of later ones, so the log writes each tick once.
-local trace = {on = false}
+local trace = {on = false, capture = false, frames_log = false}
+-- The development view's store (base/ui/ai_view), filled while `capture` is on: the last brain frame of each fighter,
+-- its last 30 events, and its intent on each of the last 300 ticks.
+trace.frames, trace.recent, trace.timeline = {}, {}, {}
+local timeline_ticks, recent_count = 300, 30
+trace.timeline_ticks = timeline_ticks
 local line_limit = 500 -- an engine log line holds at most 512 bytes ("log " and the text)
 
 local filter     -- nil for all fighters, or a set of item indices (--ai-log 11,12)
@@ -14,11 +19,13 @@ local margin = 0 -- ticks that can still run again (a rollback), so they wait be
 local entries, ready = {}, {}
 local last_tick = -1
 
--- `text`: the value of --ai-log, "all" or item indices like "11,12"; nil turns the trace off.
+-- `text`: the value of --ai-log, "all" or item indices like "11,12", and "frames" for the brain frames (a line for each
+-- think); nil turns the log off.
 function trace.configure(text)
     trace.on = type(text) == "string" and text ~= ""
+    trace.frames_log = trace.on and text:find("frames", 1, true) ~= nil
     filter = nil
-    if trace.on and text ~= "all" then
+    if trace.on and text:find("%d") then
         filter = {}
         for number in text:gmatch("%d+") do filter[tonumber(number)] = true end
     end
@@ -29,15 +36,17 @@ end
 function trace.watch(match, rollback)
     for _, entry in ipairs(entries) do ready[#ready + 1] = entry.line end
     entries, last_tick = {}, -1
+    trace.frames, trace.recent, trace.timeline = {}, {}, {}
     watched = match
     -- More than a client runs ahead of its newest final tick (base/game/rollback_client) and than a rollback check
     -- runs again.
     margin = rollback and 32 or 0
 end
 
--- Whether the brain of item `index` in `match` writes to the trace.
+-- Whether the brain of item `index` in `match` writes to the trace (the log, or the store of the view).
 function trace.active(match, index)
-    return trace.on and match == watched and (filter == nil or filter[index] == true)
+    if match ~= watched then return false end
+    return trace.capture or (trace.on and (filter == nil or filter[index] == true))
 end
 
 -- Called once per tick before the brains run: a tick that is not newer than the last one runs again.
@@ -60,7 +69,27 @@ function trace.add(match, index, text)
     -- The engine accepts printable ASCII only.
     line = line:gsub("[^\32-\126]", "?")
     if #line > line_limit then line = line:sub(1, line_limit) end
-    entries[#entries + 1] = {tick = match.frame_number, line = line}
+    if trace.on and (filter == nil or filter[index] == true) then entries[#entries + 1] = {tick = match.frame_number, line = line} end
+    if trace.capture then
+        local list = trace.recent[index] or {}
+        trace.recent[index] = list
+        list[#list + 1] = line
+        if #list > recent_count then table.remove(list, 1) end
+    end
+end
+
+-- A brain frame of item `index` (base/ai/brains/tactician): a table {intent, intent_name, path, target, candidates,
+-- ...}. The view keeps the last one; `frames` in --ai-log writes `text` as a log line too.
+function trace.frame(match, index, frame, text)
+    if match ~= watched then return end
+    if trace.capture then
+        trace.frames[index] = frame
+        local line = trace.timeline[index] or {}
+        trace.timeline[index] = line
+        line[match.frame_number % timeline_ticks + 1] = frame.intent or 0
+        line.last = match.frame_number
+    end
+    if trace.frames_log and text then trace.add(match, index, "ev=frame " .. text) end
 end
 
 -- Writes the entries that no rollback can change any more as engine log lines; `final` writes all of them (the fight

@@ -592,6 +592,7 @@ function flow.probe(state)
         end
         if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
         if fight.paused then parts[#parts + 1] = "paused" end
+        if require("base/ui/ai_view").on then parts[#parts + 1] = "ai_view=on" end
         local view = state.match.camera_view
         if view and view.width then
             parts[#parts + 1] = string.format("camera=%d,%d,zoom=%s", math.floor(view.center), math.floor(view.width),
@@ -714,6 +715,8 @@ function flow.draw(state, context)
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
     if state.fight_menu then fight_menu.draw(state.fight_menu, context, menu_env(state)) end
+    -- The AI inspector (base/ui/ai_view): persona edits only in a local fight.
+    if state.active == "match" then require("base/ui/ai_view").draw_ui(context, state.match.match, not state.session) end
     if fighting and connection.catch_fraction then
         draw_catch_up(context, connection.catch_fraction)
     elseif fighting and connection.drops and next(connection.drops) then
@@ -1008,8 +1011,9 @@ update_frame = function(state, raw, context)
     -- the input timeline.
     if state.active == "match" then
         if input_timeline.toggled(state.timeline, input) then panels.toggle(state.panels, "timeline") end
-        -- F10 shows or hides the development view of the AI (base/ui/ai_view).
+        -- F10 shows or hides the development view of the AI (base/ui/ai_view), and its inspector takes clicks.
         require("base/ui/ai_view").toggled(input)
+        require("base/ui/ai_view").update(imgui.events(input), state.match.match, not state.session and not state.match.netsim)
         local layout = panel_layout(state)
         if layout then panels.pointer(state.panels, input, layout, panel_ids(state)) end
     end

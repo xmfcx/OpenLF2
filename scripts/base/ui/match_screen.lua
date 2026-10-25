@@ -224,8 +224,27 @@ local function rollback_update(state, held, context)
     end
 end
 
+-- F8 while a local fight is paused and the AI's development view is on: one tick forward (base/ui/ai_view). The
+-- screen takes the key, so the fight does not see F8 (the original's function key).
+local function step_paused(state, held)
+    local current = state.match
+    -- A fresh F8: held now and not on the frame before.
+    local down = (held.functions or ""):find("8", 1, true) ~= nil or (held.function_presses or ""):find("8", 1, true) ~= nil
+    local fresh = down and not state.f8_held
+    state.f8_held = down
+    if not (ai_view.on and current.paused and down) then return held end
+    held.functions = (held.functions or ""):gsub("8", "")
+    held.function_presses = (held.function_presses or ""):gsub("8", "")
+    if not fresh then return held end
+    current.paused, current.pause_request, current.pause_next = false, false, false
+    match.step(current, held)
+    current.paused, current.pause_request, current.pause_next = true, true, true
+    return held
+end
+
 function screen.update(state, held, context)
     if state.netsim or state.online then return rollback_update(state, held, context) end
+    held = step_paused(state, held)
     if rollback.check then rollback_check(state, held) end
     local result = match.step(state.match, held)
     if rollback.check and result == nil then rollback_compare(state) end

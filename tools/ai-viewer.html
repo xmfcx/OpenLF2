@@ -1,0 +1,140 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: MIT -->
+<!-- Copyright (c) 2026 OpenLF2 contributors -->
+<!-- The AI log viewer (docs/ai-plan.md "Development view"): open the output of a run with
+     `--ai-log all,frames` (a headless trace or the arena) to study the decisions of the brains after the fight. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenLF2 AI log</title>
+<style>
+:root { --bg: #f6f7f9; --panel: #ffffff; --text: #1d2330; --muted: #677085; --line: #d9dde6; --accent: #2c6cdf; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14171d; --panel: #1c2028; --text: #e3e7ef; --muted: #8a93a6; --line: #2e3442; --accent: #6ea2ff; }
+}
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+header { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+h1 { font-size: 16px; margin: 0; }
+main { padding: 12px 16px; display: grid; gap: 12px; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; }
+h2 { font-size: 14px; margin: 0 0 8px; }
+canvas { width: 100%; height: 160px; display: block; }
+table { border-collapse: collapse; width: 100%; font: 12px/1.3 ui-monospace, monospace; }
+td, th { border-bottom: 1px solid var(--line); padding: 2px 6px; text-align: left; white-space: nowrap; }
+.legend span { display: inline-block; margin-right: 10px; font-size: 12px; }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: middle; }
+.muted { color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenLF2 AI log</h1>
+  <input type="file" id="file" accept=".txt,.log,text/plain">
+  <label>Fighter <select id="fighter"></select></label>
+  <label>Events <input id="filter" placeholder="filter, e.g. ev=move"></label>
+  <span class="muted" id="status">Open the output of a run with --ai-log all,frames.</span>
+</header>
+<main>
+  <section><h2>Intent over the ticks</h2><canvas id="intents"></canvas><div class="legend" id="legend"></div></section>
+  <section><h2>HP and MP (from the brain frames)</h2><canvas id="points"></canvas></section>
+  <section><h2>Results</h2><div id="results" class="muted">No ai-result lines.</div></section>
+  <section><h2>Events</h2><table><thead><tr><th>tick</th><th>event</th><th>fields</th></tr></thead><tbody id="events"></tbody></table></section>
+</main>
+<script>
+const colors = ["#808080", "#e04040", "#4060ff", "#40c0ff", "#30b030", "#ffa020", "#c040c0", "#8080ff", "#20c0a0", "#c0c020",
+  "#a06030", "#6060ff", "#ff7070", "#70d070", "#9090ff", "#c0a060"];
+let data = {fighters: new Map(), results: []};
+
+function parse(text) {
+  const fighters = new Map();
+  const results = [];
+  for (const line of text.split(/\r?\n/)) {
+    const result = line.match(/ai-result (.*)/);
+    if (result) { results.push(Object.fromEntries([...result[1].matchAll(/(\w+)=(\S+)/g)].map(m => [m[1], m[2]]))); continue; }
+    const match = line.match(/ai t=(\d+) i=(\d+) ev=(\w+)(.*)/);
+    if (!match) continue;
+    const tick = +match[1], index = match[2], event = match[3];
+    const fields = Object.fromEntries([...match[4].matchAll(/(\w+)=(\S+)/g)].map(m => [m[1], m[2]]));
+    if (!fighters.has(index)) fighters.set(index, {events: [], frames: []});
+    const fighter = fighters.get(index);
+    fighter.events.push({tick, event, fields, text: match[4].trim()});
+    if (event === "frame") fighter.frames.push({tick, ...fields});
+  }
+  return {fighters, results};
+}
+
+function sized(canvas) {
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * ratio;
+  canvas.height = canvas.clientHeight * ratio;
+  const context = canvas.getContext("2d");
+  context.setTransform(ratio, 0, 0, ratio, 0, 0);
+  return context;
+}
+
+function draw() {
+  const index = document.getElementById("fighter").value;
+  const fighter = data.fighters.get(index);
+  const intents = document.getElementById("intents"), points = document.getElementById("points");
+  const a = sized(intents), b = sized(points);
+  const width = intents.clientWidth, height = intents.clientHeight;
+  a.clearRect(0, 0, width, height);
+  b.clearRect(0, 0, points.clientWidth, points.clientHeight);
+  if (!fighter) return;
+  const ticks = fighter.events.map(e => e.tick);
+  const first = Math.min(...ticks), last = Math.max(...ticks, first + 1);
+  const x = tick => (tick - first) / (last - first) * (width - 2) + 1;
+  // Intents: one band, colored by the intent of each frame (or of each intent change).
+  const names = [];
+  const changes = fighter.frames.length ? fighter.frames.map(f => [f.tick, f.intent])
+    : fighter.events.filter(e => e.event === "intent").map(e => [e.tick, e.fields.to]);
+  for (let position = 0; position < changes.length; position++) {
+    const [tick, name] = changes[position];
+    if (!names.includes(name)) names.push(name);
+    const end = position + 1 < changes.length ? changes[position + 1][0] : last;
+    a.fillStyle = colors[names.indexOf(name) % colors.length];
+    a.fillRect(x(tick), 20, Math.max(x(end) - x(tick), 1), height - 40);
+  }
+  a.fillStyle = getComputedStyle(document.body).color;
+  for (const e of fighter.events.filter(e => e.event === "hurt")) a.fillRect(x(e.tick), 4, 2, 12);
+  a.fillText("hits taken", 4, 14);
+  document.getElementById("legend").innerHTML = names.map((name, position) =>
+    `<span><i style="background:${colors[position % colors.length]}"></i>${name}</span>`).join("");
+  // HP and MP.
+  const pheight = points.clientHeight;
+  for (const [field, color] of [["hp", "#e04040"], ["mp", "#4060ff"]]) {
+    b.strokeStyle = color;
+    b.beginPath();
+    fighter.frames.forEach((f, position) => {
+      const y = pheight - 4 - (+f[field] / 500) * (pheight - 8);
+      position ? b.lineTo(x(f.tick), y) : b.moveTo(x(f.tick), y);
+    });
+    b.stroke();
+  }
+  // Events.
+  const filter = document.getElementById("filter").value.trim();
+  const rows = fighter.events.filter(e => !filter || (`ev=${e.event} ${e.text}`).includes(filter)).slice(0, 2000);
+  document.getElementById("events").innerHTML = rows.map(e =>
+    `<tr><td>${e.tick}</td><td>${e.event}</td><td>${e.text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</td></tr>`).join("");
+}
+
+document.getElementById("file").addEventListener("change", async event => {
+  const file = event.target.files[0];
+  if (!file) return;
+  data = parse(await file.text());
+  const select = document.getElementById("fighter");
+  select.innerHTML = [...data.fighters.keys()].map(index => `<option value="${index}">item ${index}</option>`).join("");
+  document.getElementById("status").textContent = `${data.fighters.size} fighters, ${data.results.length} results`;
+  document.getElementById("results").innerHTML = data.results.length ? `<table><tr><th>fight</th><th>winner</th><th>ticks</th>`
+    + `<th>hp</th><th>damage</th><th>sides</th></tr>` + data.results.map(r => `<tr><td>${r.fight}</td><td>${r.winner}</td>`
+    + `<td>${r.ticks}</td><td>${r.hp1} / ${r.hp2}</td><td>${r.dmg1} / ${r.dmg2}</td><td>${r.side1} | ${r.side2}</td></tr>`).join("")
+    + `</table>` : "No ai-result lines.";
+  draw();
+});
+document.getElementById("fighter").addEventListener("change", draw);
+document.getElementById("filter").addEventListener("input", draw);
+window.addEventListener("resize", draw);
+</script>
+</body>
+</html>

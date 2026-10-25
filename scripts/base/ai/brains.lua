@@ -113,6 +113,15 @@ function brains.register(brain)
 end
 
 function brains.known(name) return registry[name] ~= nil end
+-- The module of a brain, for the development view (its tree and node names), or nil.
+function brains.get(name) return registry[name] end
+-- The names of the registered brains, sorted.
+function brains.names()
+    local list = {}
+    for name in pairs(registry) do list[#list + 1] = name end
+    table.sort(list)
+    return list
+end
 
 -- The AI time by brain name ({ms, calls}), measured only while the arena sets this table (base/game/arena). A timer
 -- never reaches a decision: it measures around the brain.

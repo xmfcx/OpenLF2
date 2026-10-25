@@ -292,6 +292,14 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - Brain frames in the trace, the inspector, the behavior tree view, the decision timeline, F8 for one tick forward, the selection by click, live edits in local fights.
 - The HTML viewer for AI logs (tools/ai-viewer.html) and the `frames` detail of `--ai-log`.
 - Tests: the same trace gives the same fight with the view on and off. tools/test-online-ui.sh opens the view in a session. The viewer shows a log of the arena.
+- Status: built.
+    - With the view on, base/ai/trace captures for each fighter its last brain frame, its last 30 events and its intent on each of the last 300 ticks. Brains write there and never read it.
+    - The decision timeline draws a row for each AI fighter at the top of the picture. The inspector (Dear ImGui, compact) lists the AI fighters, and for the chosen one shows its brain, level, intent, target, the root's branches of its tree with the active path, the candidate moves with their values, its key program, persona sliders and its last events.
+    - Persona sliders write a copy of the persona into the match (`ai_persona_values`) in local fights only. In a network game they only show.
+    - F8 moves a paused local fight one tick forward while the view is on, and the fight does not see F8 then.
+    - `--ai-log all,frames` writes a brain frame for each think (`ev=frame intent=... best=... value=... path=...`). tools/ai-viewer.html opens such a log: the intents over the ticks with the hits taken, hp and mp, the results, and the events with a filter.
+    - Not built: a click on a fighter in the picture (the inspector's list selects it), and the menu elements tree, table and plot of the engine (the view uses text, bars, sliders and fills).
+    - Tests: the same trace gives the same fight with the view on. tools/test-online-ui.sh opens and closes the view in a session (39 checks pass).
 
 ### Phase 10: setup, sessions and recordings
 

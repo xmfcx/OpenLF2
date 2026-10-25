@@ -486,7 +486,16 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
             config.ai_log = "all";
             if (index + 1 < arguments.size()) {
                 const auto& value = arguments[index + 1];
-                if (value == "all" || (!value.empty() && value.find_first_not_of("0123456789,") == std::string::npos)) {
+                // Tokens separated by commas: all, frames, or item indices.
+                bool valid = !value.empty() && value.size() <= 200;
+                for (std::size_t start = 0; valid && start <= value.size();) {
+                    const auto end = std::min(value.find(',', start), value.size());
+                    const auto token = value.substr(start, end - start);
+                    valid = token == "all" || token == "frames"
+                        || (!token.empty() && token.find_first_not_of("0123456789") == std::string::npos);
+                    start = end + 1;
+                }
+                if (valid) {
                     config.ai_log = value;
                     ++index;
                 }
@@ -1684,7 +1693,7 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "        with two rollback clients and a server in this program; player 1 is one client, the others the other.\n"
                          "--rollback-check (developer): fights save their state, run ahead, go back and run again, and the\n"
                          "        headless description reports whether the state came out the same.\n"
-                         "--ai-log [all|INDICES] (developer): the AI of the shown fight writes its decisions as log lines\n"
+                         "--ai-log [all|INDICES][,frames] (developer): the AI of the shown fight writes its decisions as log lines\n"
                          "        (\"ai t=TICK i=ITEM ev=...\"), for all fighters or for item indices such as 11,12.\n"
                          "--ai-brain NAME[,INDEX=NAME] (developer): the brain of the computer fighters of local fights, or of one item index,\n"
                          "        e.g. idle or 11=sentry (docs/ai-plan.md).\n"
