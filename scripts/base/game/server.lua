@@ -135,7 +135,7 @@ local function remove(state, peer)
         -- Everybody left: the session is saved, and the same players can resume it from the lobby.
         save_session(state)
         back_to_lobby(state, "everybody left")
-    elseif state.phase == "session" then
+    elseif state.phase == "session" and state.session.slots[player.slot] and state.session.slots[player.slot].peer == peer then
         drop_player(state, player.slot, engine.network_time())
     end
     broadcast_lobby(state)
@@ -147,16 +147,22 @@ local function session_message(state, rejoin)
     local session = state.session
     local owners = {}
     for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
-    return {type = "session", owners = owners, names = session.names, role = state.order[1], random = session.random,
+    return {type = "session", owners = owners, names = session.names, role = state.order[1], role_slot = session.role_slot,
+        random = session.random,
         rejoin = rejoin or nil, classic = state.classic or nil}
 end
 -- The final ticks so far, to a player who must run them to catch up (a return, or a resumed session).
 local function send_log(state, peer)
     local session = state.session
-    for first = 0, session.logged, log_chunk do
-        local part = {}
-        for tick = first, math.min(first + log_chunk - 1, session.logged) do part[tick] = session.log[tick] end
-        send(peer, {type = "log", ticks = part})
+    -- Parts of at most `log_chunk` ticks and about 40 KB (a message holds at most 64 KiB).
+    local part, size, count = {}, 0, 0
+    for tick = 0, session.logged do
+        part[tick] = session.log[tick]
+        size, count = size + #wire.encode(session.log[tick]), count + 1
+        if count >= log_chunk or size > 40000 or tick == session.logged then
+            send(peer, {type = "log", ticks = part})
+            part, size, count = {}, 0, 0
+        end
     end
 end
 
@@ -192,8 +198,9 @@ local function start_session(state, now, saved)
     state.phase, state.hashes = "session", {}
     -- A resumed session goes on with its next tick, after the start delay.
     state.start_at = now + start_delay_ms - first * tick_ms
+    -- role_slot: the slot whose keys start a fight on the setup screen, the same for the whole session.
     state.session = {names = names, random = random, slots = slots, log = saved and saved.log or {}, logged = first - 1,
-        drops = {}}
+        drops = {}, role_slot = state.players[state.order[1]].slot}
     broadcast(state, session_message(state))
     if first > 0 then
         for _, peer in ipairs(state.order) do send_log(state, peer) end
@@ -208,11 +215,14 @@ function server.load_saved()
     if type(saved) ~= "table" or type(saved.data) ~= "string" then return nil end
     local data = wire.decode(saved.data)
     if type(data) ~= "table" or type(data.slots) ~= "table" or type(data.runs) ~= "table" then return nil end
-    -- The final ticks are stored in runs of equal ticks: {count, tick}.
+    -- The final ticks are stored in runs of equal ticks: each an encoded {count, encoded tick}.
     local log, tick = {}, 0
-    for _, run in ipairs(data.runs) do
+    for _, text in ipairs(data.runs) do
+        local run = type(text) == "string" and wire.decode(text)
+        local final = type(run) == "table" and type(run[2]) == "string" and wire.decode(run[2])
+        if type(final) ~= "table" or type(run[1]) ~= "number" then return nil end
         for _ = 1, run[1] do
-            log[tick] = run[2]
+            log[tick] = final
             tick = tick + 1
         end
     end
@@ -242,10 +252,15 @@ save_session = function(state)
     if not session or session.logged < 0 then return end
     local slots = {}
     for slot, entry in pairs(session.slots) do slots[slot] = entry.name end
-    local runs = {}
-    for tick = 0, session.logged do
-        local final, last = session.log[tick], runs[#runs]
-        if last and ticks.same(last[2], final) then last[1] = last[1] + 1 else runs[#runs + 1] = {1, final} end
+    -- Runs of equal ticks, each as its own encoded text (a decoded message holds at most 65536 items).
+    local runs, last, count = {}, nil, 0
+    for tick = 0, session.logged + 1 do
+        local text = tick <= session.logged and wire.encode(session.log[tick]) or nil
+        if text == last then count = count + 1
+        else
+            if last then runs[#runs + 1] = wire.encode({count, last}) end
+            last, count = text, 1
+        end
     end
     local data = {slots = slots, random = session.random, speed = state.authority and state.authority.speed, runs = runs}
     local document = engine.read_settings()
@@ -377,11 +392,12 @@ function handlers.drop_choice(state, peer, message, now)
         state.authority.owners[slot] = to
         state.session.slots[slot].peer = to
         drop.decided = true
-        local own = {}
+        -- The player's own slot stays first (its player 1 keys); the taken fighters follow (player 2 and on).
+        local own = {player.slot}
         for owned, owner in pairs(state.authority.owners) do
-            if owner == to then own[#own + 1] = owned end
+            if owner == to and owned ~= player.slot then own[#own + 1] = owned end
         end
-        table.sort(own)
+        table.sort(own, function(a, b) return (a == player.slot and -1 or a) < (b == player.slot and -1 or b) end)
         send(to, {type = "owners", slots = own})
         end_drop(state, slot, player.name .. " plays the fighter of " .. drop.name)
     elseif message.choice == "stop" then
@@ -436,7 +452,8 @@ function handlers.chat(state, peer, message, now)
     log(state, player.name .. ": " .. text)
 end
 function handlers.input(state, peer, message, now)
-    if state.phase ~= "session" or not state.players[peer] then return end
+    -- A spectator's messages count for its acknowledgements and its round trip; authority.receive drops its keys.
+    if state.phase ~= "session" or not (state.players[peer] or state.spectators[peer]) then return end
     message.from = peer
     authority.receive(state.authority, message, now - state.start_at)
 end
@@ -471,6 +488,17 @@ end
 function server.rejoin(state, peer, slot)
     local session = state.session
     local entry = session.slots[slot]
+    -- The old connection of this player, if ENet has not noticed yet that it is gone, leaves now.
+    for other, player in pairs(state.players) do
+        if player.slot == slot then
+            state.players[other] = nil
+            for position, id in ipairs(state.order) do
+                if id == other then table.remove(state.order, position) break end
+            end
+            if state.authority.clients[other] then state.authority.clients[other] = nil end
+            engine.messages("disconnect", other)
+        end
+    end
     state.players[peer] = {name = entry.name, slot = slot, ready = true}
     state.order[#state.order + 1] = peer
     entry.peer = peer
@@ -515,7 +543,8 @@ local function room_update(state, now)
     -- A player without a message for a while has dropped; without a choice the computer plays it.
     for peer, player in pairs(state.players) do
         local client = state.authority.clients[peer]
-        if client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
+        local plays = session.slots[player.slot] and session.slots[player.slot].peer == peer
+        if plays and client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
             drop_player(state, player.slot, now)
         elseif client and client.heard > 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
             -- Its messages arrive again (it was only slow).
@@ -567,6 +596,8 @@ local function new_code(top)
 end
 local room_handlers = {}
 function room_handlers.create_room(top, peer, message)
+    local room = top.peers[peer]
+    if room.phase == "session" and room.players[peer] then return end
     local code = new_code(top)
     if not code then return end
     top.rooms[code] = new_room(top, code, message.private ~= false)

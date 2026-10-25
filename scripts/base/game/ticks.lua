@@ -4,6 +4,7 @@
 -- The input of one fight tick in the network design (OpenLF2 extension, docs/netcode.md): the keys of each player
 -- slot and the function keys, as the fight reads them (base/game/match `held`). The server, the clients and the
 -- simulated session share these helpers.
+local wire = require("base/game/wire")
 local ticks = {}
 
 -- The original's frame: about 30.3 ticks per second.
@@ -53,6 +54,7 @@ function ticks.same(a, b)
     end
     if (a.speed or 10) ~= (b.speed or 10) or (a.hold or false) ~= (b.hold or false) then return false end
     if #(a.commands or {}) ~= #(b.commands or {}) then return false end
+    if a.commands and #a.commands > 0 and wire.encode(a.commands) ~= wire.encode(b.commands) then return false end
     for slot = 0, 7 do
         if (a.slots[slot] or "") ~= (b.slots[slot] or "") then return false end
     end

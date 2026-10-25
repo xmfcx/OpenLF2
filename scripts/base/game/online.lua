@@ -25,6 +25,8 @@ online.spectator_delay = 30
 -- A fight's state hash goes to the server every this many ticks (server.lua compares the clients).
 local hash_interval = 30
 local chat_kept = 20
+-- This computer's slots as a set (defined with own_input below; the handlers use it too).
+local owned_map
 
 -- options: the runtime settings (network_profile). retry_ms: how long to connect again after a failed attempt.
 function online.create(options, address, port, retry_ms)
@@ -192,6 +194,7 @@ end
 -- The slot of the room role in the session (it starts the fight on the setup screen).
 function online.role_slot(state)
     local start = state.session_start
+    if start and tonumber(start.role_slot) then return tonumber(start.role_slot) end
     if not start or type(start.owners) ~= "table" then return nil end
     for slot, peer in pairs(start.owners) do
         if peer == start.role then return tonumber(slot) end
@@ -247,7 +250,7 @@ local function own_input(state, held)
     input.functions, input.function_presses = held.functions or "", held.function_presses or ""
     return input
 end
-local function owned_map(state)
+owned_map = function(state)
     local map = {}
     for _, slot in ipairs(own_slots(state)) do map[slot] = true end
     return map

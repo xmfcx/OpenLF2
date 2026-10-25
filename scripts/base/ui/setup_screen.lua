@@ -36,7 +36,7 @@ local panels = {"arena", "difficulty", "computers", "start"}
 -- come back in a final tick for every client (input.commands); keys act on every client alike, as they come in the
 -- combined input. Only the room role starts the fight.
 function screen.create(mode, previous, network)
-    network = network or (previous and previous.network)
+
     local fighters = catalog.load()
     local grid = {0}
     for index, fighter in ipairs(fighters) do
@@ -58,7 +58,7 @@ end
 -- After a fight: the setup again, with the Results buttons.
 function screen.after_fight(previous, speed_tenths)
     if previous.network then previous.network.speed = speed_tenths end
-    local state = screen.create(previous.setup.mode, previous)
+    local state = screen.create(previous.setup.mode, previous, previous.network)
     state.results = true
     return state
 end
@@ -307,8 +307,22 @@ local function screen_command(state, command, context)
     elseif command.type == "results_setup" then
         state.results = nil
     else
-        -- In a server's session only the room role starts.
+        -- In a server's session only the room role starts, and a player acts for its own slot (or a computer's).
         if command.type == "start" and state.network and command.role ~= true then return false, false end
+        local slot = command.slot
+        if state.network and slot then
+            local entry = model.slots[slot]
+            if not entry then return false, false end
+            local computer = entry.kind == "computer" or command.type == "add_computer"
+            if not computer and command.from ~= slot then return false, false end
+        end
+        if command.type == "arena" then
+            local known = false
+            for _, row in ipairs(state.arenas) do
+                if row == command.value then known = true end
+            end
+            if not known then return false, false end
+        end
         local applied = apply(state, command)
         -- A click from another computer moves the cursors that its keys would move.
         if applied and state.network and command.type == "join" then state.cursors[command.slot] = {panel = "grid", index = 1} end

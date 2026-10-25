@@ -115,6 +115,13 @@ grep -q "dropped: " "$WORK/drop.server"; check "drop: the server saw the drop" $
 grep -q "the computer plays" "$WORK/drop.server"; check "drop: the computer plays the dropped fighter" $? "$(tail -3 "$WORK/drop.server")"
 grep -qE "item[0-7]\{[^}]*computer=1" "$WORK/drop.one"; check "drop: client one sees the computer play it" $? "no computer=1"
 
+# 6b. Give the fighter to another player: client one takes the dropped fighter and plays it with its player 2's keys
+#     (the ids of the peers and slots are 1 or 2 and 0 or 1; the clicks that do not fit do nothing).
+GIVE="$(wait_frames 150)=drop_give_0_1,,=drop_give_0_2,,=drop_give_1_1,,=drop_give_1_2,,$(printf 'r/l,,%.0s' $(seq 1 60))"
+run_session give 23612 "$START$TITLE$PICK$MENU$FIGHT$GIVE" "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))"
+client_checks give one "screen=match"
+grep -q "plays the fighter of" "$WORK/give.server"; check "give: client one took the dropped fighter" $? "$(tail -3 "$WORK/give.server")"
+
 # 7. The dropped player comes back: a new client with the same name joins during the fight, runs the session's final
 #    ticks to catch up, and plays on with the same state (the server compares its hashes with client one's).
 start_server() { mkdir -p "$WORK/server-config"; timeout 150 "$GAME" --server --installer "$INSTALLER" --scripts scripts \
@@ -162,6 +169,8 @@ client 23610 "$(wait_frames 30)$(printf 'r,,%.0s' $(seq 1 120))" "$WORK/watch.th
 wait "$one" "$two"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
 grep -q "watching: " "$WORK/watch.server"; check "watch: the server took a spectator" $? "$(tail -3 "$WORK/watch.server")"
 client_checks watch three "screen=match"
+tick=$(grep -oE "online=tick=[0-9]+" "$WORK/watch.three" | tail -1); tick=${tick##*=}
+[ -n "$tick" ] && [ "$tick" -gt 100 ]; check "watch: the spectator's fight runs (tick $tick)" $? "tick=${tick:-none}"
 ! grep -q "difference" "$WORK/watch.server"; check "watch: no state difference" $? "$(grep difference "$WORK/watch.server")"
 grep -c "hashes agree (1 checks" "$WORK/watch.server" | grep -q "^2$"; check "watch: the spectator's hashes agree" $? "$(grep 'hashes agree' "$WORK/watch.server")"
 
@@ -174,9 +183,10 @@ for side in one two; do client_checks rooms $side "screen=(title|characters|setu
 
 # 9. The match setup screen in a session: both join, choose a fighter and get ready with their keys, the room role
 #    starts (defend; the other player's defend does nothing), and the fight runs with rollback.
+#    Client one first clicks the Stage tab: the click goes through the server, so both clients play a stage fight.
 SETUP="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"
-SERVER_FLAGS= run_session setup 23609 "$START$TITLE$SETUP$FIGHT" "$START$(wait_frames 31)$SETUP$FIGHT"
-for side in one two; do client_checks setup $side "screen=match"; done
+SERVER_FLAGS= run_session setup 23609 "$START$TITLE=mode_1$(wait_frames 10)$SETUP$FIGHT" "$START$(wait_frames 42)$SETUP$FIGHT"
+for side in one two; do client_checks setup $side "screen=match.*stage="; done
 server_checks setup 1
 
 exit $FAILED

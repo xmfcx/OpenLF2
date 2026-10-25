@@ -30,8 +30,22 @@ end
 -- Whether the fight runs on this tick, and the keys it reads then. `held` is the tick's input (base/game/ticks held)
 -- with `speed`, the speed in tenths (nil or 10 is the normal speed).
 function gate.step(fight, held)
-    -- A held tick of a server session (a player dropped): the fight waits, and its keys do not count.
-    if held.hold then return false, nil end
+    -- A held tick of a server session (a player dropped): the fight waits, and its keys do not count; only the
+    -- control letters ("A" from the server, "P") wait for the next tick that runs.
+    if held.hold then
+        for slot = 0, 7 do
+            for letter in (held[slot] or ""):gmatch("[AP]") do
+                fight.held_letters = fight.held_letters or {}
+                fight.held_letters[slot] = merged(fight.held_letters[slot] or "", letter)
+            end
+        end
+        return false, nil
+    end
+    if fight.held_letters then
+        local copy = {functions = held.functions, function_presses = held.function_presses, keys = held.keys, speed = held.speed}
+        for slot = 0, 7 do copy[slot] = (held[slot] or "") .. (fight.held_letters[slot] or "") end
+        held, fight.held_letters = copy, nil
+    end
     local tenths = held.speed or 10
     if tenths >= 10 then
         -- Keys queued on skipped ticks go to this tick.

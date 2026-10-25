@@ -160,6 +160,8 @@ local function disconnect(state, message)
     local online_session = state.session and state.session.online
     if online_session then online.close(state.session)
     elseif state.session then network.close(state.session) end
+    -- A setup of a network game does not carry over to local games.
+    if online_session then state.setup = nil end
     state.session, state.fight_menu = nil, nil
     controls.replace_names(nil)
     unlock.end_replay()
@@ -178,7 +180,7 @@ local function disconnect(state, message)
 end
 -- The end of a server's session while connected (the title's Quit, or the server ended it): back to its lobby.
 local function back_to_lobby(state)
-    state.session, state.fight_menu = nil, nil
+    state.session, state.fight_menu, state.setup = nil, nil, nil
     controls.replace_names(nil)
     state.title = title.create(state.options)
     state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
@@ -242,6 +244,8 @@ local function route(state, input, context)
         state.network = require("base/ui/network").create(state.options)
         state.active = "network"
     elseif requested == "network_ready" then
+        -- Every client starts the session with the same setup (none from earlier local games).
+        state.setup = nil
         unlock.reset_session()
         state.session = state.network.session
         controls.replace_names(state.session.names)
@@ -714,6 +718,8 @@ function flow.update(state, raw, context)
     -- in base/game/rollback_client).
     local session = state.session
     if result == false or not (session and session.online) or online.backlog(session) <= 3 then return result end
+    -- The held keys stay (Escape held through the catch-up toggles nothing); key presses and menu clicks count once.
+    local quiet_raw = raw:sub(1, 1) == "k" and raw:gsub(" [pu][^ ]*", "") or raw:gsub("=[%w_]+:?%d*", "")
     -- Only actions pass: a frame takes each flag (speed, fullscreen and the others) once, and sounds would pile up.
     local quiet = {}
     for key, value in pairs(context) do quiet[key] = type(value) == "function" and function() end or value end
@@ -722,8 +728,10 @@ function flow.update(state, raw, context)
         if state.session ~= session or (state.active == "match" and state.match.online) or online.backlog(session) <= 3 then
             break
         end
-        if update_frame(state, "k m-1,-1,0", quiet) == false then break end
+        if update_frame(state, quiet_raw, quiet) == false then break end
     end
+    -- The extra runs may wait for ticks; the next frame is no repeat of this one.
+    state.exchange_waited = nil
     return result
 end
 update_frame = function(state, raw, context)
@@ -904,6 +912,15 @@ update_frame = function(state, raw, context)
         drop_choices(state, imgui.events(input))
         -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
         if not (state.active == "match" and state.match.online) then
+            -- This computer's clicks stay with the input: the setup screen sends them to the server as commands. The
+            -- clicks of runs that wait for a tick collect until a tick comes (a repeated click counts once).
+            if input.ui then
+                local pending = state.pending_ui or {clicked = {}, changed = {}, submitted = {}}
+                for kind, list in pairs(input.ui) do
+                    for id, value in pairs(list) do pending[kind][id] = value end
+                end
+                state.pending_ui = pending
+            end
             local combined, problem = online.exchange(session, input)
             if problem then
                 disconnect(state, problem)
@@ -911,7 +928,10 @@ update_frame = function(state, raw, context)
             elseif not combined then
                 state.exchange_waited = true
                 return false
-            else input = combined end
+            else
+                combined.ui, state.pending_ui = state.pending_ui, nil
+                input = combined
+            end
         end
     elseif state.session then
         unlock.observe(input)
