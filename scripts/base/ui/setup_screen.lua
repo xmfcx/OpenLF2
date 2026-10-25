@@ -283,6 +283,14 @@ function screen.selection(state) return setup.selection(state.setup) end
 
 function screen.update(state, input, context)
     local events = imgui.events(input)
+    -- Escape (and Android's back button) leaves to the title, unless a countdown runs (jump stops it).
+    local escape = input.keys and input.keys[constants.virtual_keys.escape] == true
+    if escape and not state.escape_held and not state.setup.countdown then
+        state.escape_held = true
+        context.action("title")
+        return
+    end
+    state.escape_held = escape
     if clicks(state, events, context) then
         for _, sound in ipairs(sounds.flush(state)) do context.sound(sound.resource, sound.volume, sound.pan) end
         return

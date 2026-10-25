@@ -42,6 +42,7 @@ local note_function_keys, function_keys
 local battle = require("base/game/battle")
 local catalog = require("base/game/catalog")
 local recording = require("base/game/recording")
+local i18n = require("base/i18n/i18n")
 local unlock = require("base/game/unlock")
 local match = {}
 
@@ -337,13 +338,15 @@ end
 -- The control of a human fighter (OpenLF2 extension, plan.md "AI control"): the letter "A" in a slot's keys hands
 -- the fighter to the computer, "P" gives it back. The letters come through the combined input like the keys, so
 -- every computer changes the control on the same tick. A fresh key press of the player also takes the control back
--- once the computer played for a second. A recording keeps the control in the free bit 1 of each key byte.
+-- once the computer played for a second. A recording cannot keep the control (the key bytes have no free bit: the
+-- original's network games use bit 1), so a recording stops when the computer takes a human fighter.
 local control_return_ticks = 30
 local function read_control(state, value, keys)
-    if state.replay then
-        -- The key bytes are recorded on the ticks that read keys.
-        if state.input_phase == 0 then value.ai_control = keys:find("A", 1, true) ~= nil end
-        return
+    if state.replay then return end
+    if keys:find("A", 1, true) and not value.ai_control and state.recording and not state.recording.saved then
+        state.recording.saved = true
+        recording.status = {kind = constants.recording_statuses.error, count = 0,
+            text = i18n.tr("Recording stopped: the computer plays a human fighter")}
     end
     if keys:find("P", 1, true) then
         value.ai_control = false
@@ -817,10 +820,7 @@ function match.step(state, held)
         elseif state.recording and not state.recording.saved then
             local bytes = {0, 0, 0, 0, 0, 0, 0, 0, state.function_flags, state.unlock_bits or 0}
             if state.input_phase == 0 then
-                for slot = 0, live.network and 7 or 3 do
-                    local value = state.items[slot]
-                    bytes[slot + 1] = recording.pack_keys(live[slot] or "") + (value and value.ai_control and 1 or 0)
-                end
+                for slot = 0, live.network and 7 or 3 do bytes[slot + 1] = recording.pack_keys(live[slot] or "") end
             end
             recording.capture(state, bytes)
         end

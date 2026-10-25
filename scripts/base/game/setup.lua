@@ -205,6 +205,8 @@ function setup.selection(state)
         end
     end
     selection.options.background, selection.options.difficulty = state.background, state.difficulty
+    -- Battle mode's options panel picks a random arena only for Random.
+    selection.options.random_background = state.background == constants.background_rows.random
     selection.options.stage_level = state.stage_level
     selection.menu, selection.last_menu = constants.character_menus.options, constants.character_menus.options
     return selection

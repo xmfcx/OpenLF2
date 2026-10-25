@@ -45,7 +45,7 @@ function menu.update(state, input, env)
             state.confirm = nil
             if confirm == "leave" then return {leave = true} end
             if confirm == "end_fight" then return {end_fight = true, close = true} end
-            if confirm == "cheat_keys" then return {cheat_keys = true} end
+            if confirm == "cheat_keys" then return {cheat_keys = true, close = true} end
         end
         return nil
     end
@@ -63,7 +63,7 @@ function menu.update(state, input, env)
     end
     if clicked.cheat_keys then
         -- Turning them on asks first; turning them off does not.
-        if env.cheat_keys then return {cheat_keys = true} end
+        if env.cheat_keys then return {cheat_keys = true, close = true} end
         state.confirm = "cheat_keys"
         return nil
     end

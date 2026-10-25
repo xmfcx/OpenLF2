@@ -154,8 +154,6 @@ function recording.unpack_keys(value)
     for _, bit in ipairs(key_bits) do
         if math.floor(value / bit[2]) % 2 == 1 then letters[#letters + 1] = bit[1] end
     end
-    -- Bit 1 (unused by the original): the computer controls this human fighter (base/game/match "read_control").
-    if value % 2 == 1 then letters[#letters + 1] = "A" end
     return table.concat(letters)
 end
 -- Function-key flags of byte 8.

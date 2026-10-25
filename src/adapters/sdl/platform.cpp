@@ -943,9 +943,11 @@ private:
         const std::string_view rectangle = std::string_view(element.label).substr(0, bar);
         auto found = ui_textures_.find(element.value);
         if (found == ui_textures_.end()) {
-            if (ui_textures_.size() >= 256) ui_textures_.clear();
-            auto texture = load_bitmap_texture(element.value, false);
+            // A bitmap that cannot load stays a blank space, without a new attempt on every frame.
+            auto texture = ui_missing_.contains(element.value) ? Result<Texture>(fail(ErrorCode::io, "missing"))
+                                                                : load_bitmap_texture(element.value, false);
             if (!texture) {
+                ui_missing_.insert(element.value);
                 ImGui::Dummy({size(element.width), size(element.height)});
                 return;
             }
@@ -1003,6 +1005,8 @@ private:
             return;
         }
         if (!start_ui()) return;
+        // The menu images' cache is bounded; it empties between frames, never while ImGui still draws an image.
+        if (ui_textures_.size() >= 256) ui_textures_.clear();
         // Without menus ImGui runs no frames, so the events of that time wait in its queue. A menu that appears must
         // not take them: the Enter that opened a chat line would send it at once.
         if (!ui_shown_) {
@@ -1589,6 +1593,7 @@ private:
     std::map<std::string, std::string> ui_inputs_; // each input's text as typed
     std::map<std::string, std::string> ui_given_;  // each input's value as the scripts last gave it
     std::map<std::string, Texture, std::less<>> ui_textures_; // the bitmaps of menu images
+    std::set<std::string, std::less<>> ui_missing_;            // menu images that cannot load
     std::set<std::string> focused_;                // inputs that took the keyboard when they appeared
     ImGuiStyle base_style_;
     float ui_scale_ = 0.0f;
