@@ -311,6 +311,18 @@ A host can send scripts to an older engine. Before the dynamic mode starts, the 
 
 Each step can ship alone and keeps the classic mode exact.
 
+### What is built (first version)
+
+A first version takes a shorter way than steps 3 and 4. It reuses the render area of the engine and does not add the `world_view` block yet:
+
+- The render area takes a drawing origin and a scale (`context.render_area(x, y, w, h, ax, ay, scale)`, Viewport `area_x`, `area_y`, `area_scale`). The engine draws the commands 1:1 into a texture of `w / scale` by `h / scale` and scales it once into the area. The texture keeps spare room, so that a zoom does not make a new texture on every frame.
+- base/ui/camera_view.lua frames the human fighters (this computer's fighters in a network game), adds the other fighters below slot 20 when they fit, and zooms out up to the player's widest view (`camera_widest`, 100 to 300 percent of the window), never past the open stage. The motion uses smoothing, with a faster zoom out than zoom in, and it snaps at a new stage.
+- The world band keeps the art's rows 128 to 550. A wider view makes the band lower, at the bottom of the classic picture, and the HUD, the texts and the flow's overlays draw over it at the window's scale (`context.overlay(true)`).
+- The mode is the third value of the battlefield layout: `dynamic`, next to `classic` and `expand` (Wide). The settings menu's Display page sets it and the widest view. Page Up and Page Down zoom during a fight, and Home goes back to the automatic view.
+- Tests: the same trace gives the same fight description with the classic and the dynamic camera, and `--rollback-check` and `--net-sim` pass with it. Without a window (headless runs) the camera uses the classic picture's size.
+
+The steps below stay the plan for the rest: the sky above row 128, the `sharp` filter, the mouse wheel and middle drag, the follow choices and edge indicators, the sound listener, the HUD layouts, culling and split screen.
+
 1. Test tools. Add `frame_hash=` to the headless summary (src/app/application.cpp:1203), `--window WxH`, and `view=` in `screen.describe` (match_screen.lua:497). Record the baseline hashes. Players see no change.
 2. Refactor the drawing. Move the choice of the camera in `screen.draw` (match_screen.lua:625-690) and `follow_step` into base/ui/camera_view.lua, with one result: a view record. The draw functions (`draw_item`, background.paint, fight_effects.draw) take this record. Add the offset context for the HUD. Move the advance of the background counters out of `visible` into a function that runs once per frame. The frame hashes must not change.
 3. Engine. Add the `world_view` command, `scale_y`, the `sharp` filter, the mouse wheel and the middle button: include/openlf2/ports/platform.hpp, src/adapters/luajit/runtime.cpp, scripts/runtime/bootstrap.lua, src/adapters/sdl/platform.cpp (`present`, `draw_commands`, `sprite_effects_`), and the headless platform. A developer option draws the classic picture through a block at scale 1, and its screenshot must equal the classic one.
