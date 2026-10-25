@@ -126,8 +126,8 @@ All steps of the list that follows are built (base/ui/fight_hud.lua, base/ui/pan
 
 - The cards and the boss bars are Dear ImGui windows with two new engine elements, `bar` (a bar with a lighter part behind it and a label) and `group`, and two flags, `compact` (small spaces in a window) and `small` (a small text).
 - The stage panel counts the enemies on the field and the ones that still wait to come in the current phase. A random entry of the stage data shows the face of the random portrait.
-- Panels anchored at the top sit under the boss bars, so they move down while a boss is on the field.
-- The minimap starts at the top center, under the cards.
+- Only the size of the window moves the world and the panels. The card row keeps its height, and the boss bars float over the top of the world under the cards, so a boss that comes moves nothing.
+- The minimap starts at the bottom center.
 - The player colors apply on the new screen. The classic screen keeps the team fonts of the original for the names.
 - The engine passes the mouse wheel to the scripts as ` z` and the steps.
 - The damage chart and the input timeline still draw with the bitmap font of the original, so their text is soft at 4K.

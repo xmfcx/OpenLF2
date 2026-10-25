@@ -185,7 +185,8 @@ local function display_page(context, env)
             minimap = i18n.tr("Minimap")}
         for position, id in ipairs(panels.ids) do
             if position > 1 then imgui.same_line(context) end
-            imgui.selectable(context, "panel_" .. id, labels[id], env.panels and panels.shown(env.panels, id), 0, 0)
+            -- A width of its own: a selectable of width 0 takes the rest of the line and covers the ones after it.
+            imgui.selectable(context, "panel_" .. id, labels[id], env.panels and panels.shown(env.panels, id), 82, 0)
         end
     end
     imgui.selectable(context, "fullscreen", i18n.tr("Fullscreen"), values.fullscreen, 0, 0)

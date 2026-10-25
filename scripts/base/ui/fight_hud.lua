@@ -98,7 +98,8 @@ end
 
 -- The layout of the window (`bounds`, viewport units): left, top, right, bottom, width, height; the cards (each with
 -- x, y, width, height) and the bottom of their row (`cards_bottom`), the boss bars, and the rows for the world
--- (`region_top` to `region_bottom`).
+-- (`region_top` to `region_bottom`). Only the window's size moves the rows: the card row keeps its height, and the
+-- boss bars float over the top of the world's rows, so a boss that comes moves nothing.
 function hud.layout(bounds, current, info)
     local layout = {left = bounds.left, top = bounds.top, right = bounds.right, bottom = bounds.bottom}
     layout.width, layout.height = layout.right - layout.left, layout.bottom - layout.top
@@ -128,12 +129,12 @@ function hud.layout(bounds, current, info)
         last = card.value.team
     end
     layout.cards = list
-    layout.cards_bottom = layout.cards_top + (count > 0 and card_height or 0)
-    layout.bosses = info and info.bosses or {}
-    layout.boss_top = layout.cards_bottom + 3
-    layout.boss_height = #layout.bosses > 0 and 6 + #layout.bosses * boss_row or 0
-    layout.region_top = layout.boss_top + layout.boss_height + 3
+    layout.cards_bottom = layout.cards_top + card_height
+    layout.region_top = layout.cards_bottom + 3
     layout.region_bottom = layout.bottom - 20
+    layout.bosses = info and info.bosses or {}
+    layout.boss_top = layout.region_top + 2
+    layout.boss_height = #layout.bosses > 0 and 6 + #layout.bosses * boss_row or 0
     return layout
 end
 
@@ -181,10 +182,11 @@ function hud.draw_cards(context, current, layout)
     end
 end
 
--- The bosses of Stage mode: a large bar each, under the cards.
+-- The bosses of Stage mode: a large bar each, over the top of the world under the cards (between the panels of the
+-- corners).
 function hud.draw_bosses(context, layout)
     if #layout.bosses == 0 then return end
-    local width = math.min(600, math.floor(layout.width * 0.55))
+    local width = math.min(420, math.floor(layout.width * 0.4))
     local x = layout.left + math.floor((layout.width - width) / 2)
     imgui.window(context, "bosses", "", x, layout.boss_top, width, layout.boss_height,
         imgui.no_title + imgui.glass + imgui.passive + imgui.compact)

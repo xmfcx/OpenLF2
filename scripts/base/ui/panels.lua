@@ -9,7 +9,7 @@
 local panels = {}
 
 local handle_size = 9
--- anchor: two letters, the vertical edge (t: under the cards and boss bars, b: the window's bottom) and the horizontal one (l, c,
+-- anchor: two letters, the vertical edge (t: under the cards, b: the window's bottom) and the horizontal one (l, c,
 -- r); dx and dy: the distance from them; resize: the limits of the size, or nil for a panel of a fixed size.
 local defaults = {
     chart = {anchor = "tr", dx = 6, dy = 20, width = 220, height = 100, shown = true,
@@ -17,7 +17,7 @@ local defaults = {
     timeline = {anchor = "bl", dx = 6, dy = 22, width = 330, height = 82, shown = true},
     stage = {anchor = "tl", dx = 6, dy = 20, width = 210, height = 74, shown = true,
         resize = {width = {120, 500}, height = {40, 300}}},
-    minimap = {anchor = "tc", dx = 0, dy = 0, width = 360, height = 28, shown = true,
+    minimap = {anchor = "bc", dx = 0, dy = 22, width = 300, height = 28, shown = true,
         resize = {width = {160, 1600}, height = {18, 80}}},
 }
 panels.ids = {"chart", "timeline", "stage", "minimap"}
@@ -74,8 +74,7 @@ function panels.set_shown(state, id, shown)
     save(state)
 end
 
--- The rectangle of panel `id` in the layout (base/ui/fight_hud layout: the window, and `region_top` under the cards
--- and the boss bars):
+-- The rectangle of panel `id` in the layout (base/ui/fight_hud layout: the window, and `region_top` under the cards):
 -- x, y, width, height, kept inside the window.
 function panels.rect(state, id, layout)
     local place = state.places[id]
