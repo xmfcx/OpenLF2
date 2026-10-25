@@ -1,6 +1,11 @@
-# The computer fighters (current AI)
+# The AI of the computer fighters
 
-This document describes the AI that OpenLF2 has today: where it runs, what it sees, how it decides, what it writes, and how you change it. The AI is a port of the original game's routines for computer fighters. docs/ai-plan.md describes the new AI framework. docs/ai-moves.md lists the moves of every fighter.
+This document describes the AI that OpenLF2 has today. It has two parts:
+
+- The classic AI: a port of the original game's routines for computer fighters. It plays every computer fighter unless a developer option picks another brain. The sections from "Summary" to "Cost" describe it.
+- The AI framework: the brain registry, the move book, perception, prediction, the AI log and the development view (docs/ai-plan.md phases 1 to 3). The section "The AI framework" describes what is built.
+
+docs/ai-plan.md is the plan for the rest of the work. docs/ai-moves.md lists the moves of every fighter.
 
 ## Summary
 
@@ -138,6 +143,99 @@ The AI writes only fields of its own fighter. control.lua reads them on the same
 
 A headless run of 3000 fight ticks with 5 computer fighters took 3.9 s with the AI and 2.8 s with an AI that returns at once (debug build, best of 3 runs). That is about 0.07 ms for each computer fighter and tick, and part of it is the extra fighting that the AI causes. The AI scans all targets and objects for each computer, so the cost grows with the square of the fighter count.
 
+## The AI framework
+
+The framework lets a fighter use another brain than the classic AI, and it gives a brain the knowledge and the tools to play well. Phases 1 to 3 of docs/ai-plan.md built it. No brain uses it to fight yet: the brains `idle` and `sentry` are test brains.
+
+### One tick with the framework
+
+```mermaid
+flowchart TB
+    subgraph tick["match.step: read_input (one tick)"]
+        begin["trace.begin_tick<br/>(a tick that runs again drops its old log entries)"]
+        prepare["ai.prepare: the scan of the tick"]
+        control["brains.control(state, index, scan)<br/>for each computer fighter"]
+        begin --> prepare --> control
+    end
+    control -->|"no brain name"| classic["brain classic<br/>ai.control, unchanged"]
+    control -->|"value.ai.brain, ai_brains[index], ai_brain"| brain["brain.tick(state, index,<br/>memory, scan, log, book)"]
+    brain --> perception["perception.world(state, scan)<br/>one snapshot per tick, in the scan"]
+    brain --> predict["predict: threats, openings,<br/>hit chance, risk"]
+    brain --> senses["senses: what the brain noticed, and when"]
+    book[("move book<br/>cached by data table")] --> perception
+    book --> predict
+    perception --> predict
+    brain --> memory[("value.ai in the match table<br/>(rollback saves it)")]
+    brain --> keys["value.keys, value.previous_keys"]
+    brain -.->|"events, only when on"| trace[("trace buffer<br/>outside the match")]
+    trace -.->|"after the network exchange"| log["log ai ... lines<br/>(--ai-log)"]
+    view["ui/ai_view (F10, --ai-view)<br/>reads the match, draws boxes and threats"] -.-> perception
+```
+
+### Modules and where their state lives
+
+The place of each piece of state decides whether the framework stays deterministic and rollback-safe.
+
+| Module | Role | State and where it lives |
+|---|---|---|
+| scripts/base/ai/brains.lua | the registry, picks the brain of each fighter, starts a brain's memory | `value.ai` (the memory) and `state.ai_brain`, `state.ai_brains` in the match table: a rollback saves them and the hash covers them |
+| scripts/base/ai/random.lua | the AI random stream (Park-Miller) | one integer `memory.rng`. The start of a brain takes one value from `engine.random` |
+| scripts/base/ai/move_book.lua | the moves of a fighter from its frames | a module cache by data table: fixed data, never copied by a rollback |
+| scripts/base/ai/perception.lua | one snapshot of the fight for each tick | the scan of the tick (`scan.world`): rebuilt on every tick, never kept |
+| scripts/base/ai/senses.lua | the reaction record of a brain | three short arrays in the memory |
+| scripts/base/ai/predict.lua | threats, openings, hit chance, risk | none: pure functions |
+| scripts/base/ai/trace.lua | the debug side channel and the AI log | a module buffer outside the match. Brains write it and never read it |
+| scripts/base/ui/ai_view.lua | the development view | a module switch. It only reads the match |
+| scripts/base/ai/brains/*.lua | `classic`, `idle`, `sentry` | their memory in `value.ai` (none for classic) |
+
+### The brain interface
+
+A brain is a table `{name, version, start, tick, describe}`. The comment at the top of brains.lua is the reference.
+
+- `start(state, index, seed)` returns the memory. The memory holds numbers, short strings and short arrays only, never a table of the move book or of the snapshot, because a rollback copies the memory.
+- `tick(state, index, memory, scan, log, book)` writes the keys of the fighter for this tick. `log` is nil unless the trace follows this fighter. `book` is the move book of the fighter.
+- `describe(memory)` gives a short text for the fight description (`ai=NAME/TEXT`).
+
+The brain of a fighter is the first of: the name in its memory, `state.ai_brains[index]`, `state.ai_brain`, `classic`. Today only `--ai-brain` sets the last two, and only for local fights.
+
+### The move book
+
+`move_book.get(record)` reads the frames of a fighter once. For each special and basic move, it has the cost, the length in ticks, the first and last hit, the recovery, the damage, the reach, the projectiles, the follow-up inputs and tags. A timeline gives each tick of the move its frame, its hit boxes (relative to the fighter), its body and its forward distance. For each frame, the book has a class (free, moving, attacking, air, defending, hurt, falling, lying, dizzy, caught, catching, frozen, recovering, busy), the ticks until the fighter is free, and its place in a move (`move_at`). An attacking frame that no move reaches from its start gets a fragment. A move ends where its chain reaches a free frame, 999, 1000, a hold or a loop, the same rule as tools/lf2_moves.py. The books of all 23 fighters take 11 ms in a debug build.
+
+### Perception and prediction
+
+`perception.world(state, scan)` builds one snapshot for each tick. An entry has the position, the speed, the frame class, the ticks until free, the move and its timeline index, the body and hit boxes in world coordinates, the rest timers of combat, and the holder of a held weapon.
+
+`predict` answers four questions:
+
+- `threats`: which attack, flying object or held weapon hits a fighter, and in how many ticks. It follows the combat rules that block a hit (the attack rest, the pair rest, the blink, weak hits on a falling fighter). An attacker moves from its current speed by the `dvx` and `dvy` of its frames, with gravity and ground friction.
+- `opening`: how many ticks a fighter cannot act.
+- `hit_chance`: whether a move that starts now hits a target, on which tick, and whether the target can act before it.
+- `risk`: how much damage an enemy can do if a move misses.
+
+The test brain `sentry` measures the prediction. Over 8 seeds of 3000 ticks with classic attackers, 133 of 143 hits from hit boxes had the exact tick predicted, 1 was 1 tick away and 9 were missed. Grabs (base/game/grab) and the landing after a throw hurt without a hit box, and prediction does not cover them yet.
+
+### Logs and the development view
+
+- `--ai-log [all|INDICES]` writes `ai t=TICK i=ITEM ev=...` lines. The classic brain writes `ev=target`, `ev=move` and `ev=sum`. The sentry writes `ev=threat` and `ev=hurt`. A fight that can roll back writes a tick 32 ticks later, so that no rollback can change it.
+- `--ai-view` or F10 draws the body boxes, the hit boxes, the path of flying objects, the frame class with the ticks until free, and the ticks to the next threat over each fighter.
+- The fight description shows `ai=BRAIN/DETAIL` on a fighter with a brain other than `classic`.
+
+### Limits of the framework today
+
+- Perception has one notion of an enemy: a different team. Combat agrees, but the classic AI does not choose players of other teams as targets in Stage mode. Target choice needs its own rule.
+- Grabs, throws and the catch moves (`catch` hit boxes) are not threats in the prediction.
+- A brain other than `classic` can play only in local fights (`--ai-brain`). The setup screen and network sessions do not offer brains yet, and such a fight makes no recording.
+- Positions and speeds are numbers with a fraction, like the physics of the game. A brain must turn them into whole numbers before it compares scores, so that small differences between platforms do not change a decision.
+- Known bugs, from a review of the code (docs/ai-plan.md phase 4 fixes them):
+    - Prediction uses a held weapon's own team, but combat uses the team of its holder (base/game/combat).
+    - Thrown items, drinks and baseballs fly with gravity, but prediction moves them in straight lines.
+    - A negative `next` turns a fighter, but the move book and prediction keep the direction.
+    - The senses key a source by slot and record id. A new ball in a reused slot keeps the old reaction start.
+    - The engine changes `value.record` in place on a transform or a merge. A brain's memory then points into the wrong move book.
+    - `base/game/rollback` skips the fields `record`, `records`, `stage`, `view`, `capture` and `last_snapshot` at any depth, so a brain memory must never use these names.
+    - The snapshot makes new tables for every item on every tick, and a chasing ball makes the next brain build it again.
+
 ## Tools that help with the AI today
 
 | Tool | What it gives |
@@ -150,12 +248,13 @@ A headless run of 3000 fight ticks with 5 computer fighters took 3.9 s with the 
 | The damage chart and the fight HUD | the damage share and the hp of each fighter |
 | Recordings and replays | a fight again, with the same AI decisions |
 | `--ai-log [all\|INDICES]` | the AI log: a line for each new target and each special move, and a summary every 30 ticks (docs/ai-plan.md "Logs for agents") |
-| `--ai-brain NAME` | another brain for the computer fighters of local fights, for example `idle` |
-| `--ai-view`, F10 | the development view of the AI over the fight: hit boxes, body boxes, frame classes, threats (docs/ai-plan.md phase 3) |
+| `--ai-brain NAME[,INDEX=NAME]` | another brain for the computer fighters of local fights, for example `idle` or `11=sentry` |
+| `--ai-view`, F10 | the development view of the AI over the fight: hit boxes, body boxes, frame classes, threats |
 | `--ai-book [all\|ID]` | the move book of the AI as log lines (base/ai/move_book), which `tools/lf2_moves.py FOLDER --check LOG` compares with the data files |
 | tools/lf2_moves.py | the move list of every fighter from the data files (docs/ai-moves.md) |
+| tools/ai_prediction_check.py | the accuracy of the predicted threats in a sentry's log |
 
-The game has no view of the AI's decisions yet, and no way to run many AI fights and count the results. docs/ai-plan.md adds them.
+The game has no inspector of a brain's decisions yet, and no way to run many AI fights and count the results. docs/ai-plan.md adds them.
 
 ## How to change the current AI
 

@@ -1,181 +1,157 @@
-# The new AI framework (plan)
+# The AI framework (plan)
 
-This plan replaces the single AI routine of the original (docs/ai.md) with a framework for advanced computer fighters. The framework gives each fighter several personalities, a view for developers that shows what the AI thinks, and logs that an agent can read to debug a behavior. Learning across matches comes later, but the framework keeps a place for it. docs/ai-moves.md lists the moves that the new AI uses.
+This plan builds advanced computer fighters for OpenLF2: strong and human-like play, several personalities for each fighter, a development view and logs to debug a behavior, an arena for AI fights, and later learning. Phases 1 to 3 are built (2026-10-25), and docs/ai.md describes them as they are. This version of the plan comes from what the first three phases taught and from a review of their code. docs/ai-moves.md lists the moves of every fighter.
 
 ## Goals
 
-1. Strong play: the AI uses the frame data (hit boxes, start-up, reach, cost) of every move, so it hits when a hit is possible and does not attack when the attack loses.
-2. Personalities: each fighter has two or three styles of play, and each style is a set of numbers in a data file.
-3. Fair senses: the AI sees the fight with a reaction delay and a limit on its attention, and it types its keys like a player. The difficulty sets these limits.
-4. Speed: the AI costs at most 0.1 ms for each computer fighter and tick on average, also in Stage mode with many enemies and during a rollback.
-5. Visibility: a development view shows the decisions, the scores and the active behavior while the fight runs, and a log shows the same facts as text.
-6. Safety: the classic AI stays exact, so the original's recordings and the demo do not change. The new AI is deterministic and passes `--rollback-check`, `--net-sim` and tools/test-online.sh.
-7. Room to learn: the AI can adapt during a match, and later the numbers and policies can come from self-play.
+Each goal has a measure, so that the arena and the tests can tell when it is reached.
 
-## Limits from the engine
+1. Strong play. With the senses and input limits of Crazy (those of a good human player), the new brain wins at least 70% of 1v1 fights against the classic AI on Crazy for each of the ten main fighters, with a sequential test at a 5% error rate (see "Arena").
+2. Personalities. Each fighter has two or three personas. In the arena, the personas of one fighter differ clearly in their move use, distance and aggression (a distance between their move histograms above a fixed limit).
+3. Fair senses and hands. On Easy, Normal, Difficult and Crazy, a brain sees the fight with a reaction delay and types its keys at the human rate, with errors that the difficulty sets. Easy loses clearly to Crazy in the arena. A fifth level, Superhuman, has no limits.
+4. Speed. The AI keeps to a budget for each frame that counts re-runs after a rollback, the catch-up and the server. It also keeps to it in Stage and Battle mode with many fighters.
+5. Visibility. The development view shows the decisions, the scores and the active behavior of a brain while the fight runs. The log gives an agent the same facts as text.
+6. Safety. The classic AI stays exact for the original's recordings and the demo. Every brain is deterministic and passes the rollback check, the simulated network and the online tests.
+7. Room to learn. A brain adapts during a fight. Later, persona numbers and policies come from self-play and from recorded play, without a loss of determinism.
 
-These facts of the engine shape every decision of the plan:
+## Lessons from phases 1 to 3
 
-- The fight is a lockstep simulation (all computers run the same ticks). Each computer of a network game runs the AI of every computer fighter, and all of them must get the same keys. The AI can use only the fight state and its own random stream.
-- A rollback saves and restores only the match table. All memory of the AI must live in the match table, and it must be small, because each save copies the whole table (base/game/rollback).
-- A client in a network game runs some ticks more than once. The AI must be cheap, and its debug output must not count a tick twice.
-- The hash of the fight covers all of the match table. Numbers with a fraction are a risk across platforms (for example a fused multiply-add on ARM64). The AI uses integers for its scores, like the original's rules.
-- The original's recordings store only the keys of the players and run the classic AI again. A new AI in a recording needs its own data, or the recording stops (like `ai_control` today).
+| What we learned | What changes in the plan |
+|---|---|
+| A log plus a checker tool (the sentry and tools/ai_prediction_check.py) measured the prediction quickly and found 4 kinds of errors. | Every capability gets a test brain and a checker: prediction, the actuator, reflexes, the planner (Phase 4 and later). |
+| `rollback.lua` skips the fields `record`, `records`, `stage`, `view`, `capture` and `last_snapshot` at any depth. A brain memory with such a field escapes the copy and the hash. | A memory validator under `--rollback-check`, and rules for the memory (see "Rules for brains"). |
+| A rollback rebuilds tables in `pairs` order, so the order of a hash-part table can differ between two clients. | Brains keep dense arrays and never walk a table with `pairs` or `next`. |
+| The engine changes `value.record` in place on a transform or a merge (frame_rules.lua, merge.lua, grab.lua). The memory then points into the wrong move book. | The memory keeps the record id, and a brain restarts or adapts when it changes. |
+| Human keys change only on every second tick, and the combo sequences of control.lua have no timeout. The classic AI writes keys on every tick, fakes fresh presses and completes sequences at once. | An actuator with a model of control.lua and of the input rate, and the only writer of `previous_keys` (Phase 6). |
+| Combat and target choice ask different questions: combat lets players of different teams hit each other, but the classic AI does not choose them as targets in Stage mode. A held weapon spares its holder's team. | Two rules in perception: `can_hurt` and `enemy`. Weapons use their holder's team. |
+| Grabs, throws, turns (negative `next`), thrown items with gravity and reused slots made predictions wrong. | Phase 4 fixes them before a brain depends on them. |
+| The snapshot allocates tables for every item on every tick, and a chasing ball throws it away. | A snapshot that the perception updates in place, with culling by position. |
+| A trace through the setup screen cannot choose the fighters, and each run loads the installer. | `--fight SPEC` and a batch mode for the arena (Phase 5). |
+| The positional arguments of `brain.tick` grow with each phase. | A brain context (version 2 of the interface). |
+| Every fight is a new `match.create`. Learning and personas need a path into the match. | The match options carry the brains, the personas, the difficulty values and the stored learning. |
 
-## Where the brain runs
+## Rules for brains
 
-The brain (the part of the AI that decides for one fighter) can run in two places.
+These rules keep brains deterministic and rollback-safe. The memory validator checks the first group under `--rollback-check`.
 
-| | In the simulation (default) | Outside the simulation, as a pilot (later) |
-|---|---|---|
-| Where | inside `match.step`, on every computer | on one computer, after the frame, like a player |
-| Output | the keys of the fighter, on the same tick | keys that go into the input, like a human's keys |
-| Determinism | required: integers, its own random stream | not required: it can use any math |
-| Cost | paid again on each rollback and on each computer | paid once |
-| Network | no dependency on one computer | the fighter waits when that computer drops |
-| Use | all computer fighters, Stage enemies, the demo | heavy models, external training, tests that drive a player |
+- The memory (`value.ai`) holds numbers, short strings, booleans and dense arrays of them. It never holds a function, a table of the move book or of the snapshot, or a field named `record`, `records`, `stage`, `view`, `capture` or `last_snapshot`. It stays under a cap: 64 numbers and 8 arrays of at most 32 entries each.
+- A brain updates its arrays in place and does not make new tables on each tick.
+- A brain never walks a table with `pairs` or `next`, and the order of every loop is fixed.
+- A brain uses `+ - * /`, `math.floor`, `math.abs`, `math.min`, `math.max` and `math.sqrt`. It never uses `math.exp`, `math.log`, the trigonometric functions or `^` with an exponent that is not a whole number, because the C libraries of Linux and Windows can give different results.
+- A brain compares whole numbers. It rounds positions and speeds before it scores, and its scores are integers.
+- A brain uses only its own random stream after its start, never `engine.random`.
+- A brain writes to the trace and never reads it. It never reads a timer.
 
-The plan uses the simulation for all brains. The interface of a brain is the same in both places, so a pilot host can come later without a change to the brains.
-
-## The parts of the framework
+## Target architecture
 
 ```mermaid
 flowchart TB
-    subgraph data["Fixed data (shared, not copied by a rollback)"]
-        book["Move book<br/>ai/move_book.lua<br/>moves from the frames:<br/>timing, hit boxes, reach, cost"]
-        kits["Fighter kits and personas<br/>ai/fighters/*.lua<br/>move tags, combos, styles"]
+    subgraph fixed["Fixed data (outside the match table)"]
+        book["Move book<br/>moves, timelines, frame classes,<br/>input latency, catches and throws"]
+        kits["Fighter kits and personas<br/>tags, combos, styles"]
+        difficulty["Difficulty table<br/>reaction, precision, rate"]
     end
-    subgraph tick["Once per tick, for all brains"]
-        world["Perception<br/>ai/perception.lua<br/>one snapshot of the fight"]
+    subgraph match["Match table (rollback saves it)"]
+        memory[("value.ai: brain memory")]
+        team[("state.ai_team: team table")]
+        past[("state.ai_past: short ring of past<br/>positions and frames")]
+        options[("state.ai_brains, personas,<br/>stored learning")]
     end
-    subgraph brain["One brain per computer fighter"]
-        senses["Senses<br/>reaction delay, attention"]
-        predict["Prediction<br/>ai/predict.lua<br/>threats, openings, hit chances"]
-        memory[("Memory in the match table<br/>value.ai: intent, plan,<br/>random stream, opponent model")]
-        reflex["Reflexes<br/>every tick: defend, dodge, escape"]
-        intents["Intents (utility scores)<br/>engage, punish, zone, evade, ..."]
-        tactics["Tactics (behavior trees)<br/>one small tree per intent"]
-        planner["Move planner<br/>best move or combo now"]
-        actuator["Actuator<br/>ai/actuator.lua<br/>types the keys over the ticks"]
+    subgraph tick["One tick"]
+        world["Perception: snapshot in place,<br/>culled by position"]
+        context["Brain context"]
+        reflex["Reflexes: every tick"]
+        think["Think: every N ticks, staggered<br/>intents, tactics, planner"]
+        action["Actions: move to, keep distance,<br/>start move, defend, jump, pick up ..."]
+        actuator["Actuator: key program,<br/>model of control.lua, input rate"]
     end
-    trace["Debug trace (side channel)<br/>ai/trace.lua<br/>only when the view or the log is on"]
-    world --> senses --> predict
-    book --> predict
-    kits --> intents
-    kits --> planner
-    predict --> reflex
-    predict --> intents --> tactics --> planner --> actuator
-    reflex --> actuator
-    memory <--> intents
-    memory <--> tactics
-    memory <--> actuator
-    actuator --> keys["value.keys, value.previous_keys<br/>(the same fields as a human)"]
-    brain -.->|"writes, never reads"| trace
-    trace -.-> view["Development view<br/>ui/ai_view.lua"]
-    trace -.-> log["AI log<br/>log ai ... lines"]
+    book --> world
+    world --> context
+    past --> context
+    memory <--> context
+    team <--> context
+    kits --> think
+    difficulty --> context
+    context --> reflex --> action
+    context --> think --> action
+    action --> actuator --> keys["value.keys, value.previous_keys"]
+    context -.->|"write only"| trace[("Trace: log and view")]
 ```
 
-### Move book
+### Brain context (interface version 2)
 
-The move book is the knowledge of the AI. It reads the frames of each fighter record once, when the record loads, and keeps the result on the record. The record is fixed data, so a rollback does not copy it and the hash does not include it.
+`brain.tick(context)` replaces the positional arguments. The registry fills one context table for each call and reuses it, so a brain never keeps it.
 
-For each move, the book keeps:
+- `context.state`, `context.index`, `context.self` (the fighter), `context.memory`.
+- `context.world` (the snapshot), `context.me` (this fighter's entry), `context.view` (what the senses allow, see below).
+- `context.book`, `context.persona`, `context.difficulty`.
+- `context.act` (the action interface of the actuator), `context.log` (nil or the trace writer), `context.team` (the team table entry).
+- `context.random(range)` (the brain's random stream).
 
-- The input and the frames where the input works (the same facts as tools/lf2_moves.py, but complete).
-- The cost in mp and hp, and the cost of a held move for each frame.
-- A timeline for each tick of the move: the hit boxes relative to the fighter (with damage, `fall`, `bdefend`, effect, `zwidth`), the body boxes (no body box means that the fighter cannot be hit), and the movement (`dvx`, `dvy`, `dvz`).
-- The start-up (ticks to the first hit), the active ticks, the recovery (ticks to a frame where the fighter can act again), and the follow-ups (`hit_a`, `hit_j`, `hit_d` and combo fields inside the move).
-- The projectiles: the object, its speed, its hit box, its life, and whether it chases.
-- Tags from the analysis: close, ranged, anti-air, breaks defense, knocks down, catch, heal, movement, transform.
+Version 1 brains (`idle`, `sentry`) keep working through a small adapter until they move to version 2.
 
-The book also maps every frame of a fighter to a short class: free, moving, attacking (with the move), defending, in the air, hurt, lying, dizzy, caught, catching, and the ticks until the fighter is free. Prediction needs this class for every fighter on the field.
+### Knowledge
 
-### Perception
+The move book stays fixed data. It gets these additions:
 
-Perception builds one snapshot of the fight on each tick, before the first brain runs. It extends `ai.prepare`, which already scans the items once. The snapshot is a local table of the tick and never goes into the match table.
+- Turns: a negative `next` turns the fighter. The timeline marks the tick, and prediction turns the direction there.
+- Catches and throws: the `catch` hit boxes, the caught frames, the throw injuries (`cpoint`) and the fall damage on landing, so that prediction can warn of a grab and plan a throw.
+- Input latency: for each move and each starting class, the ticks from the first key to the move's first frame, at the fast rate and at the human rate. The sequences of control.lua have no timeout and can advance more than one step in a tick, so the latency is short at the fast rate and longer at the human rate. The drill brain of phase 6 measures it for every move.
+- A weapon book: the strength entries of each weapon and the attack frames with `wpoint.attacking`, so that the planner knows the reach and damage of a swing and a throw.
+- A dry run of control.lua: given a frame, held keys and fresh presses, which frame comes next. The planner uses it instead of a copy of the rules. It is the same code that the fight runs, in a mode that writes nothing.
+- The books of fighters that can appear later (Stage spawns, transforms, clones) build before the fight, not inside a tick.
 
-For each fighter, ball and item, the snapshot holds the position, the speed, the team, the frame class, the hit boxes and body boxes in world coordinates, the hp, the mp and the ticks until the fighter is free. It also sorts the items by `x`, so that a brain can find its near neighbors without a scan of all items.
+### Perception and senses
 
-### Senses
-
-The senses limit what one brain knows. They make the difficulty and the personality fair.
-
-- Reaction delay: a brain notices that an enemy starts a move only after its reaction time (for example 6 ticks on Easy and 2 on Crazy). The memory keeps the frame and the tick when it last saw each tracked enemy start a move.
-- Attention: a brain follows only a few fighters closely (the target, the nearest threats, its allies in need). Other fighters are only positions.
-- Noise: a brain can misjudge a distance by a few pixels, from its own random stream.
+- The snapshot updates its entries in place on each tick, without new tables. A chasing ball does not throw the snapshot away when the slot list stays the same.
+- Culling: queries use the list sorted by `x` (`by_x`) and look only within reach plus speed times the horizon.
+- Two rules: `can_hurt(a, b)` follows combat (different teams, a held weapon takes its holder's team), and `enemy(a, b)` follows the classic AI's rule for targets in each mode.
+- Reaction delay by structure: the match keeps a short ring of past states (`state.ai_past`: position, frame and hp of each character for the last 12 ticks, in arrays). A brain sees the world as it was `reaction` ticks ago and predicts the present from there. Its reflexes see the same delayed world. Only Superhuman sees the present.
+- Attention: a brain follows a few sources closely and sees the rest as positions only.
+- Senses key a source by slot, record id and spawn tick, so that a reused slot is a new source.
 
 ### Prediction
 
-Prediction answers the questions of the brain with the move book and simple motion (constant speed, and the move timeline of a fighter that attacks):
-
-- Threats: which hit box or ball reaches me, in how many ticks, and how much damage it does. It also answers: what happens if I stay, if I defend, if I jump, or if I move in depth.
-- Openings: which enemy is not free for how many ticks (recovery, lying, dizzy, broken defense).
-- Hit chance: if I start move M now, does it hit target T, on which tick, and can T defend or escape before that tick.
-- Risk: if move M misses, how many ticks am I open, and can the enemy hit me in that time.
-
-Each answer is a short loop over the ticks of one move timeline. The brain asks only about a few candidate moves and one or two targets, so the cost stays small.
-
-### Memory
-
-The memory of a brain is the table `value.ai` on its fighter, in the match table. It holds numbers and short arrays only:
-
-- The brain and the persona (two short names), and the version of the persona.
-- The random stream of the AI (one integer, a Park-Miller generator, so that the numbers stay exact in a double). The start of a brain takes one value from `engine.random` for the seed. After that, the brain does not use `engine.random`, so a change to its decisions never changes the random items, the drops or the stage of a fight.
-- The current intent, the tick when it started, the active node of the tactic, and the planned move or combo.
-- The key program of the actuator (the keys of the next ticks).
-- The tracked enemies (frame and tick of the last move start).
-- The opponent model and the move results (counters, for learning during the match).
+- Fixes: the holder's team for weapons, gravity for thrown items, drinks and baseballs, turns, and the spawn tick in the source key.
+- New threats: grabs (an enemy walks into a dizzy fighter, or a catch move reaches it), throws and landings.
+- Defense outcomes: what happens if the defender defends (`bdefend` against the defend points), jumps, rolls or moves in depth.
+- Hit chance with latency: a planned move starts after its input latency, and a target that defends or can act in time lowers the chance.
+- A "what does A do here" query through the dry run: A near an item picks it up, A while running is a run attack, A next to a dizzy enemy is a super punch.
 
 ### Decisions
 
-A brain decides on three levels. A higher level runs less often:
+A brain decides on three levels:
 
-1. Reflexes run on every tick. They are short rules for danger that is near: defend against a hit box that arrives in fewer ticks than the reaction time allows, jump or move in depth away from a ball, press keys to escape a catch, roll after a fall. A reflex can stop the current plan.
-2. Intents run on each think (for example every 3 ticks, with an offset for each slot). Each intent gets a score from weighted considerations, for example "the target is open for 12 ticks" or "my mp is low". The brain keeps its intent for a few ticks unless another intent is clearly better, so it does not change its mind on every think. The intents are: engage, pressure, punish, zone, bait, evade, retreat and recover mp, get an item, use an item, help an ally, and hold a position (Stage mode).
-3. Tactics run the intent. Each intent has a small behavior tree (a tree of steps: a sequence runs its children in order, a selector tries them until one works, a condition tests a fact, an action does one thing). The trees are data tables, so the development view can draw them and a fighter kit can add its own steps.
+1. Reflexes run on every tick and stay short: defend or dodge a threat that arrives too soon to plan, escape a catch, roll after a fall, stop a move that the enemy punishes. A reflex can drop the current key program.
+2. A think runs every few ticks (3 by default), with an offset for each slot. It scores the intents with integer considerations and the persona's weights, keeps the current intent unless another one is clearly better, and runs the intent's tactic.
+3. A tactic is a small behavior tree (sequence, selector, condition, action). The trees are data tables, so the development view can draw them and a fighter kit can add steps. The tactic hands an action to the actuator, or asks the planner for the best move or combo.
 
-The move planner picks the move or the combo for an action of a tactic. It scores each candidate with the expected damage (the hit chance times the damage), the risk, the mp cost and the personality, and it chooses with the AI's random stream among the best ones. Combos come from the follow-ups of the move book and from the fighter kits, for example Davis's `DvA` then `D^A`.
+The planner scores each candidate move with the hit chance, the damage, the risk, the mp cost and the persona, and chooses with the brain's random stream among the best ones. Combos come from the follow-ups of the move book and from the fighter kits.
 
-### Actuator
+The intents: engage, pressure, punish, zone, bait, evade, retreat and recover mp, get an item, use an item, help an ally, and hold a position (Stage mode).
 
-The actuator turns a decision into keys over the next ticks. It holds a key program in the memory, for example "defend on tick 0, forward on tick 1, attack on tick 2" for `D>A`.
+### Actions and the actuator
 
-- It types special moves key by key, inside the press windows of base/game/control. A difficulty can allow the classic shortcut (the sequence marked complete).
-- It can follow the human input rate (keys change only on every second tick, like the keys of a player).
-- It limits the key changes per second (the actions per minute of the persona).
-- It adds timing errors from the random stream, by the precision of the persona.
+Brains do not write keys. They choose actions, and the actuator turns an action into keys over the next ticks:
 
-### Personalities and difficulty
+- Actions: move to a point, keep a distance, face a target, walk, run, start a move of the book, defend for N ticks, jump in a direction, dash, roll, pick up an item, throw, drink, wait.
+- The actuator keeps a key program in the memory. It types sequences key by key inside the press windows of control.lua, and it is the only writer of `previous_keys`.
+- Closed loop: on each tick, it reads `value.sequences` and the frame class. It drops the program when the fighter is hit or caught, and it reports to the brain when a move did not start.
+- Input rate: the difficulty sets it. Easy to Crazy use the human rate: keys change only on the ticks where human keys change (`input_phase` 0). Superhuman can change keys on every tick. The difficulty also sets the actions per minute and the timing errors.
 
-A persona is a set of integers from 0 to 100, plus a few distances in pixels. The personality and the difficulty are separate: the personality says what the AI likes, and the difficulty says how well it plays.
+### Teams and Stage mode
 
-| Number | Meaning |
-|---|---|
-| `aggression` | how much it likes to go in and attack |
-| `patience` | how long it waits for an opening before it forces one |
-| `risk` | how much damage it accepts to land a hit |
-| `range` | the distance that it likes to fight from, in pixels |
-| `mp_thrift` | how much mp it keeps for the strong moves |
-| `combo_greed` | how often it adds a follow-up instead of a safe stop |
-| `defense` | how often it defends or dodges a threat that it sees |
-| `mobility` | how often it runs, jumps and dashes |
-| `items` | how much it likes weapons and drinks |
-| `teamwork` | how much it helps allies and attacks the same target as they do |
-| `focus` | how it picks a target: the nearest, the weakest, the strongest, or the one that hit it last |
-| `adapt` | how fast it changes its play from what it learns in the match |
+- A team table in the match (`state.ai_team`) holds shared facts: the target of each member, the roles, the calls for help, and an `order` entry for each member. Brains write it during their think, and other brains read it on the next tick, so the order of the brains does not change a result. Orders from human players to AI allies (follow me, attack my target) are a later feature. The `order` entry keeps a place for them, and phases 4 to 12 do not build them.
+- Stage mode: a setup option "Stage AI" chooses Classic (the default, the original's feel) or New. With New, the enemies of a stage get a brain and a persona by record id and difficulty (Grunt, and Elite for bosses), and the allies of the players get their own defaults.
+- Level of detail: a brain far from every threat and every target runs only its reflexes and a cheap think. This keeps Stage and Battle mode in the budget.
 
-The difficulty sets the reaction time, the attention, the noise, the precision, the actions per minute, and whether the planner uses the full move book. The classic difficulties (Easy, Normal, Difficult, Crazy) map to four sets of these values.
+### Personas, difficulty and fighter kits
 
-### Fighter kits
+- A persona is a data table: integers from 0 to 100 for `aggression`, `patience`, `risk`, `mp_thrift`, `combo_greed`, `defense`, `mobility`, `items`, `teamwork` and `adapt`, a preferred `range` in pixels, a category `focus` (nearest, weakest, strongest, last attacker), and move preferences by tag.
+- The difficulty is a separate table: reaction ticks, attention, distance noise, timing errors, input rate, actions per minute, and whether the planner sees the full move book. It has five rows: Easy, Normal, Difficult and Crazy (the classic names, with human limits from weak to strong), and Superhuman (no limits). Superhuman uses the game rules of Crazy. The setup screen lists it after Crazy, and with classic brains it plays like Crazy.
+- A fighter kit (scripts/base/ai/fighters/NAME.lua) adds tags, combos, special rules and the personas of the fighter. A mod (`--mod`) can register a brain and add or replace a kit. A network game shares them through script sharing, so every computer runs the same brain. Players change personas through a mod, not through separate data files.
 
-A kit is one data file for each fighter (scripts/base/ai/fighters/davis.lua and so on). It adds what the frames do not say:
-
-- Tags for moves, for example "Davis `D^A` is an anti-air move" or "John `D^J` heals an ally".
-- Combos and set-ups that the planner can use.
-- Rules for special cases, for example the steering of Firen's burn run or the end of Rudolf's hide.
-- The personas of the fighter.
-
-A first list of personas (the arena tunes the numbers later):
+A first list of personas, which the arena tunes later:
 
 | Fighter | Personas |
 |---|---|
@@ -183,7 +159,7 @@ A first list of personas (the arena tunes the numbers later):
 | Firen | Pyro (burn run and flames), Zoner (balls from a distance), Bomber (explosion when surrounded) |
 | Freeze | Controller (whirlwind and ice column), Glacier (defends with the ice sword), Zoner |
 | John | Medic (heals and shields the team), Disc (disks and biscuits from a distance) |
-| Henry | Sniper (arrows, keeps the distance), CloseCombat (keeps hitting with the bow and punches instead of arrows) |
+| Henry | Sniper (arrows, keeps the distance), Bard (flute against groups) |
 | Rudolf | Assassin (hides, clones, comes in from the side), Duelist (jump sword) |
 | Louis | Bruiser (thousand-foot kick and catches), Armored (goes for the transform to Louis EX) |
 | Dennis | Kicker (whirlwind kick and many foot), Chaser (chase balls) |
@@ -192,210 +168,159 @@ A first list of personas (the arena tunes the numbers later):
 | Louis EX, Firzen, Julian | Boss (heavy pressure with the strongest moves), and one more style each |
 | Bandit, Hunter, Mark, Jack, Sorcerer, Monk, Jan, Knight, Bat, Justin | Grunt (Stage enemy), Elite (stronger and smarter) |
 
-## Brain interface
+## From the setup to the fight
 
-A brain is a module in scripts/base/ai/brains/. The registry (scripts/base/ai/brains.lua) knows the brains by name, and a mod can add a brain with `brains.register`.
-
-```lua
-local brain = {name = "idle", version = 1}
-
--- Called on the first tick of the fighter. Returns the memory (numbers, short strings and short arrays only). The
--- registry stores it in `value.ai` and adds `memory.brain`. `seed` starts the AI random stream (base/ai/random).
-function brain.start(state, index, seed) end
-
--- Called on every tick. It writes the keys of `state.items[index]`. `scan` is the scan of the tick (ai.prepare), and
--- `log` is nil, or a function(state, index, text) that writes an event to the debug trace.
-function brain.tick(state, index, memory, scan, log) end
-
--- Optional: a short text without spaces or braces for the fight description.
-function brain.describe(memory) end
-
-return brain
-```
-
-Phase 1 built this interface. The later phases add the snapshot through the senses, the move book, the persona and the actuator as more arguments of `tick`.
-
-The existing AI becomes the brain `classic`, a thin wrapper around `ai.control` that does not change it. The match calls the brain of each computer fighter in `read_input`, where `ai.control` runs today. A slot without a brain name uses `classic`, so the existing modes, recordings and the demo do not change.
-
-The match setup gets a brain and a persona for each computer slot (base/game/setup, the setup screen). In a network game, the choice goes through the server's commands like every other setup value, so every computer runs the same brain.
-
-## How to change the new AI
-
-The framework puts each kind of change in one place:
-
-| Change | Place |
-|---|---|
-| A new style for a fighter | a persona in the fighter's kit (scripts/base/ai/fighters/NAME.lua): numbers only |
-| A combo, a move tag, a special case of one fighter | the fighter's kit |
-| A new behavior for all fighters | a step or a tree in the tactics (scripts/base/ai/tactics/) |
-| A new reason to choose an intent | a consideration in the intents (scripts/base/ai/intents.lua) |
-| A new kind of brain | a module in scripts/base/ai/brains/, or a mod that adds one |
-| The difficulty | the difficulty sets (scripts/base/ai/difficulty.lua) |
-
-To test a change:
-
-1. Run a headless fight with `--ai-log` and a fixed `--seed`, and read the log at the tick of the behavior.
-2. Run the arena for the fighter against the old version of the brain, and compare the win rate and the move use.
-3. Run the fight with `--rollback-check` and `--net-sim`. The failures must be 0.
-4. Run tools/test-online.sh after a change to the setup or to the brain interface.
+- The match options carry `ai_brains` (by slot), the personas, the difficulty row, and the stored learning of earlier fights. `match.create` copies them into the match table, so every computer of a network game has them.
+- The setup (base/game/setup) gets a brain and a persona for each computer slot, through commands like every other setup value. The server keeps them in `last_setup`. The persona list of a slot starts at Random: the brain picks one of the fighter's personas with its own random stream at its start, so every computer picks the same one.
+- The default brain of a computer slot is `classic` until the tactician passes the arena test of phase 8. Then the default becomes the tactician with Random persona, and `classic` stays in the list.
+- A local fight takes `--ai-brain` and `--fight` as today. A network session takes only the server's setup.
+- Live edits of persona numbers in the development view work in local fights only. They become inputs (`=ID:N`) that change the copy in the match table. A network game shows the numbers but does not change them.
+- Recordings: OpenLF2 adds its own block to a recording with the brain, persona and version of each computer slot. A replay with another version of a brain stops with a clear message. Until the block exists, a fight with a new brain makes no recording.
 
 ## Development view
 
-The development view shows what the AI thinks. It is local to this computer and only reads the debug trace. It never changes the fight, so the same trace gives the same fight with the view on and off.
+The world layer is built (docs/ai.md). The next layers read "brain frames": when the view is on, each brain writes a short record of its decision on each think to the trace (intent scores, the active tree path, the candidate moves, the key program). The trace keeps the last 300 ticks for each fighter and drops ticks that run again.
 
-- Switch: a flag (`--ai-view`) and a switch on the Display page of the settings menu, off by default.
-- Data: when the view is on, each brain writes its decisions to the debug trace: a ring buffer of the last 300 ticks for each fighter, outside the match table. A tick that runs again after a rollback overwrites its entry.
+- Inspector (a panel of base/ui/panels): the fighter, its brain, persona and difficulty, the intent scores as bars with the parts of the chosen score, the behavior tree with the state of each step, the candidate moves with hit chance, value and risk, the key program, and the last 30 decisions with their reasons.
+- Decision timeline: a row for each AI fighter with its intent over the last 10 seconds, and marks for hits dealt and taken.
+- World layer additions: the target line, the intent above the head, the predicted hit boxes of the planned move, the goal point.
+- Controls: F1 pauses. F8 moves the fight one tick forward while it is paused and the view is on. In that case the flow takes the key, so the match does not see F8 (the original's function key). The game speed gives slow motion, and a click selects a fighter.
+- An HTML viewer (tools/ai-viewer.html) loads an AI log of a whole fight and shows the decision timeline, the intent scores and the behavior tree of each tick, to study a fight after it ended and to share it. `--ai-log ... frames` writes the brain frames to the log for it.
 
-The view has these parts:
+## Logs, metrics and tests
 
-1. World layer (drawn in the render area of the camera view):
-    - The hit boxes and body boxes of all fighters and balls.
-    - For the selected AI fighter: a line to its target, the name of its intent above its head, the predicted hit boxes of its planned move, the reach of its best moves, its goal point.
-    - Threats: the ticks to impact next to each hit box that is on its way to the fighter.
-2. AI inspector (a panel of base/ui/panels):
-    - The fighter, its brain, its persona and its difficulty values.
-    - The score of each intent as a bar, with the parts of the score of the chosen intent.
-    - The behavior tree of the current tactic, with the state of each step (running, done, failed) in colors, and the active path.
-    - The candidate moves: hit chance, value, risk, mp.
-    - The key program of the actuator, and the opponent model.
-    - The last 30 decisions with their reasons.
-3. Decision timeline (a panel like the input timeline): a row for each AI fighter with its intent over the last 10 seconds in colors, and marks for hits dealt and taken.
-4. Controls: F1 pauses (it does today), a key for one tick forward in a pause, the game speed for slow motion, a click on a fighter to select it. In a local game, the inspector can change the persona numbers during the fight. In a network game it only shows them, because a change makes the computers differ.
-
-## Logs for agents
-
-The AI log gives an agent (and a developer) the same facts as text. An agent runs a headless fight, reads the log and finds the tick where a behavior went wrong.
-
-- Switch: `--ai-log` or `--ai-log all` (all AI fighters), or `--ai-log 11,12` (item indices). Each line is a `log ai ...` action of the scripts, so the engine prints it on its output (the path of the server's log lines). A headless run prints it as `frame N: action log ai ...`, so `grep -o 'ai t=.*'` gives the lines.
-- Fields: `t` is the tick of the fight (`frame_number`), `i` the item index, `ev` the kind of event.
-- Content: one line for each change, not one line for each tick. For example:
-
-```text
-ai t=812 i=11 f=davis p=brawler ev=intent from=engage to=punish why=open:12,dist:64 score=730/510
-ai t=812 i=11 ev=move m=many_punch/270 hit=72 value=410 risk=90
-ai t=815 i=11 ev=reflex kind=defend threat=firen_ball/s=0 impact=4
-ai t=829 i=11 ev=result m=many_punch/270 dealt=45 blocked=0
-ai t=840 i=11 ev=sum intent=pressure target=0 hp=310 mp=125 dist=140
-```
-
-- Only final ticks: in a local fight every tick is final. A tick that runs again after a rollback replaces its entries in the debug trace, and a fight that can roll back (a network fight, `--net-sim`, `--rollback-check`) writes a tick only 32 ticks later, when no rollback can reach it. So the last 32 ticks of such a fight are missing when the program stops before the fight ends.
-- The fight description (`describe`) gets a short `ai=BRAIN/DETAIL` part for each fighter with a brain other than `classic`, for example `ai=idle/target:12,wait:8`. Later brains add the persona, the intent, the target and the planned move. Classic fighters get nothing, so the old descriptions stay the same.
-- A summary at the end of a fight: `ai-result` lines with the winner, the damage, the moves used with their hit rates, and the AI time per tick.
+- The log keeps one line for each change. The events: `start`, `target`, `intent`, `move` (with the hit chance and the risk), `result` (hit, blocked, missed, punished), `reflex`, `threat`, `hurt` (with the cause), `sum`, and `ai-result` at the end of a fight.
+- tools/test-ai.sh runs the AI tests in one command:
+    - The classic baseline: the VS traces give the same description as a stored copy.
+    - The rollback check with `rollback.interval` 9, and the memory validator.
+    - `--net-sim` with each brain.
+    - The move book against tools/lf2_moves.py.
+    - The checkers of each capability (prediction, actuator, reflexes) with their limits.
+    - A short arena run.
 
 ## Arena
 
-The arena runs many AI fights without a window and counts the results. It tests the strength, the personality and the speed of a brain, and later it is the base of the learning.
-
-- tools/ai-arena.py starts many headless games at the same time (like tools/test-online.sh), each with a seed and a fight, for example `davis:brawler vs firen:classic`.
-- The engine starts the fight at once from a flag (`--fight SPEC`), without a trace through the setup screen.
-- The tool reads the `ai-result` lines and prints win rates with a margin of error, damage per minute, the use of each move for each persona, and the AI time per tick.
-- Tests that use the arena: the new brain must beat `classic` on Crazy, the personas of one fighter must use their moves in a clearly different way, and the time must stay in the budget.
+- `--fight SPEC` starts a fight at once: mode, background, fighters, teams, brains, personas, difficulty, a time limit and a seed. For example `vs:davis/tactician/brawler,firen/classic;time=3600`.
+- A batch mode runs many fights in one process (`--fights N` with consecutive seeds), so the installer loads once, and it skips the drawing.
+- Each fight runs with both sides mirrored (sides and slots swapped) to cancel the start position. The time limit is 3600 ticks (2 minutes). At the limit, the side with more hp left wins, and equal hp is a draw (half a point).
+- tools/ai-arena.py runs batches in parallel processes, reads the `ai-result` lines, and stops a comparison with a sequential test (SPRT) when the result is clear. It prints win rates with their margin, damage per minute, move use for each persona, and the AI time.
+- `engine.clock` (a timer for the arena and the view only) measures the AI time for each tick.
 
 ## Speed
 
-- The budget is 0.1 ms on average for each computer fighter and tick, and 0.5 ms for one think, in a release build.
-- Perception and the move book run once (per tick and per record), not once per brain.
-- The thinks of the brains spread over the ticks (a think every 3 ticks, with an offset for each slot). Reflexes run on every tick but are short.
-- The memory stays small, because a rollback copies it. The work tables of a tick live in the snapshot and are used again on the next tick.
-- The hot loops use numeric `for` loops, not `pairs`, so that LuaJIT can compile them.
-- The arena and the development view measure the time with a timer of the engine that only they use. A decision never reads the time.
+- A budget for each frame: all brains together use at most 4 ms in a frame of a release build, including the re-runs after a rollback (up to 20 ticks), the catch-up and the server. A single think stays under 0.5 ms.
+- Level of detail, in-place snapshots, culling, staggered thinks and capped memory keep the AI in the budget.
+- The arena reports the AI time, and tools/test-ai.sh fails when a fixed scenario goes over its limit.
 
 ## Learning
 
-During a match (in the plan):
-
-- The opponent model counts how each enemy acts in a few situations, for example "jumps when a ball comes" or "defends after my run". The intents and the planner use the counts, by the `adapt` number of the persona.
-- The move results count hits, misses and punishes for each move, so the planner uses less of a move that does not work against this enemy.
-- All counters are integers in the memory, so the rollback and the hash cover them.
-
-Across matches (later):
-
-1. Tuning: an optimizer in tools/ (for example an evolution strategy) changes the numbers of a persona, runs the arena, and keeps the numbers that win more. The result is a persona file in the scripts.
-2. Learned policies: an outside trainer runs the headless game as an environment through a bridge (keys in, snapshot out) and trains a small network by self-play. The game runs the network with integer weights in a data file, so every computer gets the same result. The network profile (the hash of the scripts) covers the file.
-3. Heavy models that cannot be deterministic run as a pilot outside the simulation.
+1. During a fight: an opponent model (counts of how each enemy acts in a few situations) and move results (hits, misses and punishes of each move). Both are integer arrays in the memory.
+2. Across fights: the match options carry a stored learning block for each fighter and persona, and the next fight starts from it. Local games keep it in config.json. A network session keeps it on the server, like `last_setup`, so every computer starts from the same data.
+3. Tuning: an optimizer in tools/ changes persona numbers, runs the arena and keeps the numbers that win more. The result is a persona file.
+4. Imitation: recorded human play (the keys and the snapshots of a fight) trains the choice of intents and moves.
+5. Self-play: tools in tools/ run the headless game in batches. The game uses `rollback.save` and `rollback.restore` to reset and to branch a fight. A trained network runs in the game with integer weights and fixed-point sums that stay below 2^53.
+6. No brain runs outside the game. A program outside the game does not drive a fighter (decision of 2026-10-25), so training happens through batches of the game and through files of numbers that the scripts load.
 
 ## Engine changes
 
-The framework needs few changes to the engine. Each one is small:
+1. Done: `--ai-log`, `--ai-brain`, `--ai-book`, `--ai-view`.
+2. `--fight SPEC` and `--fights N` (the arena).
+3. `engine.clock` for the arena and the view. The rules forbid it in decisions.
+4. Menu elements for the inspector: a tree node, a table, a line plot. Until they exist, the view uses text, bars and selectables.
 
-1. Flags for the scripts: `--ai-log` and `--ai-brain` (built in phase 1), `--ai-view`, `--fight SPEC`.
-2. Menu elements for the inspector: a tree node, a table and a line plot (new UiKind values). Until they exist, the view uses text, bars and selectables.
-3. A timer for the arena and the view (`engine.clock`), which the rules forbid in decisions.
-4. Later: the bridge for an outside trainer (`--ai-bridge`).
+Older engines get the scripts through script sharing, so the scripts check a new function before they use it (`if engine.clock then`).
 
-Older engines get the scripts through script sharing. The scripts check a new function before they use it (`if engine.clock then`).
+## Remaining work
 
-## Implementation plan
+Each phase ends with tests that pass. No phase changes the classic AI.
 
-Each phase ends with tests that pass. A phase changes the classic AI in no way, so the replays and the demo stay as they are.
+### Phase 4: hardening
 
-### Phase 1: the frame of the framework
+- Fix the prediction: the holder's team for weapons, gravity for thrown items, turns, and the spawn tick in the senses key.
+- The two rules `can_hurt` and `enemy`.
+- The memory keeps the record id. A brain restarts when the record changes, and when the computer takes a human fighter again.
+- The memory validator under `--rollback-check`, and the rules for brains in AGENTS.md and in brains.lua.
+- The snapshot in place, culling by `by_x`, and no rebuild after a chasing ball.
+- The books of Stage spawns, transforms and clones build before the fight.
+- tools/test-ai.sh with the checks that exist today.
+- Tests: the sentry's exact rate does not go down, tools/test-ai.sh passes, and a Stage mode trace with sentries passes the rollback check.
 
-- The brain registry, the brain `classic` (a wrapper), the call in `read_input`, `value.ai` in the match table, the AI random stream.
-- The debug trace, `--ai-log`, the `ai=` part of the description, and `--ai-brain NAME` (the brain of the computer fighters of local fights, for tests).
-- A brain `idle` for tests (it only walks to the target).
-- Tests: the existing traces give the same description as before. A fight with the brain `idle` passes `--rollback-check` with `rollback.interval` 9 and `--net-sim`.
-- Status: built. The VS traces of AGENTS.md give the same description as before, also with `--rollback-check`. A fight of three `idle` computers passes 156 rollback checks with `rollback.interval` 9 (0 failures, no tick twice in the log) and `--net-sim delay=80,jitter=30,loss=5,seed=1` (hashes 47/0). tools/test-online.sh (87 checks) and tools/test-online-ui.sh (36 checks) pass.
-- What the classic brain logs with `--ai-log`: `ev=target` (a new target), `ev=move` (a sequence that the AI marked, with the frame of the move, or `frame=none from=FRAME` when the current frame has no move for the input), and `ev=sum` every 30 ticks (frame, hp, mp, target, distance, held keys).
+### Phase 5: the arena
 
-### Phase 2: the move book
+- `--fight SPEC`, `--fights N`, the time limit, mirrored sides, no drawing in batch mode, `engine.clock`, the `ai-result` lines.
+- tools/ai-arena.py with parallel processes and SPRT.
+- Tests: classic against classic on the same fighter gives about 50%. A batch of 100 fights gives the same results as 100 single runs.
 
-- scripts/base/ai/move_book.lua: the timelines, the frame classes and the tags of every move, cached on the record.
-- A command that prints the book of one fighter, and a test that compares it with tools/lf2_moves.py.
-- Tests: the book of every fighter builds without errors, and the build time of all records stays under 50 ms.
-- Status: built. The comment at the top of move_book.lua lists the fields of a book and of a move.
-    - `move_book.get(record)` builds the book on the first call and caches it by the record's data table (base/game/object_data shares one table for each file). The book is outside the match table, so a rollback does not copy it. A brain keeps frame numbers in its memory, never the tables of the book.
-    - A move ends where its frame chain reaches a free frame (standing, walking, running or jumping), 999, 1000, a hold (`next: 0`) or a loop. The timeline gives each tick its frame, its hit boxes (relative to the fighter's center and feet, for a fighter that faces right), its body and the forward distance from a start at rest (the `dvx` rule of base/game/control and a ground friction of 1 for each tick).
-    - Each frame has a class (free, moving, attacking, air, defending, hurt, falling, lying, dizzy, caught, catching, frozen, recovering, busy) and the ticks until the fighter is free (-1 for a hold or a loop). `move_book.inputs_from(book, frame)` gives the special moves that a fighter in that frame can start, also through its defend frame.
-    - The tags: `close`, `ranged`, `summon`, `knockdown`, `guard_break`, `anti_air`, `movement`, `air`, `catch`, `heal`, `reflect`, `hits_balls`, `teleport`, `transform`, `defends`, `untouchable`.
-    - `brain.tick` gets the book of its fighter as a sixth argument. The match screen builds the books of the fighters before a fight with a brain other than `classic`.
-    - `--ai-book [all|ID]` prints the books as `book ...` log lines: one line for each fighter (its frame classes and the moves from standing) and one for each move. tools/lf2_moves.py and the book end a move by the same rule, and `tools/lf2_moves.py FOLDER --check LOG` compares them: 425 moves of 23 fighters, 0 differences.
-    - Time: the books of all 23 fighters take 11 ms (debug build). The object files of the projectiles take 228 ms more in a debug build, but the game loads them anyway when the objects spawn.
+### Phase 6: the actuator and the control model
 
-### Phase 3: perception and prediction
+- The actions, the key programs, the closed loop, the input rate, the dry run of control.lua, the input latency in the move book.
+- The test brain `drill`: it starts every move of the book from each starting class and logs whether the move started on the predicted tick.
+- Tests: the drill starts all special moves of all fighters, at the fast rate and at the human rate. The checker reports each move that fails.
 
-- The snapshot of the tick, the senses, the threats, the openings, the hit chance and the risk.
-- The first world layer of the development view: hit boxes, body boxes, threats with their ticks to impact.
-- Tests: in fixed situations (a trace that sets up a ball at a known distance), the prediction gives the tick of impact that the fight shows.
-- Status: built.
-    - base/ai/perception builds one snapshot for each tick in the tick's scan: position, speed, frame class, ticks until free, the place in the move book (`move`, `move_tick`), the body and hit boxes in world coordinates, the rest timers of combat, and the holder of a held weapon.
-    - base/ai/senses keeps, in the memory, the nearest attacking sources and the tick when the brain first saw what each one does, so a brain can react only after its reaction time.
-    - base/ai/predict gives the threats to a fighter (attacking characters, flying objects and held weapons), the opening of a fighter, the hit chance of a move and the punish risk of a move. It follows the combat rules that block a hit: the attack rest, the pair rest, the blink and weak hits on a falling fighter. An attacker moves from its current speed by the `dvx` and `dvy` of its frames, with gravity and ground friction.
-    - The move book also maps each frame to its place in a move (`move_at`). An attacking frame that no move reaches from its start gets a fragment (a short move from that frame).
-    - The test brain `sentry` stands still, predicts and logs (`ev=threat ... impact=TICK`, `ev=hurt hit=TICK cause=hit|grab|throw`). `--ai-brain` takes `INDEX=NAME` pairs, so `--ai-brain 11=sentry` gives the sentry to item 11 only, and the other computers play classic. tools/ai_prediction_check.py compares the predictions with the hits.
-    - Result over 8 seeds (3000 ticks, classic attackers): 133 of 143 hit-box hits had the exact tick predicted, 1 was 1 tick away, 9 were missed. Grabs (6) and throw landings (3) hurt without a hit box and count apart. Known gaps: a heavy weapon thrown from very close hits on the tick when it leaves the hand, and a few hits had no prediction for reasons that the log does not show yet.
-    - The world layer of the development view (base/ui/ai_view): `--ai-view` or F10. It draws the body boxes (blue), the hit boxes (red when they hurt, yellow for the others), the path of flying objects, the frame class with the ticks until free, and the ticks to the next threat in red. The same trace gives the same fight with the view on and off.
-    - Tests: the VS traces give the same description as before. Sentries pass 156 rollback checks with `rollback.interval` 9 and `--net-sim` (hashes 47/0). tools/test-online.sh (87) and tools/test-online-ui.sh (36) pass.
+### Phase 7: the brain context, reflexes and the delayed view
 
-### Phase 4: the first strong brain
+- Interface version 2, the past ring (`state.ai_past`), the difficulty table, the reflexes.
+- The test brain `guard`: it only defends and dodges. A checker counts the threats that it blocked or avoided.
+- Tests: on Crazy, the guard blocks or avoids most hits that it can see in time. On Easy, it blocks clearly fewer. Rollback and network tests pass.
 
-- The brain `tactician`: reflexes, intents, behavior trees, the move planner and the actuator. It plays every fighter with the move book and the tags only, with one generic persona.
-- The arena (tools/ai-arena.py and `--fight`).
-- Tests: `tactician` wins at least 70% of the 1v1 fights against `classic` on Crazy over 50 seeds, for each of the ten main fighters. It stays in the time budget. It passes the rollback and network tests.
+### Phase 8: the first strong brain
 
-### Phase 5: the development view
+- The brain `tactician`: intents, tactics as behavior trees, the planner, combos from the move book. One generic persona for all fighters.
+- Tests: in the arena, with the senses and input limits of Crazy, the tactician beats classic on Crazy in at least 70% of the fights for each of the ten main fighters (SPRT). It keeps to the speed budget.
 
-- The AI inspector, the behavior tree view, the decision timeline, one tick forward in a pause, the selection of a fighter by click.
-- Changes to persona numbers during a local fight.
-- Tests: the same trace gives the same fight with the view on and off. tools/test-online-ui.sh gets a check with the view open in a session.
+### Phase 9: the development view
 
-### Phase 6: fighter kits and personas
+- Brain frames in the trace, the inspector, the behavior tree view, the decision timeline, F8 for one tick forward, the selection by click, live edits in local fights.
+- The HTML viewer for AI logs (tools/ai-viewer.html) and the `frames` detail of `--ai-log`.
+- Tests: the same trace gives the same fight with the view on and off. tools/test-online-ui.sh opens the view in a session. The viewer shows a log of the arena.
 
-- A kit for every fighter, with the personas of the table above. The setup screen gets the brain and the persona of each computer slot.
-- Difficulty sets for the four classic difficulties.
-- Tests: the arena shows a clear difference in move use between the personas of a fighter. Easy loses to Crazy clearly in the arena.
+### Phase 10: setup, sessions and recordings
 
-### Phase 7: learning during the match
+- A brain and a persona (Random by default) for each computer slot on the setup screen, through server commands and `last_setup`. The Stage AI option, and the defaults for Stage enemies and allies. Superhuman in the difficulty list.
+- OpenLF2's recording block with the brain, persona, difficulty row and script version of each computer slot.
+- Tests: a session with tactician computers passes tools/test-online.sh scenarios. A recording of a tactician fight replays the same.
 
-- The opponent model, the move results and their use in the scores.
-- Tests: against a scripted opponent that always jumps over balls, a Zoner uses fewer balls and more anti-air moves in the second half of the fight.
+### Phase 11: fighter kits, personas and team play
 
-### Phase 8: learning across matches (later)
+- A kit for every fighter with the personas of the table, the difficulty rows, the team table, level of detail for Stage and Battle.
+- Tests: the arena shows different move use for the personas of a fighter. Easy loses clearly to Crazy. A full Stage run with tactician enemies keeps to the budget.
 
-- The tuner in tools/, the bridge for an outside trainer, integer networks in the scripts, and the pilot host.
+### Phase 12: learning during and across fights
 
-## Open questions
+- The opponent model, the move results, the stored learning block in the match options.
+- Tests: against a scripted opponent that always jumps over balls, a Zoner uses fewer balls in the second half of a fight, and starts the next fight with that knowledge.
 
-- Recordings: does a recording stop when a new brain plays (the simple way), or does OpenLF2 add its own block to the recording with the brains and the persona versions?
-- The keys for the view and for one tick forward: the engine passes F1 to F12 to the scripts as virtual keys (0x70 to 0x7B). No script uses F10 (virtual key 121) today, so F10 is a candidate for the view.
-- The default brain of a computer slot: `classic` until the new brain wins in the arena, then the new brain with a persona that fits the fighter.
+### Phase 13: learning from data (later)
+
+- The persona tuner, the imitation data from recorded play, self-play batches, integer networks in the scripts.
+
+## Risks
+
+- Strength against fairness: a brain with perfect senses wins easily but does not feel human. The arena reports both the win rate and the fairness settings, and the difficulty rows decide.
+- Cost in network play: re-runs multiply the AI cost. Level of detail and the per-frame budget are the answer, and tools/test-ai.sh measures it.
+- Hidden state: a field that escapes the rollback copy desyncs only in rare cases. The validator and the rules prevent it, and `--net-sim` runs with every brain.
+- Platform math: numbers with a fraction in decisions can differ between Linux and Windows. Integer scores and the banned functions prevent it.
+- Mods: a mod with new data gets a move book from its frames, but no kit. A generic persona covers it.
+
+## Decisions
+
+The owner decided these points on 2026-10-25. The sections above follow them.
+
+| Question | Decision |
+|---|---|
+| The fairness of the strongest levels | Easy, Normal, Difficult and Crazy have human limits. A fifth level, Superhuman, has no limits. |
+| The input rate of brains | Set by the difficulty: the human rate on the four classic levels, every tick on Superhuman. |
+| The reaction delay | A delayed view of the world from a short ring of past states. Only Superhuman sees the present. |
+| The default brain | `classic` until the tactician passes the arena in phase 8. Then the tactician with a Random persona. |
+| Recordings | OpenLF2's own recording block with the brain, persona, difficulty row and version of each computer slot (phase 10). |
+| Personas of a computer slot | A choice on the setup screen, with Random as the default. |
+| Stage mode | A setup option "Stage AI": Classic (default) or New. |
+| Learning across fights | config.json in local games, the server in network sessions. |
+| The next phases | Phase 4 (hardening), then phase 5 (the arena). |
+| The inspector | In the game, and an HTML viewer for AI logs. |
+| One tick forward | F8 while paused with the view on. |
+| Orders to AI allies | Later. The team table keeps an `order` entry for them. |
+| The difficulty levels | The classic four and Superhuman. |
+| Live edits of personas | Local fights only. |
+| The arena fight | 3600 ticks, hp decides at the limit, a draw counts half, mirrored sides. |
+| Who adds brains and personas | Mods (brains and fighter kits), shared by script sharing. No separate persona files, and no brains outside the game. |
