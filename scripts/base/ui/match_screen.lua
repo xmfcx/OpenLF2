@@ -671,7 +671,7 @@ function screen.draw(state, context, window_bounds, camera)
         local height = math.floor(rows * scale + 0.5)
         layout.band_top = layout.region_top + math.floor((region - height) / 2)
         layout.band_bottom = layout.band_top + height
-        layout.view_left, layout.view_width = left, width
+        layout.view_left, layout.view_width, layout.scale, layout.art_top = left, width, scale, art_top
         local stage_width = current.stage.width or constants.screen.width
         wide = {left = 0, right = width, camera = left}
         view = {camera = left, items = view.items, paused = view.paused, held_by = view.held_by, shake = view.shake,
@@ -697,8 +697,8 @@ function screen.draw(state, context, window_bounds, camera)
         draw_item(context, current.stage, view, entry, passable_bounds, lighting, modern)
     end
     context.clip()
-    -- Ghosts and combo counters (OpenLF2 extension).
-    fight_effects.draw(state.effects, context, view)
+    -- Ghosts and combo counters (OpenLF2 extension); the new fight screen draws them after the world (below).
+    if not modern then fight_effects.draw(state.effects, context, view) end
     if closed then context.fill(closed.left, closed.top, closed.right - closed.left, closed.rows, 0, 0, 0, 150) end
     -- The new fight screen: everything after the world (the HUD, the texts, the flow's overlays) draws at the
     -- window's scale over the picture, and the free rows above and below the world get a dark gradient.
@@ -715,6 +715,9 @@ function screen.draw(state, context, window_bounds, camera)
         end
         gradient(layout.top, layout.band_top, 8, 22)
         gradient(layout.band_bottom, layout.bottom, 22, 8)
+        fight_effects.draw(state.effects, context, view, function(x, y)
+            return layout.left + (x - view.camera) * layout.scale, layout.band_top + (y - layout.art_top) * layout.scale
+        end)
     end
     if spectated then
         local name = spectated < 8 and controls.name(spectated) or "Com"

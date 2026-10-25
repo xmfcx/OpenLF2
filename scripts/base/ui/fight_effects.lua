@@ -164,13 +164,14 @@ function effects.observe(state, match)
     state.ghosts = ghosts
 end
 
-local function draw_ghost(context, ghost, frame, camera)
+local function draw_ghost(context, ghost, frame, at)
     local age = frame - ghost.born
     local scale = age < 4 and 1 or 2
     local alpha = age < 24 and 230 or math.floor(230 * (ghost_frames - age) / (ghost_frames - 24))
     if alpha <= 0 then return end
-    local x = math.floor(ghost.x - camera + math.sin(ghost.sway + age * 0.25) * 3) - 7
-    local y = math.floor(ghost.y - age * 1.1) - 16
+    local ghost_x, ghost_y = at(ghost.x, ghost.y)
+    local x = math.floor(ghost_x + math.sin(ghost.sway + age * 0.25) * 3) - 7
+    local y = math.floor(ghost_y - age * 1.1) - 16
     -- The wispy tail under the skull.
     for wisp = 0, 2 do
         local wobble = math.floor(math.sin(ghost.sway + age * 0.4 + wisp) * 2)
@@ -212,7 +213,7 @@ local function draw_number(context, text, x, y, size, r, g, b, alpha)
     return width
 end
 
-local function draw_combo(state, context, combo, frame, camera)
+local function draw_combo(state, context, combo, frame, at)
     if combo.hits < 2 or combo.hidden then return end
     local level = intensity(combo.total)
     local alpha = 255
@@ -223,8 +224,9 @@ local function draw_combo(state, context, combo, frame, camera)
     local size = 2 + math.floor(level + 0.5)
     if not combo.ended and frame - combo.pop < 3 then size = size + 1 end
     local shake = level >= 2 and (level - 1) * 1.5 or 0
-    local x = math.floor(combo.x - camera + (random(state) - 0.5) * 2 * shake)
-    local y = math.floor(combo.y - 14 - 5 * size + (random(state) - 0.5) * 2 * shake)
+    local combo_x, combo_y = at(combo.x, combo.y)
+    local x = math.floor(combo_x + (random(state) - 0.5) * 2 * shake)
+    local y = math.floor(combo_y - 14 - 5 * size + (random(state) - 0.5) * 2 * shake)
     if combo.ended then y = y - math.floor((frame - combo.ended) * 0.8) end
     local text = tostring(math.floor(combo.total))
     local width = #text * 4 * size
@@ -251,19 +253,23 @@ local function draw_combo(state, context, combo, frame, camera)
     font.gdi(context, "COMBO", x, y - 15, (r * 65536 + g * 256 + b), nil, "center")
 end
 
--- `view`: the match screen's view (its camera includes the wide layout's shift).
-function effects.draw(state, context, view)
+-- `view`: the match screen's view (its camera includes the wide layout's shift). `at`: a function from a world place
+-- to the screen, for the new fight screen, which draws the effects over the whole window so that a combo above a
+-- jumping fighter or a rising ghost is not cut at the top of the world's picture; nil draws them in the world.
+function effects.draw(state, context, view, at)
     local frame = state.last_frame
     if not frame then return end
     local camera = view.camera
+    at = at or function(x, y) return x - camera, y end
     for _, particle in ipairs(state.particles) do
         local alpha = math.floor(255 * (1 - particle.age / particle.life))
         local color = particle.color
-        context.fill(math.floor(particle.x - camera), math.floor(particle.y), 2, 2, color[1], color[2], color[3], alpha)
+        local x, y = at(particle.x, particle.y)
+        context.fill(math.floor(x), math.floor(y), 2, 2, color[1], color[2], color[3], alpha)
     end
     -- The newest ghosts only, so that a battle with many soldiers stays light.
-    for index = math.max(1, #state.ghosts - 5), #state.ghosts do draw_ghost(context, state.ghosts[index], frame, camera) end
-    for _, combo in pairs(state.combos) do draw_combo(state, context, combo, frame, camera) end
+    for index = math.max(1, #state.ghosts - 5), #state.ghosts do draw_ghost(context, state.ghosts[index], frame, at) end
+    for _, combo in pairs(state.combos) do draw_combo(state, context, combo, frame, at) end
 end
 
 return effects
