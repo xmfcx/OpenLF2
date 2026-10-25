@@ -227,6 +227,10 @@ local function route(state, input, context)
     elseif requested == "online_fight" then
         -- A server program started a fight: the server's random state and setup make the same fight here.
         local lobby = state.online_lobby
+        -- The fighters show the names of the players who own them, the same on every computer.
+        local names = {}
+        for _, player in ipairs(lobby.online.lobby and lobby.online.lobby.players or {}) do names[player.slot + 1] = player.name end
+        controls.replace_names(names)
         local options = require("base/game/online").fight_options(lobby.online, lobby.start)
         state.match = require("base/ui/match_screen").create(options, lobby.online, lobby.start)
         state.active, state.wait_release = "match", false
@@ -709,8 +713,9 @@ function flow.update(state, raw, context)
     if input.keys[virtual_keys.escape] and not state.escape_held then escape_pressed = true end
     state.escape_held = input.keys[virtual_keys.escape] == true
     local closed_now = false
-    -- Typing M, F, D opens the game speed menu, and typing it again closes it (network games handle it above).
-    local speed_keys = not state.session and speed_menu.observe(state.speed_keys, input)
+    -- Typing M, F, D opens the game speed menu, and typing it again closes it (network games handle it above). A
+    -- server program's lobby and fights have no speed menu: the server runs the ticks.
+    local speed_keys = not state.session and not online_connection(state) and speed_menu.observe(state.speed_keys, input)
     if state.quit_dialog then
         -- While the question is open the screen below is frozen.
         local answer = quit_dialog.update(state.quit_dialog, input, context)
