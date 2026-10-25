@@ -128,6 +128,12 @@ function flow.create(options)
         state.backgrounds = require("base/ui/background_preview").create()
         state.active = "backgrounds"
     end
+    -- The arena (`--fight`, docs/ai-plan.md): headless AI fights, no screens.
+    if options.fight then
+        state.arena = require("base/game/arena").create(options)
+        state.active = "arena"
+        return state
+    end
     -- The server program (`--server`): no screens, only the server (base/game/server).
     if options.server_port then
         state.server = require("base/game/server").create(options)
@@ -651,7 +657,7 @@ local function pointer_position(state)
 end
 function flow.draw(state, context)
     -- The server draws nothing, but the runtime expects a viewport on every frame.
-    if state.server then return context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0) end
+    if state.server or state.arena then return context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0) end
     context = budgeted(context)
     -- A screen's pointer is drawn last, over the whole window (see draw_pointer).
     local pointer_drawn = false
@@ -876,6 +882,7 @@ function flow.update(state, raw, context)
     return result
 end
 update_frame = function(state, raw, context)
+    if state.arena then return require("base/game/arena").update(state.arena, context) end
     if state.server then
         for _, line in ipairs(require("base/game/server").update(state.server, raw)) do context.action("log " .. line) end
         return

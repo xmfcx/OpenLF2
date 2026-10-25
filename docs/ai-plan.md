@@ -204,7 +204,7 @@ The world layer is built (docs/ai.md). The next layers read "brain frames": when
 - A batch mode runs many fights in one process (`--fights N` with consecutive seeds), so the installer loads once, and it skips the drawing.
 - Each fight runs with both sides mirrored (sides and slots swapped) to cancel the start position. The time limit is 3600 ticks (2 minutes). At the limit, the side with more hp left wins, and equal hp is a draw (half a point).
 - tools/ai-arena.py runs batches in parallel processes, reads the `ai-result` lines, and stops a comparison with a sequential test (SPRT) when the result is clear. It prints win rates with their margin, damage per minute, move use for each persona, and the AI time.
-- `engine.clock` (a timer for the arena and the view only) measures the AI time for each tick.
+- `engine.network_time` (a timer for the arena and the view only) measures the AI time for each tick.
 
 ## Speed
 
@@ -225,7 +225,7 @@ The world layer is built (docs/ai.md). The next layers read "brain frames": when
 
 1. Done: `--ai-log`, `--ai-brain`, `--ai-book`, `--ai-view`.
 2. `--fight SPEC` and `--fights N` (the arena).
-3. `engine.clock` for the arena and the view. The rules forbid it in decisions.
+3. A timer for the arena and the view: `engine.network_time` (milliseconds with a fraction) serves. The rules forbid it in decisions.
 4. Menu elements for the inspector: a tree node, a table, a line plot. Until they exist, the view uses text, bars and selectables.
 
 Older engines get the scripts through script sharing, so the scripts check a new function before they use it (`if engine.clock then`).
@@ -251,6 +251,7 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - `--fight SPEC`, `--fights N`, the time limit, mirrored sides, no drawing in batch mode, `engine.clock`, the `ai-result` lines.
 - tools/ai-arena.py with parallel processes and SPRT.
 - Tests: classic against classic on the same fighter gives about 50%. A batch of 100 fights gives the same results as 100 single runs.
+- Status: built. `--fight SPEC --fights N` runs one whole fight per frame without drawing (base/game/arena), so 400 fights take about 6 s on all cores of this computer (debug build). Fight K starts the engine's random streams from its own number (a Park-Miller table), so a batch and single runs (`first=K`) give the same fights. tools/ai-arena.py runs chunks in parallel and prints the score with its 95% margin, the damage per minute, the length, the AI time and the move use, and `--sprt LOW,HIGH` stops early. Measured: classic Davis against classic Davis without mirroring scores 0.505 +- 0.049 over 400 fights (no slot advantage), classic Davis beats classic Firen 0.804 +- 0.050 (SPRT stop after 240 fights), and the classic AI costs 12 to 19 us for each fighter and tick (debug build). `engine.network_time` already has a fraction of a millisecond, so the arena measures with it and needs no `engine.clock`.
 
 ### Phase 6: the actuator and the control model
 

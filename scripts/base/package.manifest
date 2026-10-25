@@ -58,6 +58,7 @@ module=ai/perception|ai/perception.lua
 module=ai/senses|ai/senses.lua
 module=ai/predict|ai/predict.lua
 module=ai/brains/sentry|ai/brains/sentry.lua
+module=game/arena|game/arena.lua
 module=game/objects|game/objects.lua
 module=game/grab|game/grab.lua
 module=game/weapons|game/weapons.lua

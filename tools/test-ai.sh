@@ -48,6 +48,8 @@ run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --ro
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run book --scripts scripts --seed 1 --ai-book --input-trace ",," &
+run arena_batch --scripts scripts --fight "henry/sentry|dennis;seed=3" --fights 4 &
+for number in 1 2 3 4; do run "arena_$number" --scripts scripts --fight "henry/sentry|dennis;seed=3;first=$number" & done
 for seed in 1234 1 2 3 4 5 6 7; do
     run "predict_$seed" --scripts scripts --seed "$seed" --ai-brain 11=sentry --ai-log 11 --input-trace "$LONG" &
 done
@@ -75,6 +77,12 @@ for name in netsim_idle netsim_sentry; do
     hashes=$(grep -o "hashes=[0-9]*/[0-9]*" "$WORK/$name.out" | tr '\n' ' ')
     echo "$hashes" | grep -qE "hashes=[1-9][0-9]*/0 hashes=[1-9][0-9]*/0"; check "net-sim: $name" $? "${hashes:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
+
+# The arena: four fights, the same in a batch and in single runs.
+batch=$(grep "^ai-result" "$WORK/arena_batch.out" | sed 's/ us=.*//')
+single=$(for number in 1 2 3 4; do grep "^ai-result" "$WORK/arena_$number.out" | sed 's/ us=.*//'; done)
+[ "$(echo "$batch" | grep -c .)" = 4 ] && [ "$batch" = "$single" ]
+check "arena: a batch of 4 fights equals 4 single runs" $? "$(echo "$batch" | head -2)"
 
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then

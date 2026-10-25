@@ -140,6 +140,10 @@ struct Configuration {
     std::string ai_book;
     // --ai-view: the development view of the AI starts on (F10 turns it on and off).
     bool ai_view = false;
+    // --fight SPEC (--fights N): headless AI fights of the arena (docs/ai-plan.md "Arena"); the run ends when the
+    // scripts ask to quit.
+    std::string fight;
+    int fights = 1;
     bool preview_ending = false;
     // Lets a held mouse button stand in for touch when testing the on-screen gamepad.
     bool mouse_touch = false;
@@ -499,6 +503,24 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
             }
         }
         else if (argument == "--ai-view") config.ai_view = true;
+        else if (argument == "--fight") {
+            if (++index == arguments.size()) return fail(ErrorCode::format, "--fight needs a fight, such as davis|firen;time=3600");
+            config.fight = arguments[index];
+            if (config.fight.empty() || config.fight.size() > 400
+                || config.fight.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_/,|;=.:-") != std::string::npos) {
+                return fail(ErrorCode::format, "--fight takes lower-case names, numbers and the signs / , | ; = . : -");
+            }
+            config.headless = true;
+        }
+        else if (argument == "--fights") {
+            if (++index == arguments.size()) return fail(ErrorCode::format, "--fights needs a number");
+            try {
+                config.fights = std::stoi(arguments[index]);
+            } catch (const std::exception&) {
+                return fail(ErrorCode::format, "--fights needs a number from 1 to 100000");
+            }
+            if (config.fights < 1 || config.fights > 100000) return fail(ErrorCode::format, "--fights needs a number from 1 to 100000");
+        }
         else if (argument == "--ai-brain") {
             if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a brain name");
             config.ai_brain = arguments[index];
@@ -1114,6 +1136,7 @@ Result<void> run(const Configuration& config) {
         (config.ai_brain.empty() ? std::string{} : ", ai_brain=\"" + config.ai_brain + "\"") +
         (config.ai_book.empty() ? std::string{} : ", ai_book=\"" + config.ai_book + "\"") +
         (config.ai_view ? ", ai_view=true" : "") +
+        (config.fight.empty() ? std::string{} : ", fight=\"" + config.fight + "\", fights=" + std::to_string(config.fights)) +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
         (config.connect_address.empty() ? std::string{} : ", connect_address=\"" + config.connect_address +
             "\", connect_port=" + std::to_string(config.network_port)) + "}\n" + sources;
@@ -1177,7 +1200,11 @@ Result<void> run(const Configuration& config) {
     }
     if (config.headless) {
         // Runs each traced frame (or one idle frame) and loads every drawn resource once.
-        const auto frames = config.input_trace.empty() ? std::vector<std::string>{""} : config.input_trace;
+        // --fight: frames until the scripts ask to quit (the arena runs one fight in each frame).
+        auto frames = config.input_trace.empty() ? std::vector<std::string>{""} : config.input_trace;
+        if (!config.fight.empty()) frames.assign(200000, "");
+        bool quit = false;
+        std::size_t frames_run = 0;
         std::set<std::string, std::less<>> loaded_resources;
         std::set<std::string, std::less<>> played_sounds;
         std::size_t sound_count = 0;
@@ -1195,6 +1222,7 @@ Result<void> run(const Configuration& config) {
             }
             auto frame = simulation.frame(frames[index]);
             if (!frame) return std::unexpected(frame.error());
+            ++frames_run;
             // A trace frame denotes a committed script tick, not a socket polling attempt.
             while (frame->waiting) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -1234,15 +1262,18 @@ Result<void> run(const Configuration& config) {
                 decoded_music.insert(music.resource);
             }
             for (const auto& action : frame->actions) {
-                std::cout << "frame " << index << ": action " << action << '\n';
+                if (!config.fight.empty() && action.starts_with("log ")) std::cout << action.substr(4) << '\n';
+                else std::cout << "frame " << index << ": action " << action << '\n';
+                if (action == "quit") quit = true;
             }
+            if (quit && !config.fight.empty()) break;
         }
         if (!config.input_trace.empty()) {
             auto description = simulation.describe();
             if (!description) return std::unexpected(description.error());
             std::cout << *description << '\n';
         }
-        std::cout << "Indexed " << archive->file_count() << " files; " << frames.size()
+        std::cout << "Indexed " << archive->file_count() << " files; " << frames_run
                   << " Lua frame(s), " << loaded_resources.size() << " distinct bitmap resources loaded, "
                   << sound_count << " sound(s) requested from " << played_sounds.size() << " file(s); "
                   << (music_available ? std::to_string(decoded_music.size()) + " music track(s) decoded"
@@ -1659,6 +1690,8 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "        e.g. idle or 11=sentry (docs/ai-plan.md).\n"
                          "--ai-view (developer): the development view of the AI (hit boxes, frame classes, threats) starts on;\n"
                          "        F10 shows or hides it.\n"
+                         "--fight SPEC [--fights N] (developer): headless AI fights of the arena, e.g.\n"
+                         "        \"davis/sentry|firen;time=3600\" (docs/ai-plan.md \"Arena\"); the results are ai-result lines.\n"
                          "--ai-book [all|ID] (developer): prints the AI's move book of every fighter (or of one fighter id) as log lines.\n"
                          "--default-controller (off by default; always on for consoles): until controls are saved, player 1 uses the\n"
                          "        first controller instead of the keyboard.\n"

@@ -103,8 +103,25 @@ end
 
 function brains.known(name) return registry[name] ~= nil end
 
+-- The AI time by brain name ({ms, calls}), measured only while the arena sets this table (base/game/arena). A timer
+-- never reaches a decision: it measures around the brain.
+brains.timing = nil
+
+local control
 -- Writes the keys of the computer fighter in `state.items[index]` for this tick.
 function brains.control(state, index, scan)
+    local timing = brains.timing
+    if not timing then return control(state, index, scan) end
+    local started = engine.network_time()
+    control(state, index, scan)
+    local value = state.items[index]
+    local name = value and value.ai and value.ai.brain or "classic"
+    local entry = timing[name]
+    if not entry then entry = {ms = 0, calls = 0}; timing[name] = entry end
+    entry.ms, entry.calls = entry.ms + engine.network_time() - started, entry.calls + 1
+end
+
+control = function(state, index, scan)
     local value = state.items[index]
     local memory = value.ai
     local name = memory and memory.brain or (state.ai_brains and state.ai_brains[index]) or state.ai_brain
