@@ -58,6 +58,8 @@ end
 -- The match setup screen replaces the classic character selection, except with "Classic menus" (or --classic-menus)
 -- and in network games, which keep the classic screens in lockstep.
 local function setup_screen_used(state)
+    -- A server's session: every client uses the same screen, as the server says.
+    if state.session and state.session.online then return not state.session.classic end
     return not state.session and not state.options.classic_menus and not user_options.current().classic_menus
 end
 local function screen_state(state)
@@ -274,7 +276,11 @@ local function route(state, input, context)
         controls.replace_names(nil)
     elseif (requested == "versus" or requested == "stage" or requested == "battle") and setup_screen_used(state) then
         -- The match setup screen (base/ui/setup_screen); the values of the last visit stay.
-        state.setup = require("base/ui/setup_screen").create(constants.modes[requested], state.setup)
+        local session = state.session and state.session.online and state.session
+        state.setup = require("base/ui/setup_screen").create(constants.modes[requested], state.setup, session and {
+            send = function(command) online.send(session, {type = "command", command = command}) end,
+            slot = session.slot, names = session.names, role_slot = online.role_slot(session), set_speed = function(tenths)
+                online.send(session, {type = "set_speed", tenths = tenths}) end, speed = session.speed})
         state.active = "setup"
         state.wait_release = true
     elseif requested == "versus" or requested == "stage" or requested == "battle" then
@@ -355,7 +361,8 @@ local function route(state, input, context)
             state.active = "match"
         elseif state.setup and setup_screen_used(state) then
             -- The setup screen again, with the Results buttons; a lost stage starts at the stage the players reached.
-            state.setup = require("base/ui/setup_screen").after_fight(state.setup)
+            state.setup = require("base/ui/setup_screen").after_fight(state.setup, state.session and state.session.online
+                and state.session.speed)
             if outcome.stage_level then state.setup.setup.stage_level = outcome.stage_level - outcome.stage_level % 10 end
             state.active = "setup"
         else

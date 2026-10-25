@@ -130,12 +130,16 @@ focus 95; press 95 "$CHAT"; sleep 0.3; shot 95 title-chat; sleep 0.2; press 95 E
 expect "host: Escape closes the chat" host "chat_open=false"
 expect_not "host: Escape in the chat does not open the settings" host "settings="
 
-# To a fight: Versus, both join with attack three times, no computers, Fight!
+# To a fight: Versus opens the match setup screen; both join, choose a fighter and get ready with attack (three
+# times), and the host (the room role) starts with defend; the countdown takes three seconds.
 press 95 "$ATTACK"; sleep 1.5
-expect "both: the character selection" host "screen=characters"
+expect "both: the match setup screen" host "screen=setup"
+expect "join: the match setup screen" join "screen=setup"
 for round in 1 2 3; do focus 96; press 96 "$ATTACK"; focus 95; press 95 "$ATTACK"; sleep 0.6; done
-sleep 7
-focus 95; press 95 "$ATTACK"; sleep 1; press 95 "$UP"; press 95 "$UP"; press 95 "$ATTACK"; sleep 2
+sleep 1; shot 95 setup
+focus 96; press 96 "$DEFEND"; sleep 1
+expect "join: the other player's defend does not start" join "screen=setup"
+focus 95; press 95 "$DEFEND"; sleep 4.5
 expect "host: the fight starts" host "screen=match online=session"
 expect "join: the fight starts" join "screen=match online=session"
 

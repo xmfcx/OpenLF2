@@ -32,7 +32,11 @@ local stage_names = {"Stage 1", "Stage 2", "Stage 3", "Stage 4", "Stage 5", "Sur
 local panels = {"arena", "difficulty", "computers", "start"}
 
 -- mode: constants.modes.versus, stage or battle; previous: the screen of the last visit (its setup stays).
-function screen.create(mode, previous)
+-- network: a server's session ({send, slot, names, set_speed, speed}): clicks go to the server as commands, which
+-- come back in a final tick for every client (input.commands); keys act on every client alike, as they come in the
+-- combined input. Only the room role starts the fight.
+function screen.create(mode, previous, network)
+    network = network or (previous and previous.network)
     local fighters = catalog.load()
     local grid = {0}
     for index, fighter in ipairs(fighters) do
@@ -40,9 +44,10 @@ function screen.create(mode, previous)
     end
     local state = {fighters = fighters, backgrounds = catalog.backgrounds(), grid = grid,
         setup = setup.create(mode, previous and previous.setup), cursors = {}, held = {}, focus = 0,
-        results = previous and previous.results}
+        results = previous and previous.results, network = network}
     state.arenas = {constants.background_rows.random, constants.background_rows.lee_on_road}
     for row = 0, #state.backgrounds - 1 do state.arenas[#state.arenas + 1] = row end
+    if network and network.slot then state.focus = network.slot end
     for slot = 0, 7 do
         local entry = state.setup.slots[slot]
         if entry.kind == "human" then state.cursors[slot] = {panel = entry.ready and "start" or "grid", index = 1} end
@@ -51,15 +56,17 @@ function screen.create(mode, previous)
 end
 
 -- After a fight: the setup again, with the Results buttons.
-function screen.after_fight(previous)
+function screen.after_fight(previous, speed_tenths)
+    if previous.network then previous.network.speed = speed_tenths end
     local state = screen.create(previous.setup.mode, previous)
     state.results = true
     return state
 end
 
+local current_network
 local function name_of(slot)
-    local name = controls.name(slot)
-    return name ~= "" and name or tostring(slot + 1)
+    local name = current_network and current_network.names and current_network.names[slot + 1] or controls.name(slot)
+    return name and name ~= "" and name or tostring(slot + 1)
 end
 local function names()
     local list = {}
@@ -125,6 +132,10 @@ local function last_computer(state)
     return nil
 end
 
+-- In a server's session only the room role starts the fight.
+local function may_start(state, slot)
+    return not state.network or (state.network.role_slot == nil and slot == 0) or state.network.role_slot == slot
+end
 -- One slot's key presses: the cursor of that slot, and the commands it gives.
 local function slot_keys(state, slot, pressed, context)
     local model = state.setup
@@ -200,10 +211,10 @@ local function slot_keys(state, slot, pressed, context)
         elseif cursor.panel == "computers" and pressed.f then
             local computer = last_computer(state)
             if computer then apply(state, {type = "remove_computer", slot = computer}) end
-        elseif cursor.panel == "start" and pressed.c then
+        elseif cursor.panel == "start" and pressed.c and may_start(state, slot) then
             apply(state, {type = "start", slot = slot})
         end
-        if pressed.f and cursor.panel ~= "computers" then apply(state, {type = "start", slot = slot}) end
+        if pressed.f and cursor.panel ~= "computers" and may_start(state, slot) then apply(state, {type = "start", slot = slot}) end
         if pressed.b then
             apply(state, {type = "ready", slot = slot, value = false})
             cursor.panel = model.mode == modes.stage and "grid" or "team"
@@ -211,9 +222,12 @@ local function slot_keys(state, slot, pressed, context)
     end
 end
 
--- Clicks (Dear ImGui): for the slot in focus, or the shared values.
+-- Clicks (Dear ImGui): for the slot in focus, or the shared values. In a server's session a click becomes a command
+-- for the server (it comes back in a final tick, see shared_command), so all clients apply it on the same tick.
+local apply_click
 local function clicks(state, events, context)
     local model, clicked = state.setup, events.clicked
+    local apply = function(_, command) return apply_click(state, command, context) end
     for slot = 0, 7 do
         if clicked["card_" .. slot] then state.focus = slot end
         if clicked["join_" .. slot] and apply(state, {type = "join", slot = slot}) then
@@ -256,16 +270,33 @@ local function clicks(state, events, context)
     for _, mode in ipairs({modes.versus, modes.stage, modes.battle}) do
         if clicked["mode_" .. mode] then apply(state, {type = "mode", value = mode}) end
     end
-    local tenths = imgui.slider_value(events, "setup_speed", speed.tenths, 1, 10)
-    if tenths then speed.tenths = tenths end
+    local current = state.network and (state.network.speed or 10) or speed.tenths
+    local tenths = imgui.slider_value(events, "setup_speed", current, 1, 10)
+    if tenths and tenths ~= current then
+        if state.network then state.network.set_speed(tenths) else speed.tenths = tenths end
+    end
     if clicked.start then apply(state, {type = "start"}) end
     if clicked.wait then apply(state, {type = "wait"}) end
-    if clicked.exit or clicked.result_title then context.action("title") return true end
-    if clicked.result_rematch then
+    if clicked.exit or clicked.result_title then
+        if state.network then state.network.send({type = "exit"}) return false end
+        context.action("title")
+        return true
+    end
+    if clicked.result_rematch then apply(state, {type = "rematch"}) end
+    if clicked.result_fighters then apply(state, {type = "change_fighters"}) end
+    if clicked.result_setup then apply(state, {type = "results_setup"}) end
+    return false
+end
+
+-- A command of the screen itself, or of the setup (base/game/setup). Returns whether the screen leaves, and whether
+-- the command acted.
+local function screen_command(state, command, context)
+    local model = state.setup
+    if command.type == "exit" then context.action("title") return true, true end
+    if command.type == "rematch" then
         state.results = nil
         apply(state, {type = "start"})
-    end
-    if clicked.result_fighters then
+    elseif command.type == "change_fighters" then
         state.results = nil
         for slot = 0, 7 do
             if model.slots[slot].kind == "human" then
@@ -273,15 +304,42 @@ local function clicks(state, events, context)
                 state.cursors[slot] = {panel = "grid", index = grid_index(state, model.slots[slot].fighter)}
             end
         end
+    elseif command.type == "results_setup" then
+        state.results = nil
+    else
+        -- In a server's session only the room role starts.
+        if command.type == "start" and state.network and command.role ~= true then return false, false end
+        local applied = apply(state, command)
+        -- A click from another computer moves the cursors that its keys would move.
+        if applied and state.network and command.type == "join" then state.cursors[command.slot] = {panel = "grid", index = 1} end
+        if applied and state.network and command.type == "leave" then state.cursors[command.slot] = nil end
+        if applied and state.network and command.type == "ready" and state.cursors[command.slot] then
+            state.cursors[command.slot].panel = command.value and "start" or "grid"
+        end
+        return false, applied
     end
-    if clicked.result_setup then state.results = nil end
-    return false
+    return false, true
+end
+apply_click = function(state, command, context)
+    if state.network then
+        state.network.send(command)
+        return false
+    end
+    -- A local game: the click acts now; the room role is this computer.
+    command.role = true
+    local _, applied = screen_command(state, command, context)
+    return applied
 end
 
 -- The match options of base/game/match, through the classic selection (base/game/setup `selection`).
 function screen.selection(state) return setup.selection(state.setup) end
 
 function screen.update(state, input, context)
+    current_network = state.network
+    -- The commands of a server's session, in its final tick (clicks of every client).
+    for _, command in ipairs(input.commands or {}) do
+        if screen_command(state, command, context) then return end
+    end
     local events = imgui.events(input)
     -- Escape (and Android's back button) leaves to the title, unless a countdown runs (jump stops it).
     local escape = input.keys and input.keys[constants.virtual_keys.escape] == true
@@ -328,7 +386,8 @@ local function roster(state, context)
             imgui.text(context, string.format("%s: %s", who, fighter_name(state, entry.fighter)), color)
             if model.mode ~= modes.stage then
                 imgui.same_line(context, 170)
-                imgui.button(context, "team_" .. slot, team_name(entry.team), 80, 20)
+                imgui.button(context, "team_" .. slot, entry.team == teams.independent and i18n.tr("No team")
+                    or team_name(entry.team), 80, 20)
             end
             if entry.kind == "human" then
                 imgui.same_line(context, 254)
@@ -414,7 +473,7 @@ local function rules_panel(state, context)
             imgui.selectable(context, "difficulty_" .. (value + 1), i18n.tr(difficulty_names[value]), model.difficulty == value, 84, 0)
         end
     end
-    local tenths = speed.tenths
+    local tenths = state.network and (state.network.speed or 10) or speed.tenths
     imgui.text(context, i18n.tr("Game speed: %s", tenths == 10 and "1.0" or "0." .. tenths)
         .. (tenths == 4 and " " .. i18n.tr("(recommended)") or ""), 0xa8b8e8)
     imgui.same_line(context, 230)
@@ -449,6 +508,7 @@ local function start_bar(state, context)
 end
 
 function screen.draw(state, context)
+    current_network = state.network
     context.viewport(constants.screen.width, constants.screen.height, 16, 32, 108)
     context.image("pe/menu_back1", 0, 0, true)
     if not imgui.available(context) then return end

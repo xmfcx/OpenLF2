@@ -35,8 +35,10 @@ local tick_ms = 33
 function server.create(options)
     local listening, problem = engine.messages("listen", "0.0.0.0", options.server_port, 64)
     assert(listening, problem)
+    -- classic: the sessions use the classic character selection (--classic-menus, for the input traces of the
+    -- original menus); otherwise they use the match setup screen.
     return {profile = options.network_profile, version = network.own_version() or "", players = {}, order = {},
-        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved()}
+        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved(), classic = options.classic_menus == true}
 end
 
 local function log(state, text) state.log[#state.log + 1] = text end
@@ -104,7 +106,7 @@ local function session_message(state, rejoin)
     local owners = {}
     for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
     return {type = "session", owners = owners, names = session.names, role = state.order[1], random = session.random,
-        rejoin = rejoin or nil}
+        rejoin = rejoin or nil, classic = state.classic or nil}
 end
 -- The final ticks so far, to a player who must run them to catch up (a return, or a resumed session).
 local function send_log(state, peer)
@@ -357,6 +359,22 @@ function handlers.set_speed(state, peer, message)
     local text = tenths == 10 and "1.0" or string.format("0.%d", tenths)
     broadcast(state, {type = "notice", text = player.name .. " set the speed to " .. text, speed = tenths})
     log(state, player.name .. " set the speed to " .. text)
+end
+-- A command of the menus (base/game/setup) from a click: it goes into the next final tick for every client. Only
+-- small values pass: a type, a slot and a number or a flag.
+local command_types = {join = true, leave = true, fighter = true, team = true, ready = true, add_computer = true,
+    remove_computer = true, mode = true, arena = true, stage = true, difficulty = true, start = true, wait = true,
+    exit = true, rematch = true, change_fighters = true, results_setup = true}
+function handlers.command(state, peer, message)
+    local command = message.command
+    if state.phase ~= "session" or not state.players[peer] or type(command) ~= "table" or not command_types[command.type] then
+        return
+    end
+    if #state.authority.commands >= 16 then return end
+    local value = command.value
+    if type(value) ~= "number" and type(value) ~= "boolean" then value = nil end
+    state.authority.commands[#state.authority.commands + 1] = {type = command.type, slot = tonumber(command.slot),
+        value = value, from = state.players[peer].slot, role = state.order[1] == peer or nil}
 end
 function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end

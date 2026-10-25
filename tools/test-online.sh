@@ -24,6 +24,7 @@ run_session() {
     local name=$1 port=$2
     mkdir -p "$WORK/server-config"
     timeout 120 "$GAME" --server --installer "$INSTALLER" --scripts scripts --config-dir "$WORK/server-config" --port "$port" \
+        ${SERVER_FLAGS---classic-menus} \
         > "$WORK/$name.server" 2>&1 &
     local server=$!
     sleep 2
@@ -57,6 +58,7 @@ server_checks() { # scenario, whether the clients' hashes must have been compare
     fi
 }
 
+# Most scenarios use the classic character selection (the server's --classic-menus); scenario 9 the setup screen.
 # 1. A whole versus game: lobby, start, the original title menu and character selection, a fight with rollback;
 #    F4 ends it, the character selection comes back, and a second fight starts (rollback, then lockstep, then rollback).
 TITLE="c$(wait_frames 30)"                           # Versus
@@ -116,7 +118,7 @@ grep -qE "item[0-7]\{[^}]*computer=1" "$WORK/drop.one"; check "drop: client one 
 # 7. The dropped player comes back: a new client with the same name joins during the fight, runs the session's final
 #    ticks to catch up, and plays on with the same state (the server compares its hashes with client one's).
 start_server() { mkdir -p "$WORK/server-config"; timeout 150 "$GAME" --server --installer "$INSTALLER" --scripts scripts \
-    --config-dir "$WORK/server-config" --port "$1" > "$WORK/$2.server" 2>&1 & SERVER=$!; }
+    --config-dir "$WORK/server-config" --port "$1" --classic-menus > "$WORK/$2.server" 2>&1 & SERVER=$!; }
 client() { timeout 140 "$GAME" --headless --installer "$INSTALLER" --scripts scripts --connect 127.0.0.1 --port "$1" --input-trace "$2" > "$3" 2>&1; }
 start_server 23607 return; sleep 2
 client 23607 "$START$TITLE$PICK$MENU$FIGHT$LONG$LONG" "$WORK/return.one" &
@@ -147,5 +149,12 @@ grep -q "session resumed" "$WORK/resume.server"; check "resume: the session went
 for side in three four; do client_checks resume $side "screen=match"; done
 ! grep -q "difference" "$WORK/resume.server"; check "resume: no state difference" $? "$(grep difference "$WORK/resume.server")"
 grep -c "hashes agree (1 checks" "$WORK/resume.server" | grep -q "^2$"; check "resume: the hashes agree after the resume" $? "$(grep 'hashes agree' "$WORK/resume.server")"
+
+# 9. The match setup screen in a session: both join, choose a fighter and get ready with their keys, the room role
+#    starts (defend; the other player's defend does nothing), and the fight runs with rollback.
+SETUP="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"
+SERVER_FLAGS= run_session setup 23609 "$START$TITLE$SETUP$FIGHT" "$START$(wait_frames 31)$SETUP$FIGHT"
+for side in one two; do client_checks setup $side "screen=match"; done
+server_checks setup 1
 
 exit $FAILED

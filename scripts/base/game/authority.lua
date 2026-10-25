@@ -29,7 +29,7 @@ function authority.create(options)
     local first = options.first_tick or 0
     local state = {match = options.match, random = options.random, owners = options.owners,
         function_owner = options.function_owner, all_functions = options.all_functions, tick = first, final = {}, last_final = ticks.empty(), clients = {},
-        hashes = {}, results = {}, stats = {late = 0, predicted = 0}, hold = false, inject = {}}
+        hashes = {}, results = {}, stats = {late = 0, predicted = 0}, hold = false, inject = {}, commands = {}}
     for _, id in ipairs(options.clients) do authority.add_client(state, id) end
     return state
 end
@@ -99,6 +99,8 @@ local function finalize(state, tick, now)
     -- computer).
     for slot, letters in pairs(state.inject) do final.slots[slot] = (final.slots[slot] or "") .. letters end
     state.inject = {}
+    -- The commands of the menus (base/game/setup), in the order they arrived: every client applies them on this tick.
+    if #state.commands > 0 then final.commands, state.commands = state.commands, {} end
     state.final[tick], state.last_final = final, final
     -- Inputs for a final tick are not needed anymore, from any client.
     for _, client in pairs(state.clients) do

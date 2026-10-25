@@ -114,6 +114,7 @@ function handlers.session(state, message)
     state.finals, state.next_tick, state.local_inputs, state.sent_tick, state.speed = {}, 0, {}, -1, nil
     state.input_acknowledged, state.frames, state.client, state.base = -1, 0, nil, nil
     state.drops, state.slots, state.rejoin = {}, nil, message.rejoin == true
+    state.classic = message.classic == true
     state.events[#state.events + 1] = message
 end
 handlers["end"] = function(state, message)
@@ -184,6 +185,15 @@ function handlers.owners(state, message)
     for _, slot in ipairs(message.slots) do state.slots[#state.slots + 1] = tonumber(slot) end
     if state.client then state.client.owned = owned_map(state) end
 end
+-- The slot of the room role in the session (it starts the fight on the setup screen).
+function online.role_slot(state)
+    local start = state.session_start
+    if not start or type(start.owners) ~= "table" then return nil end
+    for slot, peer in pairs(start.owners) do
+        if peer == start.role then return tonumber(slot) end
+    end
+    return nil
+end
 -- How many final ticks wait to be run in the menus (a return or a resume catches up when there are many).
 function online.backlog(state)
     local count = 0
@@ -240,7 +250,7 @@ end
 local function combined_input(final)
     local combined = ticks.held(final)
     combined.pointer_x, combined.pointer_y, combined.button, combined.network, combined.unlock_bits = 0, 0, false, true, 0
-    combined.hold = final.hold
+    combined.hold, combined.commands = final.hold, final.commands
     return combined
 end
 
