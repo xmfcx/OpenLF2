@@ -72,7 +72,7 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 
 1. Build the Windows version with the new engine and the taunts (tools: ~/programs/openlf2-windows/publish-version.sh).
 2. Create the public link of the versions folder on Nextcloud (needs the owner's approval), then publish the version. The friend downloads the new Windows build once; later versions arrive through the Versions screen.
-3. Map UDP port 12345 with UPnP from the game (miniupnpc). No UPnP code exists today.
+3. Done: a hosting game opens UDP 12345 with UPnP (miniupnpc), and the lobby shows the public address.
 4. Play a real game over the internet and note what to tune.
 
 ### 2. Network polish
@@ -81,7 +81,7 @@ Done: a frame on each message at the server and sends at once (the round trip on
 
 ### 3. The pre-game redesign
 
-The steps of docs/pregame-ui-redesign.md, in its order:
+The steps of docs/pregame-ui-redesign.md, in its order. Done: steps 1 to 4 (local music, no locks, the settings menu on Escape with the game speed, AI control and the cheat keys, the game speed in server sessions) and the image and slider widgets of step 5. Open from step 3: the settings menu does not replace the launch options page yet (its Display, Controls and Language values).
 
 1. Local sound and music: configuration values, a local random track, the music out of the shared options. Small; it also fixes the shared music in network games.
 2. No locks: all fighters and difficulties from the start, the `lf2.net` word off in live games, replays unchanged.
@@ -100,7 +100,7 @@ Each step needs headless traces with the player keys, and the online tests must 
 
 Step 5 of docs/netcode.md:
 
-- AI control: each human item (0 to 7) gets a control mode, player or AI. `read_input` skips an item in AI mode, and `ai.control` runs for it. The command `set_control(slot, mode)` changes it on the same tick for everyone. This works in a local game too and can come first.
+- Done: AI control. The letters `A` and `P` in a slot's keys switch its fighter to the computer and back (base/game/match `read_control`), from the settings menu; a fresh key press takes it back after a second.
 - Long drops: the match pauses and the server makes an autosave. The players choose to wait, let the AI take over, give the fighter to another person, or stop and resume later.
 - Returns: a returning player gets a snapshot and the ticks since then. For this, the server must run the game itself (the flow without a window on the final ticks), or ask a client for a snapshot.
 - The server writes the final ticks, so that it can go on after a restart.
