@@ -338,6 +338,12 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 ### Phase 13: learning from data (later)
 
 - The persona tuner, the imitation data from recorded play, self-play batches, integer networks in the scripts.
+- Status: built as a foundation.
+    - Tuning: the arena option `tune=NAME:VALUE.NAME:VALUE` sets persona numbers of side 1's tacticians, and tools/ai-tune.py runs a random search with it: one or two numbers change by a step each round, every candidate plays the same seeds, and a better score keeps the change. It prints the numbers for the kit. A short run for Henry on Crazy (6 rounds of 30 fights) kept risk 30 and spacing 28 (0.633 to 0.639, inside the noise of 30 fights).
+    - Imitation data: `--ai-log INDICES,observe` writes, on each tick where human keys change, the situation of each fighter (ten whole numbers, base/ai/features: distance, depth gap, own and enemy classes, mp, facing) and its keys as an action (left and right become away and toward). It works for human play (a replay of a recording) and for brains (the arena).
+    - tools/ai-imitate.py keeps the 12 most common actions, trains a network with one hidden layer of 24 (numpy), turns it into integers (scale 256) and writes scripts/base/ai/imitation.lua. base/ai/net runs it with whole numbers only. Trained on 18,016 observations of the tactician as Davis: 50% test accuracy (the most common action alone: 30%), and the integer network agrees with the float one on 98% of the test cases.
+    - The brain `imitator` plays by that network. It passes the rollback check and `--net-sim` (the same keys on every client). It plays weakly: 56 damage a minute against a sentry, and it loses to classic. Better data (human recordings) and richer features are the next steps.
+    - Self-play: the arena batches, `learn=1` and the tuner run brains against brains or classic without a window.
 
 ## Risks
 

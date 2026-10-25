@@ -79,7 +79,7 @@ function match.create(options)
         camera = 0, camera_step = 0, frame_number = 0, input_phase = 0,
         random_game = options.demo ~= nil, ai_skill = 0, ai_brain = options.ai_brain, ai_brains = options.ai_brains,
         ai_personas = options.ai_personas, ai_level = options.ai_level, ai_levels = options.ai_levels,
-        ai_learning = options.ai_learning,
+        ai_learning = options.ai_learning, ai_persona_values = options.ai_persona_values,
         round_counter = 0, winner = -1, elapsed = 0, finished = false,
         paused = false, pause_request = false, pause_next = false, cheat_lock = 0,
         heal_all = false, weapon_command = 0, function_counts = {[6] = 0, [7] = 0, [8] = 0, [9] = 0}}
@@ -423,6 +423,11 @@ local function read_input(state, held)
                 scan = nil
             end
         end
+    end
+    -- Imitation data (--ai-log observe, base/ai/features): the situation and the keys of every fighter of this tick.
+    if ai_trace.observe and ai_trace.watching(state) then
+        if not scan then scan = ai.prepare(state) end
+        require("base/ai/features").observe(state, scan, ai_trace.add)
     end
 end
 

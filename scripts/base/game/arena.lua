@@ -11,7 +11,8 @@
 --   crazy|superhuman (crazy), background=ROW (1), seed=N (1), mirror=0|1 (1: every seed plays twice, the second time
 --   with the sides in swapped slots), first=K (the number of the first fight, for a single run of one fight), mp=N (the
 --   mp of every fighter at the start), learn=1 (each fight starts from what the brains learned in the fights before:
---   the move results of the tactician, base/ai/brains/tactician, by side and place in the side).
+--   the move results of the tactician, base/ai/brains/tactician, by side and place in the side), tune=NAME:VALUE.NAME:VALUE
+--   (persona numbers for the tacticians of side 1, for tools/ai-tune.py).
 -- Fight K uses seed + (K - 1) / 2 with mirroring (seed + K - 1 without), and the engine's random streams start from
 -- that number alone, so a fight is the same in a batch and in a single run.
 local constants = require("base/game/constants")
@@ -62,7 +63,7 @@ function arena.parse(text)
     end
     assert(#spec.sides == 2, "arena: a fight needs two sides, A|B")
     for position = 2, #parts do
-        local key, value = parts[position]:match("^(%a+)=([%w_]+)$")
+        local key, value = parts[position]:match("^(%a+)=([%w_:%.%-]+)$")
         if key == "time" then spec.time = assert(tonumber(value), "arena: time is a number")
         elseif key == "difficulty" then
             spec.difficulty = assert(difficulties[value], "arena: unknown difficulty " .. value)
@@ -73,6 +74,9 @@ function arena.parse(text)
         elseif key == "first" then spec.first = assert(tonumber(value), "arena: first is a number")
         elseif key == "mp" then spec.mp = assert(tonumber(value), "arena: mp is a number")
         elseif key == "learn" then spec.learn = value == "1"
+        elseif key == "tune" then
+            spec.tune = {}
+            for name, number in value:gmatch("([%a_]+):(%-?%d+)") do spec.tune[name] = tonumber(number) end
         elseif parts[position] ~= "" then error("arena: unknown option " .. parts[position]) end
     end
     return spec
@@ -102,7 +106,7 @@ local function options_of(spec, number)
     local mirrored = spec.mirror and (number - 1) % 2 == 1
     local seed = spec.mirror and spec.seed + math.floor((number - 1) / 2) or spec.seed + number - 1
     local order = mirrored and {2, 1} or {1, 2}
-    local slots, brain_names, personas, members, levels, learning = {}, {}, {}, {}, {}, {}
+    local slots, brain_names, personas, members, levels, learning, persona_values = {}, {}, {}, {}, {}, {}, {}
     local slot = 0
     for _, side_number in ipairs(order) do
         for place, fighter in ipairs(spec.sides[side_number]) do
@@ -113,13 +117,19 @@ local function options_of(spec, number)
             personas[slot + 10] = fighter.persona
             levels[slot + 10] = fighter.level
             members[#members + 1] = {index = slot + 10, side = side_number, fighter = fighter, place = place}
+            if spec.tune and side_number == 1 and fighter.brain == "tactician" then
+                local values = require("base/ai/brains/tactician").persona_values(fighter.id, fighter.persona)
+                for name, number in pairs(spec.tune) do values[name] = number end
+                persona_values[slot + 10] = values
+            end
             slot = slot + 1
         end
     end
     local options = {mode = constants.modes.versus, difficulty = spec.difficulty, background = spec.background,
         fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = slots,
         ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level, start_mp = spec.mp,
-        ai_levels = next(levels) and levels or nil, ai_learning = next(learning) and learning or nil}
+        ai_levels = next(levels) and levels or nil, ai_learning = next(learning) and learning or nil,
+        ai_persona_values = next(persona_values) and persona_values or nil}
     return options, seed, mirrored, members
 end
 

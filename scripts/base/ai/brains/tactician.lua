@@ -41,8 +41,9 @@ tactician.learn_size = learn_size
 tactician.generic = generic
 
 -- A kit's persona with the generic numbers for the ones that it does not set. Fixed data, cached by persona.
+local full_persona
 local merged = {}
-local function full_persona(entry)
+full_persona = function(entry)
     if not entry then return generic end
     local result = merged[entry]
     if result then return result end
@@ -471,6 +472,14 @@ local root = tree.selector(1, "root", {
 })
 tactician.tree = root
 tactician.names = tree.names(root)
+
+-- A copy of the full persona of fighter `id` and persona `choice` (a number or a name), for the arena's tune option.
+function tactician.persona_values(id, choice)
+    local source = full_persona(kits.persona(kits.of(id), choice))
+    local copy = {}
+    for key, value in pairs(source) do copy[key] = value end
+    return copy
+end
 
 -- The persona of this fighter: the match option (a number, or a name from the arena), else a random one of its kit,
 -- chosen once with the brain's random stream (memory.persona keeps its number; 0 before the first tick).

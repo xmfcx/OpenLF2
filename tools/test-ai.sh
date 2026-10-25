@@ -62,6 +62,9 @@ mkdir -p "$WORK/record" && echo '{"recording": {"enabled": true}}' > "$WORK/reco
 (run record --scripts scripts --config-dir "$WORK/record" --seed 1234 --input-trace "$BRAINS"
  run replay --scripts scripts --config-dir "$WORK/record" --replay "$(ls "$WORK"/record/recording/*.lfr 2>/dev/null | head -1)" \
      --input-trace "$(frames 3000)") &
+run rollback_imitator --scripts "$WORK/scripts9" --seed 1234 --ai-brain imitator --rollback-check --input-trace "$VERSUS" &
+run netsim_imitator --scripts scripts --seed 1234 --ai-brain imitator --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
+run tune --scripts scripts --fight "davis/tactician/brawler|davis;tune=aggression:60.spacing:80;time=600" &
 run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$STAGE" &
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
@@ -92,7 +95,7 @@ for name in classic_versus classic_menus; do
 done
 
 # Rollback: no failure, and no error of the memory validator.
-for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_tactician rollback_stage rollback_stage_ai; do
+for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_tactician rollback_imitator rollback_stage rollback_stage_ai; do
     line=$(grep -o "rollback=checks:[0-9]*,failures:[0-9]*" "$WORK/$name.out" | tail -1)
     echo "$line" | grep -qE "checks:[1-9][0-9]*,failures:0$"; check "rollback: $name" $? "${line:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
@@ -107,7 +110,7 @@ grep -q "Recording saved" "$WORK/record.out" && echo "$recorded" | grep -q "ai=t
 check "recording: a tactician fight replays the same" $? "recorded: $recorded replayed: $replayed"
 
 # The simulated network: both clients agree on every hash.
-for name in netsim_idle netsim_sentry netsim_guard netsim_tactician; do
+for name in netsim_idle netsim_sentry netsim_guard netsim_tactician netsim_imitator; do
     hashes=$(grep -o "hashes=[0-9]*/[0-9]*" "$WORK/$name.out" | tr '\n' ' ')
     echo "$hashes" | grep -qE "hashes=[1-9][0-9]*/0 hashes=[1-9][0-9]*/0"; check "net-sim: $name" $? "${hashes:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
@@ -158,6 +161,11 @@ counts=$(awk '/ai-result/{f++} /ev=move m=ball1\/240/{match($0,/t=[0-9]+/); t=su
 set -- $counts
 [ "${1:-0}" -gt "${2:-0}" ] && [ "${1:-0}" -gt "${3:-0}" ]
 check "learning: balls in fight 1 early $1, late $2, fight 2 early $3" $? "$counts"
+
+# Learning from data (phase 13): the imitator plays (its integer network gives the same keys on every client, above),
+# and the arena takes persona numbers to tune.
+grep -q "ai=imitator/action" "$WORK/rollback_imitator.out"; check "imitator: the network brain plays" $? "$(description rollback_imitator | grep -o 'ai=[^ }]*' | head -2)"
+grep -q "^ai-result" "$WORK/tune.out"; check "tuning: the arena takes persona numbers (tune=)" $? "$(grep -m1 -i error "$WORK/tune.out")"
 
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then

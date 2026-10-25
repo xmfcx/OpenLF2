@@ -491,7 +491,7 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
                 for (std::size_t start = 0; valid && start <= value.size();) {
                     const auto end = std::min(value.find(',', start), value.size());
                     const auto token = value.substr(start, end - start);
-                    valid = token == "all" || token == "frames"
+                    valid = token == "all" || token == "frames" || token == "observe"
                         || (!token.empty() && token.find_first_not_of("0123456789") == std::string::npos);
                     start = end + 1;
                 }

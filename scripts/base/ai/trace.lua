@@ -5,7 +5,7 @@
 -- write and the AI log and the development view read. It lives outside the match table on purpose: a brain never
 -- reads it, so it cannot change a fight. It follows one fight (the one that the screen shows). A tick that runs again
 -- after a rollback drops the entries of that tick and of later ones, so the log writes each tick once.
-local trace = {on = false, capture = false, frames_log = false}
+local trace = {on = false, capture = false, frames_log = false, observe = false}
 -- The development view's store (base/ui/ai_view), filled while `capture` is on: the last brain frame of each fighter,
 -- its last 30 events, and its intent on each of the last 300 ticks.
 trace.frames, trace.recent, trace.timeline = {}, {}, {}
@@ -24,6 +24,8 @@ local last_tick = -1
 function trace.configure(text)
     trace.on = type(text) == "string" and text ~= ""
     trace.frames_log = trace.on and text:find("frames", 1, true) ~= nil
+    -- `observe`: the situation and the keys of every fighter (base/ai/features), the data of imitation.
+    trace.observe = trace.on and text:find("observe", 1, true) ~= nil
     filter = nil
     if trace.on and text:find("%d") then
         filter = {}
@@ -42,6 +44,9 @@ function trace.watch(match, rollback)
     -- runs again.
     margin = rollback and 32 or 0
 end
+
+-- Whether `match` is the fight that the trace follows.
+function trace.watching(match) return match == watched end
 
 -- Whether the brain of item `index` in `match` writes to the trace (the log, or the store of the view).
 function trace.active(match, index)
