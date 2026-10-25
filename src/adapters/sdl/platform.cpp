@@ -14,6 +14,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <list>
@@ -188,6 +189,9 @@ public:
         // Without this the back button finishes the activity; with it the app receives it as a key.
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
+        // The game's own name for the system: sound servers keep each program's volume by this name, and without it
+        // the game shares "SDL Application" (and its stored volume) with every other SDL program.
+        SDL_SetAppMetadata("OpenLF2", nullptr, "io.github.openlf2.OpenLF2");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return error();
         session_ = std::make_unique<QuitSdl>();
 #if TARGET_OS_IPHONE
