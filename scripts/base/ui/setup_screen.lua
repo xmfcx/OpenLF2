@@ -148,7 +148,8 @@ local function slot_keys(state, slot, pressed, context)
     if entry.kind ~= "human" then
         if pressed.c and not entry.kind and apply(state, {type = "join", slot = slot}) then
             state.cursors[slot] = {panel = "grid", index = grid_index(state, 0)}
-            state.focus = slot
+            -- A network game's clicks stay with this computer's own slot.
+            if not state.network then state.focus = slot end
         end
         return
     end
@@ -228,34 +229,31 @@ local apply_click
 local function clicks(state, events, context)
     local model, clicked = state.setup, events.clicked
     local apply = function(_, command) return apply_click(state, command, context) end
+    -- The cursors of the keys change only in screen_command, which every client runs for the same commands on the same
+    -- tick: a click that moved a cursor here, on the clicking computer alone, made the next keys pick different
+    -- fighters on the other computers (a desync). `focus` only aims this computer's clicks.
     for slot = 0, 7 do
         if clicked["card_" .. slot] then state.focus = slot end
-        if clicked["join_" .. slot] and apply(state, {type = "join", slot = slot}) then
-            state.cursors[slot], state.focus = {panel = "grid", index = 1}, slot
+        if clicked["join_" .. slot] then
+            apply(state, {type = "join", slot = slot})
+            state.focus = slot
         end
-        if clicked["computer_" .. slot] and apply(state, {type = "add_computer", slot = slot}) then state.focus = slot end
+        if clicked["computer_" .. slot] then
+            apply(state, {type = "add_computer", slot = slot})
+            state.focus = slot
+        end
         if clicked["remove_" .. slot] then
             apply(state, {type = model.slots[slot].kind == "computer" and "remove_computer" or "leave", slot = slot})
-            state.cursors[slot] = nil
         end
         if clicked["team_" .. slot] then
             apply(state, {type = "team", slot = slot, value = setup.step_team(model, model.slots[slot].team, 1)})
         end
-        if clicked["ready_" .. slot] then
-            local entry = model.slots[slot]
-            if apply(state, {type = "ready", slot = slot, value = not entry.ready}) then
-                if state.cursors[slot] then state.cursors[slot].panel = entry.ready and "start" or "grid" end
-            end
-        end
+        if clicked["ready_" .. slot] then apply(state, {type = "ready", slot = slot, value = not model.slots[slot].ready}) end
     end
     for position, value in ipairs(state.grid) do
         if clicked["fighter_" .. position] then
-            local focus = model.slots[state.focus]
-            if not focus.kind then
-                if apply(state, {type = "join", slot = state.focus}) then state.cursors[state.focus] = {panel = "team", index = position} end
-            end
+            if not model.slots[state.focus].kind then apply(state, {type = "join", slot = state.focus}) end
             apply(state, {type = "fighter", slot = state.focus, value = value})
-            if state.cursors[state.focus] then state.cursors[state.focus].index = position end
         end
     end
     for position, row in ipairs(state.arenas) do
@@ -345,12 +343,12 @@ local function screen_command(state, command, context)
             if not known then return false, false end
         end
         local applied = apply(state, command)
-        -- A click from another computer moves the cursors that its keys would move.
-        if applied and state.network and command.type == "join" then state.cursors[command.slot] = {panel = "grid", index = 1} end
-        if applied and state.network and command.type == "leave" then state.cursors[command.slot] = nil end
-        if applied and state.network and command.type == "ready" and state.cursors[command.slot] then
-            state.cursors[command.slot].panel = command.value and "start" or "grid"
-        end
+        -- A click moves the cursor of the keys of its slot, on every client alike.
+        local cursor = applied and slot and state.cursors[slot]
+        if applied and command.type == "join" then state.cursors[slot] = {panel = "grid", index = 1}
+        elseif applied and (command.type == "leave" or command.type == "remove_computer") then state.cursors[slot] = nil
+        elseif cursor and command.type == "ready" then cursor.panel = command.value and "start" or "grid"
+        elseif cursor and command.type == "fighter" then cursor.index = grid_index(state, command.value) end
         return false, applied
     end
     return false, true
@@ -636,14 +634,19 @@ function screen.draw(state, context)
     imgui.end_window(context)
 end
 
-function screen.describe(state)
+-- The state that every client of a server's session shares: the setup and the cursors of the keys (the menus' desync
+-- check, base/game/online menu_check). `focus` is this computer's own.
+function screen.shared_describe(state)
     local cursors = {}
     for slot = 0, 7 do
         local cursor = state.cursors[slot]
         if cursor then cursors[#cursors + 1] = string.format("%d:%s:%d", slot, cursor.panel, cursor.index) end
     end
-    return setup.describe(state.setup) .. " cursors=" .. table.concat(cursors, ",") .. " focus=" .. state.focus
-        .. (state.results and " results" or "")
+    return setup.describe(state.setup) .. " cursors=" .. table.concat(cursors, ",") .. (state.results and " results" or "")
+end
+
+function screen.describe(state)
+    return screen.shared_describe(state) .. " focus=" .. state.focus
 end
 
 return screen

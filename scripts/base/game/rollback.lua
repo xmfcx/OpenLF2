@@ -91,6 +91,10 @@ local function hash_value(sums, value, seen)
         end
         table.sort(keys, key_order)
         feed(sums, "{")
+        -- The object of an item is shared data, but which object it is belongs to the state: two clients with
+        -- different fighters must never give the same hash.
+        local record = value.record
+        if type(record) == "table" and record.id then feed(sums, "o" .. record.id .. ";") end
         for _, key in ipairs(keys) do
             hash_value(sums, key, seen)
             hash_value(sums, value[key], seen)
@@ -132,6 +136,57 @@ function rollback.field_hashes(match)
     end
     local index, sequence, crt = engine.random_position()
     result.random = index .. "," .. sequence .. "," .. crt
+    return result
+end
+
+-- The desync report (docs/netcode.md "Desync checks"): a short text of a saved state that goes with each hash to the
+-- server. Two clients with the same state give the same text, so a difference shows what differs: the frame, the
+-- random streams, each fighter in slots 0-19 (object id, hp, mp, place) and the number of other items.
+function rollback.summary(saved)
+    local match = saved.match
+    local parts = {string.format("frame=%d random=%d,%d,%d", match.frame_number or 0, saved.random[1], saved.random[2],
+        saved.random[3])}
+    local others = 0
+    for index, value in pairs(match.items) do
+        if index >= 20 then others = others + 1 end
+    end
+    for index = 0, 19 do
+        local value = match.items[index]
+        if value then
+            parts[#parts + 1] = string.format("item%d=id%d,hp%d,mp%d,at%d,%d,%d", index, value.record and value.record.id or -1,
+                value.hp, value.mp, value.x_int, value.y_int, value.z_int)
+        end
+    end
+    parts[#parts + 1] = "others=" .. others
+    return table.concat(parts, " ")
+end
+
+-- The explanation of a difference: hashes of the parts of a saved state. Without `item`: each field of the match and
+-- each item as a whole (with its object id); with `item`: each field of that item. The server compares the clients'
+-- parts and logs the names that differ.
+function rollback.explain(saved, item)
+    local result = {}
+    local function one(value)
+        local sums = {0, 0}
+        hash_value(sums, value, {count = 0})
+        return string.format("%08x", sums[1])
+    end
+    if item then
+        local value = saved.match.items[item]
+        if not value then return result end
+        for key, field in pairs(value) do
+            if not shared_keys[key] and type(field) ~= "function" then result[tostring(key)] = one(field) end
+        end
+        result.object = tostring(value.record and value.record.id)
+        return result
+    end
+    for key, value in pairs(saved.match) do
+        if key ~= "items" and not shared_keys[key] and type(value) ~= "function" then result[tostring(key)] = one(value) end
+    end
+    for index, value in pairs(saved.match.items) do
+        result["item" .. index] = one(value) .. "/" .. tostring(value.record and value.record.id)
+    end
+    result.random = table.concat(saved.random, ",")
     return result
 end
 

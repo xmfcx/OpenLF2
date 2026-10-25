@@ -588,6 +588,17 @@ local function draw_panels(state, context)
         panels.draw_handle(context, x, y, width, height)
     end
 end
+-- The shared state of the screens of a server's session as text, for the menus' desync check (base/game/online
+-- menu_check): the screen, its state (the setup screen's without this computer's focus) and the random streams.
+local function shared_summary(state)
+    local parts = {"screen=" .. tostring(state.active)}
+    local module = screen_module(state.active)
+    if state.active == "setup" then parts[#parts + 1] = module.shared_describe(state.setup)
+    elseif module.describe then parts[#parts + 1] = module.describe(screen_state(state)) end
+    local index, sequence, crt = engine.random_position()
+    parts[#parts + 1] = string.format("random=%d,%d,%d", index, sequence, crt)
+    return table.concat(parts, " ")
+end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
 local imgui_screens = {online_menu = true, online_lobby = true, setup = true}
 local function pointer_position(state)
@@ -1044,6 +1055,7 @@ update_frame = function(state, raw, context)
             else
                 combined.ui, state.pending_ui = state.pending_ui, nil
                 input = combined
+                state.menu_tick = session.next_tick - 1
             end
         end
     elseif state.session then
@@ -1178,7 +1190,13 @@ update_frame = function(state, raw, context)
             state.control_request = nil
         end
         route(state, input, context)
+        -- The menus' desync check: the shared state after this session tick goes to the server.
+        local session = state.session and state.session.online and state.session
+        if state.menu_tick and session and session.phase == "session" and state.active ~= "match" then
+            online.menu_check(session, state.menu_tick, shared_summary(state))
+        end
     end
+    state.menu_tick = nil
     if fight and state.active == "match" and state.match.match == fight then
         local stepped = fight.frame_number ~= frame_before
         local waiting = state.speed_input and #state.speed_input.slots[watched].queue or nil

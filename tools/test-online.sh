@@ -52,7 +52,7 @@ client_checks() { # scenario, side, screen pattern
     ! grep -qiE "traceback|attempt to|error" "$out"; check "$1: client $2 has no script error" $? "$(grep -iE 'traceback|attempt to|error' "$out" | head -1)"
 }
 server_checks() { # scenario, whether the clients' hashes must have been compared (1 = yes)
-    ! grep -q "difference" "$WORK/$1.server"; check "$1: the server finds no state difference" $? "$(grep difference "$WORK/$1.server")"
+    ! grep -qE "desync|difference" "$WORK/$1.server"; check "$1: the server finds no state difference" $? "$(grep -E "desync|difference" "$WORK/$1.server")"
     if [ "$2" = 1 ]; then
         grep -q "hashes agree" "$WORK/$1.server"; check "$1: the server compared the clients' hashes" $? "no comparison"
     fi
@@ -136,7 +136,7 @@ client 23607 "$(wait_frames 30)$LONG" "$WORK/return.three"
 wait "$one"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
 grep -q "is back" "$WORK/return.server"; check "return: the server gave the slot back" $? "$(tail -3 "$WORK/return.server")"
 client_checks return three "screen=match"
-! grep -q "difference" "$WORK/return.server"; check "return: no state difference after the return" $? "$(grep difference "$WORK/return.server")"
+! grep -qE "desync|difference" "$WORK/return.server"; check "return: no state difference after the return" $? "$(grep -E "desync|difference" "$WORK/return.server")"
 grep -c "hashes agree (1 checks" "$WORK/return.server" | grep -q "^2$"; check "return: the hashes agree with the returning player" $? "$(grep 'hashes agree' "$WORK/return.server")"
 
 # 8. Stop and resume later: both players leave during a fight, the server saves the session, two clients with the
@@ -154,7 +154,7 @@ wait "$one"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
 grep -q "session saved" "$WORK/resume.server"; check "resume: the server saved the session" $? "$(tail -3 "$WORK/resume.server")"
 grep -q "session resumed" "$WORK/resume.server"; check "resume: the session went on" $? "$(tail -3 "$WORK/resume.server")"
 for side in three four; do client_checks resume $side "screen=match"; done
-! grep -q "difference" "$WORK/resume.server"; check "resume: no state difference" $? "$(grep difference "$WORK/resume.server")"
+! grep -qE "desync|difference" "$WORK/resume.server"; check "resume: no state difference" $? "$(grep -E "desync|difference" "$WORK/resume.server")"
 grep -c "hashes agree (1 checks" "$WORK/resume.server" | grep -q "^2$"; check "resume: the hashes agree after the resume" $? "$(grep 'hashes agree' "$WORK/resume.server")"
 
 # 10. A spectator: a third client joins during the fight, runs the session's ticks to catch up and watches a second
@@ -171,7 +171,7 @@ grep -q "watching: " "$WORK/watch.server"; check "watch: the server took a spect
 client_checks watch three "screen=match"
 tick=$(grep -oE "online=tick=[0-9]+" "$WORK/watch.three" | tail -1); tick=${tick##*=}
 [ -n "$tick" ] && [ "$tick" -gt 100 ]; check "watch: the spectator's fight runs (tick $tick)" $? "tick=${tick:-none}"
-! grep -q "difference" "$WORK/watch.server"; check "watch: no state difference" $? "$(grep difference "$WORK/watch.server")"
+! grep -qE "desync|difference" "$WORK/watch.server"; check "watch: no state difference" $? "$(grep -E "desync|difference" "$WORK/watch.server")"
 grep -c "hashes agree (1 checks" "$WORK/watch.server" | grep -q "^2$"; check "watch: the spectator's hashes agree" $? "$(grep 'hashes agree' "$WORK/watch.server")"
 
 # 11. Rooms: client one makes a private room, and each client starts a session alone in its room; both sessions run
@@ -190,5 +190,15 @@ for side in one two; do client_checks setup $side "screen=match.*stage="; done
 python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1])).get("last_setup") or {}; sys.exit(0 if s.get("mode") == 1 else 1)' \
     "$WORK/server-config/config.json"; check "setup: the server keeps the values of the last match (Stage)" $? "$(grep -o '"last_setup"[^}]*' "$WORK/server-config/config.json")"
 server_checks setup 1
+
+# 10. Clicks and keys on the setup screen (the desync of 2026-10-25): client one clicks a portrait, then picks with
+#     its keys from there. A click once moved the cursor of the keys only on the clicking computer, so the two clients
+#     picked different fighters. Both clients must play the same fight, and the menus' and the fight's checks agree.
+CLICKS="c$(wait_frames 15)=fighter_5$(wait_frames 15)r$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"
+KEYS="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)$(wait_frames 60)$(wait_frames 140)"
+SERVER_FLAGS= run_session clicks 23611 "$START$CLICKS$FIGHT" "$START$(wait_frames 11)$KEYS$FIGHT"
+for side in one two; do client_checks clicks $side "screen=match"; done
+grep -q "hashes agree" "$WORK/clicks.server"; check "clicks: the server compared the fight hashes" $? "no comparison"
+! grep -qE "desync|difference" "$WORK/clicks.server"; check "clicks: the menus and the fight stay the same on both clients" $? "$(grep -E "desync|difference" "$WORK/clicks.server")"
 
 exit $FAILED

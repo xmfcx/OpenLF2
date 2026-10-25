@@ -102,12 +102,24 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 ### Truth
 
 - Every computer converges on the state of the server, because every computer runs the same confirmed inputs.
-- Every 30 ticks, each client sends a hash of its confirmed state for a tick, and the server compares it with its own. On a difference, the server sends a snapshot of the true state, the client takes it, and the client writes both states and the last inputs to the log. The game heals itself and the bug can be found. Built: the clients send the hashes, and the server compares them with each other. It logs `hashes agree` or `difference at tick T` and tells the clients about a difference. It sends no snapshot.
+- Every 30 ticks, each client sends a hash of its confirmed state for a tick, and the server compares it with its own. On a difference, the server sends a snapshot of the true state, the client takes it, and the client writes both states and the last inputs to the log. The game heals itself and the bug can be found. Built: the clients send the hashes, and the server compares them with each other (see "Desync checks"). It sends no snapshot.
 - The profile check stays: all clients and the server must run the same scripts and engine version. The versions feature delivers them.
 
 ### A session (built)
 
 The server program does not run the game itself. After the lobby, a session starts: the server sends its random state, the players' slots and the values of the last match (`last_setup`), and from then on it makes every tick of the whole game final, in the menus and in the fights. The clients open the match setup screen in place of the title menu, or the original menus when the server runs with `--classic-menus`. They run the menus in lockstep on the final ticks (base/game/online `exchange`): each frame takes the next final tick, like the original's network game, so the menus have the delay of one round trip. A click on the setup screen goes to the server as a command, and the server puts it into the next final tick. A fight runs with rollback on the same ticks, counted from its first tick. Once the tick that ends it is final, the menus go on from the next tick. Every 30 ticks of a fight, each client sends a hash of its final state, and the server compares the clients and logs a difference. Returning players, spectators and saved sessions do not need the game on the server: they run the server's log of final ticks again (see "What is built" under "A dropped player").
+
+### Desync checks
+
+A desync is a difference in the state of two clients: two realities of one game. The server does not run the game, so it cannot say which client is right, but it finds every difference, names what differs, logs it and tells every player. The checks:
+
+- Fights: every 30 ticks, each client sends the hash of its state after a final tick and a summary of it (base/game/rollback `summary`): the frame, the random streams, and each fighter in slots 0-19 with its object id, hp, mp and place. The hash includes the object id of each item, so two different fighters always differ. On a difference, the server logs the summary values that differ, then asks both clients for the parts of that state (`explain`, base/game/rollback `explain`): the hash of each field of the match and of each item. It logs the fields and items that differ, and then the fields of up to three of those items. Each client keeps the last four checked states for these questions.
+- Menus: after every 30th session tick of the menus, each client sends a text of the shared state of its screen (base/ui/flow `shared_summary`): the screen, its state (the setup and the cursors of the keys on the setup screen) and the random streams. The server compares the texts and logs the values that differ.
+- The log tells the first desync of the fight and of the menus in a session (`desync in the menus at tick T between A and B: ...`), then once every 100 checks while it lasts. Every player sees the first one as a chat line ("The games differ (desync) at tick T: ...").
+
+The desync of 2026-10-25 (version 2026.10.25-42) came from the setup screen. A click on a fighter portrait moved the cursor of that slot's keys only on the clicking computer, so the next arrow key and attack picked a different fighter on the other computer. A click on a remove button cleared that cursor the same way. Now the cursors change only in the command path that every client runs on the same tick, and tools/test-online.sh has a scenario with a click and then keys (scenario 10). The rule for the menus of a session: a screen changes shared state only from the combined input and the server's commands. The local mouse, the local keys and the window may only draw or send a command.
+
+The checks do not heal a desync. A later step can let every client run the session's log of final ticks again (as a returning player does), which gives every client the state of the final ticks.
 
 ## Bad connections
 

@@ -138,8 +138,21 @@ function handlers.notice(state, message)
     if #log > chat_kept then table.remove(log, 1) end
     if tonumber(message.speed) then state.speed = tonumber(message.speed) end
 end
+-- The server found that the clients run different games (docs/netcode.md "Desync checks"): every player sees it.
 function handlers.difference(state, message)
-    state.difference = tonumber(message.tick)
+    state.difference = {tick = tonumber(message.tick), reason = tostring(message.reason or "")}
+    handlers.notice(state, {text = string.format("The games differ (desync) at tick %s: %s", tostring(message.tick),
+        tostring(message.reason or "see the server log"))})
+end
+-- The server asks for the parts of the state after a checked tick, to name what differs.
+function handlers.explain(state, message)
+    local tick, item = tonumber(message.tick), tonumber(message.item)
+    local saved = tick and state.checked and state.checked[tick]
+    if not saved then
+        online.send(state, {type = "explanation", tick = tick, item = item, missing = true})
+        return
+    end
+    online.send(state, {type = "explanation", tick = tick, item = item, parts = rollback.explain(saved, item)})
 end
 -- A chat line; a number from 1 to 42 alone is a taunt, which plays its sound (base/ui/chat).
 function handlers.chat(state, message)
@@ -317,6 +330,13 @@ function online.exchange(state, held)
     return combined_input(final)
 end
 
+-- The menus' check (docs/netcode.md "Desync checks"): after every 30th session tick of the menus, a text of the shared
+-- state of the screens goes to the server, which compares the clients and names what differs.
+function online.menu_check(state, tick, summary)
+    if tick % hash_interval ~= 0 then return end
+    online.send(state, {type = "sync", tick = tick, summary = summary})
+end
+
 -- A fight starts in the menus' tick that was just taken; its tick 0 is the next session tick. The rollback client
 -- starts with the keys this computer already sent for the fight's ticks and the final ticks already here.
 function online.begin_match(state, fight)
@@ -379,8 +399,13 @@ function online.frame(state, held)
     for tick = state.hash_sent + 1, last do
         local saved = client.saved[tick + 1]
         if tick % hash_interval == 0 and saved then
-            online.send(state, {type = "hash", tick = tick + first, hash = rollback.hash_saved(saved)})
+            online.send(state, {type = "hash", tick = tick + first, hash = rollback.hash_saved(saved),
+                summary = rollback.summary(saved)})
             state.hashes_sent = (state.hashes_sent or 0) + 1
+            -- The last checked states stay for the server's questions about a difference (handlers.explain).
+            state.checked = state.checked or {}
+            state.checked[tick + first] = saved
+            state.checked[tick + first - 4 * hash_interval] = nil
         end
     end
     state.hash_sent = math.max(state.hash_sent, last)

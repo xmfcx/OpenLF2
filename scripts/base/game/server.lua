@@ -101,6 +101,7 @@ end
 
 local function back_to_lobby(state, reason)
     state.phase, state.authority, state.hashes, state.session = "lobby", nil, {}, nil
+    state.syncs, state.desyncs, state.explaining = nil, nil, nil
     -- Spectators join the lobby as players while there are free slots.
     for peer, spectator in pairs(state.spectators) do
         local slot = free_slot(state)
@@ -196,7 +197,7 @@ local function start_session(state, now, saved)
     local first = saved and saved.length or 0
     state.authority = authority.create({owners = owners, clients = clients, all_functions = true, first_tick = first})
     state.authority.speed = saved and saved.speed or (state.last_setup and state.last_setup.speed)
-    state.phase, state.hashes = "session", {}
+    state.phase, state.hashes, state.syncs, state.desyncs, state.explaining = "session", {}, {}, nil, nil
     -- A resumed session goes on with its next tick, after the start delay.
     state.start_at = now + start_delay_ms - first * tick_ms
     state.session = {names = names, random = random, slots = slots, log = saved and saved.log or {}, logged = first - 1,
@@ -520,29 +521,127 @@ function handlers.input(state, peer, message, now)
     message.from = peer
     authority.receive(state.authority, message, now - state.start_at)
 end
--- A client's hash of its game state after a final tick (base/game/online): two different hashes for one tick mean
--- that the clients run different games. The server keeps the first report of each tick and compares the others.
+-- The desync checks (docs/netcode.md "Desync checks"). The clients never send their whole state, so the server cannot
+-- say who is right; it names the clients, the tick and what differs, logs it, and tells every player.
+local function name_of(state, id)
+    local who = state.players[id] or state.spectators[id]
+    return who and who.name or "?"
+end
+-- The words of two summaries ("name=value ...") that differ, as "name: A vs B", at most `limit` of them.
+local function summary_difference(one, two, limit)
+    local function words(text)
+        local list, by_name = {}, {}
+        for word in tostring(text):gmatch("%S+") do
+            local name = word:match("^([^=]+)=") or word
+            if not by_name[name] then list[#list + 1] = name end
+            by_name[name] = word:match("^[^=]+=(.*)$") or ""
+        end
+        return list, by_name
+    end
+    local names, first = words(one)
+    local more, second = words(two)
+    for _, name in ipairs(more) do
+        if first[name] == nil then names[#names + 1] = name end
+    end
+    local parts = {}
+    for _, name in ipairs(names) do
+        if first[name] ~= second[name] and #parts < limit then
+            parts[#parts + 1] = string.format("%s: %s vs %s", name, first[name] or "-", second[name] or "-")
+        end
+    end
+    return table.concat(parts, "; ")
+end
+-- A desync that the log tells once (and then every 100 checks), and every player sees.
+local function report(state, kind, tick, first_peer, peer, reason)
+    state.desyncs = state.desyncs or {}
+    local count = (state.desyncs[kind] or 0) + 1
+    state.desyncs[kind] = count
+    if count == 1 then
+        log(state, string.format("desync in the %s at tick %d between %s and %s: %s", kind, tick, name_of(state, first_peer),
+            name_of(state, peer), reason))
+        broadcast(state, {type = "difference", tick = tick, reason = kind .. ": " .. reason})
+    elseif count % 100 == 0 then
+        log(state, string.format("the %s still differ (%d checks, tick %d)", kind, count, tick))
+    end
+end
+-- A client's hash of its fight state after a final tick (base/game/online), with a summary: two different hashes
+-- for one tick mean that the clients run different fights. The server keeps the first report of each tick and
+-- compares the others; on the first difference it asks both clients for the parts of their state (handlers.explanation).
 function handlers.hash(state, peer, message)
     if state.phase ~= "session" or not (state.players[peer] or state.spectators[peer]) then return end
     local tick, hash = tonumber(message.tick), message.hash
     if not tick or type(hash) ~= "string" then return end
+    local summary = type(message.summary) == "string" and message.summary:sub(1, 2000) or ""
     local first = state.hashes[tick]
     if not first then
-        state.hashes[tick] = {hash = hash, peer = peer}
+        state.hashes[tick] = {hash = hash, peer = peer, summary = summary}
     elseif first.hash == hash and first.peer ~= peer and not first.agreed then
         first.agreed = true
         state.agreed = (state.agreed or 0) + 1
-        if state.agreed == 1 or state.agreed == 10 or state.agreed == 100 then
+        if state.agreed == 1 or state.agreed == 10 or state.agreed == 100 or state.agreed % 1000 == 0 then
             log(state, string.format("hashes agree (%d checks, tick %d)", state.agreed, tick))
         end
     elseif first.hash ~= hash and not first.reported then
         first.reported = true
-        local function name_of(id)
-            local who = state.players[id] or state.spectators[id]
-            return who and who.name or "?"
+        local reason = summary_difference(first.summary, summary, 6)
+        report(state, "fight", tick, first.peer, peer, reason ~= "" and reason or "a field outside the summary")
+        if (state.desyncs.fight or 0) == 1 then
+            state.explaining = {tick = tick, peers = {first.peer, peer}, answers = {}}
+            for _, id in ipairs(state.explaining.peers) do send(id, {type = "explain", tick = tick}) end
         end
-        log(state, string.format("difference at tick %d: %s and %s", tick, name_of(first.peer), name_of(peer)))
-        broadcast(state, {type = "difference", tick = tick})
+    end
+end
+-- The parts of the two clients' states after a checked tick: the fields of the fight and the items that differ, and
+-- then the fields of the first items that differ.
+function handlers.explanation(state, peer, message)
+    local asked = state.explaining
+    if not asked or tonumber(message.tick) ~= asked.tick or (peer ~= asked.peers[1] and peer ~= asked.peers[2]) then return end
+    local key = tostring(tonumber(message.item) or "all")
+    asked.answers[key] = asked.answers[key] or {}
+    asked.answers[key][peer] = message.missing and false or (type(message.parts) == "table" and message.parts or false)
+    local one, two = asked.answers[key][asked.peers[1]], asked.answers[key][asked.peers[2]]
+    if one == nil or two == nil then return end
+    if not one or not two then
+        log(state, string.format("desync at tick %d: a client no longer had that state to explain it", asked.tick))
+        state.explaining = nil
+        return
+    end
+    local names = {}
+    for name in pairs(one) do names[name] = true end
+    for name in pairs(two) do names[name] = true end
+    local sorted = {}
+    for name in pairs(names) do sorted[#sorted + 1] = name end
+    table.sort(sorted)
+    local differ, items = {}, {}
+    for _, name in ipairs(sorted) do
+        if one[name] ~= two[name] then
+            differ[#differ + 1] = key == "all" and name or ("item " .. key .. " " .. name)
+            local item = key == "all" and tonumber(name:match("^item(%d+)$"))
+            if item and #items < 3 then items[#items + 1] = item end
+        end
+    end
+    log(state, string.format("desync at tick %d, %s differs: %s", asked.tick, key == "all" and "the fight" or "item " .. key,
+        #differ > 0 and table.concat(differ, ", ", 1, math.min(#differ, 24)) or "nothing in the parts"))
+    if key == "all" then
+        for _, item in ipairs(items) do
+            for _, id in ipairs(asked.peers) do send(id, {type = "explain", tick = asked.tick, item = item}) end
+        end
+    end
+end
+-- A client's text of the shared state of the menus after a session tick (base/game/online menu_check). The screens
+-- of every client must be the same; a difference names the screen values that differ.
+function handlers.sync(state, peer, message)
+    if state.phase ~= "session" or not (state.players[peer] or state.spectators[peer]) then return end
+    local tick, summary = tonumber(message.tick), message.summary
+    if not tick or type(summary) ~= "string" then return end
+    summary = summary:sub(1, 2000)
+    state.syncs = state.syncs or {}
+    local first = state.syncs[tick]
+    if not first then
+        state.syncs[tick] = {summary = summary, peer = peer}
+    elseif first.summary ~= summary and not first.reported then
+        first.reported = true
+        report(state, "menus", tick, first.peer, peer, summary_difference(first.summary, summary, 6))
     end
 end
 
@@ -623,6 +722,9 @@ local function room_update(state, now)
             message.type = "ticks"
             send(peer, message, unreliable)
         end
+    end
+    for tick in pairs(state.syncs or {}) do
+        if tick < state.authority.tick - 600 then state.syncs[tick] = nil end
     end
     for tick in pairs(state.hashes) do
         if tick < state.authority.tick - 600 then state.hashes[tick] = nil end
