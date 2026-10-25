@@ -12,6 +12,7 @@
 #endif
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -609,6 +610,7 @@ public:
     bool rebuild_renderer() {
         setup_.reset();
         textures_.clear();
+        ui_textures_.clear();
         sprite_effects_.clear();
         texture_bytes_ = 0;
         frame_target_.reset();
@@ -903,6 +905,97 @@ private:
         }
         return true;
     }
+    // A bitmap (BMP, or PNG with SDL 3.4) of the resources as a texture; black is see-through with `color_key`.
+    Result<Texture> load_bitmap_texture(std::string_view resource, bool color_key) {
+        auto bytes = resources_.read(resource);
+        if (!bytes) return std::unexpected(bytes.error());
+        std::unique_ptr<SDL_IOStream, CloseStream> stream(SDL_IOFromConstMem(bytes->data(), bytes->size()));
+        if (!stream) return error();
+        const bool png = resource.ends_with(".png");
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+        std::unique_ptr<SDL_Surface, DestroySurface> loaded(
+            png ? SDL_LoadPNG_IO(stream.get(), false) : SDL_LoadBMP_IO(stream.get(), false));
+#else
+        if (png) return fail(ErrorCode::unsupported, "PNG sprites require SDL 3.4: " + std::string(resource));
+        std::unique_ptr<SDL_Surface, DestroySurface> loaded(SDL_LoadBMP_IO(stream.get(), false));
+#endif
+        if (!loaded) return error();
+        std::unique_ptr<SDL_Surface, DestroySurface> surface(
+            SDL_ConvertSurface(loaded.get(), png ? SDL_PIXELFORMAT_ARGB8888 : SDL_PIXELFORMAT_XRGB8888));
+        if (!surface) return error();
+        if (surface->w <= 0 || surface->h <= 0 || surface->w > 8192 || surface->h > 8192) {
+            return fail(ErrorCode::limit, "image dimensions exceed limits");
+        }
+        if (color_key && !SDL_SetSurfaceColorKey(surface.get(), true, SDL_MapSurfaceRGB(surface.get(), 0, 0, 0))) {
+            return error();
+        }
+        Texture texture(SDL_CreateTextureFromSurface(renderer_.get(), surface.get()));
+        // Sprites are always sampled without filtering; linear scaling happens on the finished frame.
+        if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_NEAREST)) return error();
+        return texture;
+    }
+    // An image element (UiCommand::Kind::image): a bitmap of the game data, part of it, with frames around it in the
+    // colors of the players whose cursors are on it. Menu images keep their own cache, so that a sprite frame that
+    // empties the sprite cache never takes a texture that ImGui still draws.
+    template <typename Size>
+    void draw_ui_image(const UiCommand& element, const Size& size) {
+        const auto bar = element.label.find('|');
+        const std::string_view rectangle = std::string_view(element.label).substr(0, bar);
+        auto found = ui_textures_.find(element.value);
+        if (found == ui_textures_.end()) {
+            if (ui_textures_.size() >= 256) ui_textures_.clear();
+            auto texture = load_bitmap_texture(element.value, false);
+            if (!texture) {
+                ImGui::Dummy({size(element.width), size(element.height)});
+                return;
+            }
+            found = ui_textures_.emplace(element.value, std::move(*texture)).first;
+        }
+        SDL_Texture* texture = found->second.get();
+        std::array<int, 4> source{0, 0, texture->w, texture->h};
+        if (!rectangle.empty()) {
+            std::size_t start = 0;
+            for (auto& part : source) {
+                const auto end = rectangle.find(',', start);
+                const auto piece = rectangle.substr(start, end == std::string_view::npos ? rectangle.size() - start : end - start);
+                std::from_chars(piece.data(), piece.data() + piece.size(), part);
+                if (end == std::string_view::npos) break;
+                start = end + 1;
+            }
+        }
+        const float width = static_cast<float>(texture->w), height = static_cast<float>(texture->h);
+        const ImVec2 uv0{static_cast<float>(source[0]) / width, static_cast<float>(source[1]) / height};
+        const ImVec2 uv1{static_cast<float>(source[0] + source[2]) / width, static_cast<float>(source[1] + source[3]) / height};
+        const ImVec2 extent{size(element.width > 0 ? element.width : source[2]), size(element.height > 0 ? element.height : source[3])};
+        const ImVec4 tint = (element.flags & ui_dim) ? ImVec4{0.45f, 0.45f, 0.45f, 1.0f} : ImVec4{1.0f, 1.0f, 1.0f, 1.0f};
+        const auto texture_id = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture));
+        if (element.flags & ui_clickable) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, {0.0f, 0.0f});
+            const auto hidden = "##" + element.id;
+            if (ImGui::ImageButton(hidden.c_str(), texture_id, extent, uv0, uv1, {0, 0, 0, 0}, tint)) {
+                ui_events_.push_back({UiEvent::Kind::clicked, element.id, {}});
+            }
+            ImGui::PopStyleVar();
+        } else {
+            ImGui::ImageWithBg(texture_id, extent, uv0, uv1, {0, 0, 0, 0}, tint);
+        }
+        if (bar == std::string::npos) return;
+        // One frame for each color, the later ones inside the earlier ones.
+        auto* list = ImGui::GetWindowDrawList();
+        ImVec2 low = ImGui::GetItemRectMin(), high = ImGui::GetItemRectMax();
+        const float thickness = std::max(2.0f, size(3));
+        std::string_view colors = std::string_view(element.label).substr(bar + 1);
+        while (!colors.empty()) {
+            const auto end = colors.find(',');
+            const auto piece = colors.substr(0, end);
+            unsigned int color = 0;
+            std::from_chars(piece.data(), piece.data() + piece.size(), color, 16);
+            list->AddRect(low, high, IM_COL32((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff, 255), 0.0f, 0, thickness);
+            low.x += thickness; low.y += thickness; high.x -= thickness; high.y -= thickness;
+            if (end == std::string_view::npos) break;
+            colors.remove_prefix(end + 1);
+        }
+    }
     void draw_ui(const Viewport& viewport) {
         if (ui_.empty()) {
             ui_keyboard_ = ui_mouse_ = false;
@@ -1048,6 +1141,27 @@ private:
                     --children;
                 }
                 break;
+            case UiCommand::Kind::slider: {
+                // The scripts' value wins when it changes; while the knob moves, the moved value stays.
+                int low = std::min(element.x, element.y), high = std::max(element.x, element.y);
+                int given = low;
+                std::from_chars(element.value.data(), element.value.data() + element.value.size(), given);
+                auto& known = ui_given_[element.id];
+                auto& moved = ui_inputs_[element.id];
+                if (known != element.value || moved.empty()) known = moved = std::to_string(std::clamp(given, low, high));
+                int current = std::stoi(moved);
+                ImGui::SetNextItemWidth(element.width > 0 ? size(element.width) : -1.0f);
+                ImGui::BeginDisabled((element.flags & ui_disabled) != 0);
+                if (ImGui::SliderInt(labelled.c_str(), &current, low, high, "")) {
+                    moved = std::to_string(current);
+                    ui_events_.push_back({UiEvent::Kind::changed, element.id, moved});
+                }
+                ImGui::EndDisabled();
+                break;
+            }
+            case UiCommand::Kind::image:
+                draw_ui_image(element, size);
+                break;
             }
         }
         for (; children > 0; --children) ImGui::EndChild();
@@ -1150,26 +1264,9 @@ private:
             }
             const auto key = sprite.resource + (sprite.color_key ? ":key" : ":opaque");
             if (!textures_.contains(key)) {
-                auto bytes = resources_.read(sprite.resource);
-                if (!bytes) return std::unexpected(bytes.error());
-                std::unique_ptr<SDL_IOStream, CloseStream> stream(SDL_IOFromConstMem(bytes->data(), bytes->size()));
-                if (!stream) return error();
-                const bool png = sprite.resource.ends_with(".png");
-#if SDL_VERSION_ATLEAST(3, 4, 0)
-                std::unique_ptr<SDL_Surface, DestroySurface> loaded(
-                    png ? SDL_LoadPNG_IO(stream.get(), false) : SDL_LoadBMP_IO(stream.get(), false));
-#else
-                if (png) return fail(ErrorCode::unsupported, "PNG sprites require SDL 3.4: " + sprite.resource);
-                std::unique_ptr<SDL_Surface, DestroySurface> loaded(SDL_LoadBMP_IO(stream.get(), false));
-#endif
-                if (!loaded) return error();
-                std::unique_ptr<SDL_Surface, DestroySurface> surface(
-                    SDL_ConvertSurface(loaded.get(), png ? SDL_PIXELFORMAT_ARGB8888 : SDL_PIXELFORMAT_XRGB8888));
-                if (!surface) return error();
-                if (surface->w <= 0 || surface->h <= 0 || surface->w > 8192 || surface->h > 8192) {
-                    return fail(ErrorCode::limit, "image dimensions exceed limits");
-                }
-                const auto texture_bytes = static_cast<std::size_t>(surface->w) * static_cast<std::size_t>(surface->h) * 4;
+                auto texture = load_bitmap_texture(sprite.resource, sprite.color_key);
+                if (!texture) return std::unexpected(texture.error());
+                const auto texture_bytes = static_cast<std::size_t>((*texture)->w) * static_cast<std::size_t>((*texture)->h) * 4;
                 // Bounded cache: drop every retained texture when a limit would be exceeded.
                 // SDL flushes pending draws that use a texture before destroying it.
                 if (texture_bytes > max_texture_bytes) return fail(ErrorCode::limit, "texture memory budget exceeded");
@@ -1177,14 +1274,7 @@ private:
                     textures_.clear();
                     texture_bytes_ = 0;
                 }
-                if (sprite.color_key &&
-                    !SDL_SetSurfaceColorKey(surface.get(), true, SDL_MapSurfaceRGB(surface.get(), 0, 0, 0))) {
-                    return error();
-                }
-                Texture texture(SDL_CreateTextureFromSurface(renderer_.get(), surface.get()));
-                // Sprites are always sampled without filtering; linear scaling happens on the finished frame.
-                if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_NEAREST)) return error();
-                textures_.emplace(key, std::move(texture));
+                textures_.emplace(key, std::move(*texture));
                 texture_bytes_ += texture_bytes;
             }
             const auto& texture = textures_.at(key);
@@ -1498,6 +1588,7 @@ private:
     std::vector<UiEvent> ui_events_;
     std::map<std::string, std::string> ui_inputs_; // each input's text as typed
     std::map<std::string, std::string> ui_given_;  // each input's value as the scripts last gave it
+    std::map<std::string, Texture, std::less<>> ui_textures_; // the bitmaps of menu images
     std::set<std::string> focused_;                // inputs that took the keyboard when they appeared
     ImGuiStyle base_style_;
     float ui_scale_ = 0.0f;

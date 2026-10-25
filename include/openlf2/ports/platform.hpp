@@ -150,7 +150,10 @@ struct ScreenExtent { int left = 0; int top = 0; int right = 0; int bottom = 0; 
 // network menus). Positions and sizes are in viewport units and scale with the picture; 0 is "automatic" (a window
 // of height 0 fits its content and sits in the middle of the picture's height).
 struct UiCommand {
-    enum class Kind { window, end_window, text, button, input, selectable, same_line, separator, spacing, child, end_child };
+    // slider: an integer from x to y (value as text); image: the bitmap `value`, the source rectangle "x,y,w,h" in
+    // `label` (empty: the whole bitmap), then "|" and the colors (RRGGBB hex, comma separated) of cursor frames.
+    enum class Kind { window, end_window, text, button, input, selectable, same_line, separator, spacing, child, end_child,
+        slider, image };
     Kind kind = Kind::text;
     std::string id;    // letters, digits and '_'; the events name it
     std::string label; // the text shown (an input's hint)
@@ -161,9 +164,10 @@ struct UiCommand {
 };
 // Flags of UiCommand: a window without a title bar, a text that wraps, a big text, an input that takes the keyboard
 // when it appears, a child with a border, a button or selectable that cannot be used, a see-through window (over a
-// fight), a window that clicks pass through.
+// fight), a window that clicks pass through, an image that is also a button, a dim image.
 enum UiFlag : int {
-    ui_no_title = 1, ui_wrap = 2, ui_large = 4, ui_focus = 8, ui_border = 16, ui_disabled = 32, ui_glass = 64, ui_passive = 128
+    ui_no_title = 1, ui_wrap = 2, ui_large = 4, ui_focus = 8, ui_border = 16, ui_disabled = 32, ui_glass = 64, ui_passive = 128,
+    ui_clickable = 256, ui_dim = 512
 };
 // What the player did with the menu elements of the previous frame.
 struct UiEvent {

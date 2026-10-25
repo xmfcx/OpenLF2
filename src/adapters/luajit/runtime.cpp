@@ -367,7 +367,7 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
                 // A menu element (ports/platform.hpp UiCommand): kind, id, label, value, x, y, width, height,
                 // color, flags.
                 UiCommand element;
-                element.kind = static_cast<UiCommand::Kind>(reader.integer(0, static_cast<int>(UiCommand::Kind::end_child)));
+                element.kind = static_cast<UiCommand::Kind>(reader.integer(0, static_cast<int>(UiCommand::Kind::image)));
                 const auto id = reader.text();
                 if (id.size() > 64 || id.find_first_not_of(
                         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string_view::npos) {
@@ -378,7 +378,7 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
                 element.value = std::string(reader.text());
                 element.x = reader.integer(); element.y = reader.integer();
                 element.width = reader.integer(); element.height = reader.integer();
-                element.color = reader.integer(-1, 0xffffff); element.flags = reader.integer(0, 255);
+                element.color = reader.integer(-1, 0xffffff); element.flags = reader.integer(0, 0xffff);
                 if (frame.ui.size() >= 4096) throw std::runtime_error("too many menu elements");
                 frame.ui.push_back(std::move(element));
                 break;
