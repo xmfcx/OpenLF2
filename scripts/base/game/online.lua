@@ -20,6 +20,8 @@ local tick_ms = ticks.tick_ms
 local connect_ms = 10000
 -- The most ticks one input message repeats, and the most new ticks one frame gives keys to.
 local resend_limit, sample_limit = 32, 8
+-- A spectator runs the final ticks this many ticks (a second) behind the newest one.
+online.spectator_delay = 30
 -- A fight's state hash goes to the server every this many ticks (server.lua compares the clients).
 local hash_interval = 30
 local chat_kept = 20
@@ -95,6 +97,7 @@ end
 local handlers = {}
 function handlers.welcome(state, message)
     state.phase, state.id, state.slot = "lobby", message.id, message.slot
+    state.spectator = message.spectator == true
 end
 function handlers.refused(state, message)
     local reasons = {version = "The server runs another game version (" .. tostring(message.version) .. ")",
@@ -232,10 +235,14 @@ end
 -- This computer's keys for the session: player 1's keys drive its slot; the function keys go with them.
 -- This computer's slots: its own, and the fighters of dropped players it took over (the server's "owners"), played
 -- by its player 1, player 2 and so on.
-local function own_slots(state) return state.slots or {state.slot} end
+local function own_slots(state)
+    if state.spectator then return {} end
+    return state.slots or {state.slot}
+end
 local function own_input(state, held)
     local input = ticks.empty()
     for position, slot in ipairs(own_slots(state)) do input.slots[slot] = held[position - 1] or "" end
+    if state.spectator then return input end
     input.functions, input.function_presses = held.functions or "", held.function_presses or ""
     return input
 end
@@ -283,6 +290,8 @@ function online.exchange(state, held)
     online.send(state, {type = "input", sent_at = now, acknowledged = state.next_tick - 1, inputs = inputs}, unreliable)
     local final = state.finals[state.next_tick]
     if not final then return nil end
+    -- A spectator stays a second behind (docs/netcode.md "Spectators").
+    if state.spectator and not state.finals[state.next_tick + online.spectator_delay] then return nil end
     state.finals[state.next_tick], state.local_inputs[state.next_tick] = nil, nil
     state.next_tick, state.frames = state.next_tick + 1, state.frames + 1
     return combined_input(final)
@@ -294,7 +303,8 @@ function online.begin_match(state, fight)
     state.base = state.next_tick - 1
     local first = state.base + 1
     local client = rollback_client.create({id = state.id, match = fight, random = {engine.random_position()},
-        owned = owned_map(state), owns_functions = true})
+        owned = owned_map(state), owns_functions = not state.spectator,
+        delay_behind = state.spectator and online.spectator_delay or nil})
     -- A speed set in the menus holds in the fight until a final tick says otherwise.
     if state.speed and state.speed < 10 then client.last_speed = state.speed end
     for tick = first, state.sent_tick do

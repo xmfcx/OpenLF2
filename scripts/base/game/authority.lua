@@ -33,11 +33,12 @@ function authority.create(options)
     for _, id in ipairs(options.clients) do authority.add_client(state, id) end
     return state
 end
--- A client that joins (a session's start, or a player who comes back).
-function authority.add_client(state, id)
+-- A client that joins (a session's start, a player who comes back, or a spectator, whose keys never count).
+function authority.add_client(state, id, spectator)
     -- `newest`: the newest tick up to which every input of the client arrived; `heard`: its newest message time
     -- (server clock); `echo`: the client time of its newest message; `acknowledged`: its newest final tick.
-    state.clients[id] = {inputs = {}, newest = state.tick - 1, heard = 0, echo = nil, acknowledged = -1, missed = {}}
+    state.clients[id] = {inputs = {}, newest = state.tick - 1, heard = 0, echo = nil, acknowledged = -1, missed = {},
+        spectator = spectator or nil}
 end
 
 function authority.receive(state, message, now)
@@ -46,6 +47,7 @@ function authority.receive(state, message, now)
     client.heard = now
     if not client.echo or message.sent_at > client.echo then client.echo, client.echo_at = message.sent_at, now end
     if message.acknowledged and message.acknowledged > client.acknowledged then client.acknowledged = message.acknowledged end
+    if client.spectator then return end
     for tick, input in pairs(message.inputs or {}) do
         -- A client may only send keys for its own slots; an input for a tick that is already final is late.
         if tick < state.tick then

@@ -26,7 +26,9 @@ local resend_limit, run_limit, catch_up_limit = 32, 2, 8
 
 -- options: id, match, random (its position), owned[slot] = true, owns_functions.
 function client.create(options)
+    -- delay_behind: a spectator runs only final ticks, this many behind the newest one.
     return {id = options.id, match = options.match, random = options.random, owned = options.owned,
+        delay_behind = options.delay_behind,
         owns_functions = options.owns_functions, tick = 0, confirmed = -1, reported = -1, final = {},
         local_inputs = {}, used = {}, saved = {}, results = {}, played = {}, last_known = ticks.empty().slots,
         sample = ticks.empty(), delay = 0, input_acknowledged = -1, server_hashes = {}, hashes_checked = -1, sounds_out = {},
@@ -140,6 +142,7 @@ function client.update(state, now)
         -- Run ahead of the server: half the round trip and a margin for jitter, less what the input delay covers.
         local lead = math.max(state.rtt / 2 + 2 * state.jitter + 8 - state.delay * tick_ms, 4)
         local target = math.floor((now + state.offset + lead) / tick_ms)
+        if state.delay_behind then target = math.min(target, state.confirmed - state.delay_behind) end
         -- Far behind (a return or a resumed session runs the ticks so far): more ticks a frame.
         local limit = state.tick <= state.confirmed and (state.confirmed - state.tick > 60 and 4 * catch_up_limit or catch_up_limit)
             or run_limit

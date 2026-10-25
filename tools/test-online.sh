@@ -150,6 +150,21 @@ for side in three four; do client_checks resume $side "screen=match"; done
 ! grep -q "difference" "$WORK/resume.server"; check "resume: no state difference" $? "$(grep difference "$WORK/resume.server")"
 grep -c "hashes agree (1 checks" "$WORK/resume.server" | grep -q "^2$"; check "resume: the hashes agree after the resume" $? "$(grep 'hashes agree' "$WORK/resume.server")"
 
+# 10. A spectator: a third client joins during the fight, runs the session's ticks to catch up and watches a second
+#     behind; the server compares its hashes with the players'.
+start_server 23610 watch; sleep 2
+client 23610 "$START$TITLE$PICK$MENU$FIGHT$LONG" "$WORK/watch.one" &
+one=$!
+client 23610 "$START$(wait_frames 31)$PICK$(wait_frames 136)$LONG" "$WORK/watch.two" &
+two=$!
+sleep 25
+client 23610 "$(wait_frames 30)$(printf 'r,,%.0s' $(seq 1 120))" "$WORK/watch.three"
+wait "$one" "$two"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
+grep -q "watching: " "$WORK/watch.server"; check "watch: the server took a spectator" $? "$(tail -3 "$WORK/watch.server")"
+client_checks watch three "screen=match"
+! grep -q "difference" "$WORK/watch.server"; check "watch: no state difference" $? "$(grep difference "$WORK/watch.server")"
+grep -c "hashes agree (1 checks" "$WORK/watch.server" | grep -q "^2$"; check "watch: the spectator's hashes agree" $? "$(grep 'hashes agree' "$WORK/watch.server")"
+
 # 9. The match setup screen in a session: both join, choose a fighter and get ready with their keys, the room role
 #    starts (defend; the other player's defend does nothing), and the fight runs with rollback.
 SETUP="c$(wait_frames 15)c$(wait_frames 15)c$(wait_frames 15)f$(wait_frames 140)"

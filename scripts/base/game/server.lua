@@ -38,7 +38,8 @@ function server.create(options)
     -- classic: the sessions use the classic character selection (--classic-menus, for the input traces of the
     -- original menus); otherwise they use the match setup screen.
     return {profile = options.network_profile, version = network.own_version() or "", players = {}, order = {},
-        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved(), classic = options.classic_menus == true}
+        phase = "lobby", log = {}, hashes = {}, saved = server.load_saved(), classic = options.classic_menus == true,
+        spectators = {}}
 end
 
 local function log(state, text) state.log[#state.log + 1] = text end
@@ -74,6 +75,16 @@ end
 
 local function back_to_lobby(state, reason)
     state.phase, state.authority, state.hashes, state.session = "lobby", nil, {}, nil
+    -- Spectators join the lobby as players while there are free slots.
+    for peer, spectator in pairs(state.spectators) do
+        local slot = free_slot(state)
+        if slot then
+            state.players[peer] = {name = spectator.name, slot = slot, ready = false}
+            state.order[#state.order + 1] = peer
+            state.spectators[peer] = nil
+            send(peer, {type = "welcome", id = peer, slot = slot})
+        end
+    end
     for _, player in pairs(state.players) do player.ready = false end
     broadcast(state, {type = "end"})
     broadcast_lobby(state)
@@ -82,6 +93,12 @@ end
 
 local drop_player, save_session
 local function remove(state, peer)
+    if state.spectators[peer] then
+        log(state, "stopped watching: " .. state.spectators[peer].name)
+        state.spectators[peer] = nil
+        if state.authority then state.authority.clients[peer] = nil end
+        return
+    end
     if not state.players[peer] then return end
     local player = state.players[peer]
     log(state, "left: " .. player.name)
@@ -270,8 +287,7 @@ function handlers.hello(state, peer, message)
             if not entry.peer and entry.name == (name ~= "" and name or tostring(dropped + 1)) then slot = dropped end
         end
         if not slot then
-            send(peer, {type = "refused", reason = "playing"})
-            engine.messages("disconnect", peer)
+            server.watch(state, peer, name ~= "" and name or "?")
             return
         end
         server.rejoin(state, peer, slot)
@@ -380,7 +396,7 @@ function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end
 end
 function handlers.chat(state, peer, message, now)
-    local player = state.players[peer]
+    local player = state.players[peer] or state.spectators[peer]
     if not player or type(message.text) ~= "string" then return end
     local text = message.text:gsub("[^\32-\126]", ""):sub(1, chat_length)
     if text:match("^%s*$") then return end
@@ -402,7 +418,7 @@ end
 -- A client's hash of its game state after a final tick (base/game/online): two different hashes for one tick mean
 -- that the clients run different games. The server keeps the first report of each tick and compares the others.
 function handlers.hash(state, peer, message)
-    if state.phase ~= "session" or not state.players[peer] then return end
+    if state.phase ~= "session" or not (state.players[peer] or state.spectators[peer]) then return end
     local tick, hash = tonumber(message.tick), message.hash
     if not tick or type(hash) ~= "string" then return end
     local first = state.hashes[tick]
@@ -416,8 +432,11 @@ function handlers.hash(state, peer, message)
         end
     elseif first.hash ~= hash and not first.reported then
         first.reported = true
-        log(state, string.format("difference at tick %d: %s and %s", tick, state.players[first.peer]
-            and state.players[first.peer].name or "?", state.players[peer].name))
+        local function name_of(id)
+            local who = state.players[id] or state.spectators[id]
+            return who and who.name or "?"
+        end
+        log(state, string.format("difference at tick %d: %s and %s", tick, name_of(first.peer), name_of(peer)))
         broadcast(state, {type = "difference", tick = tick})
     end
 end
@@ -440,6 +459,22 @@ function server.rejoin(state, peer, slot)
     if session.drops[slot] then end_drop(state, slot, entry.name .. " is back")
     else log(state, entry.name .. " is back") end
     broadcast_lobby(state)
+end
+
+-- A player who joins a running session with a new name watches it (docs/netcode.md "Spectators"): the start of the
+-- session and every final tick so far, then the final ticks as they come; the client stays a second behind and
+-- runs no prediction. A spectator chats, but its keys and clicks do not count.
+function server.watch(state, peer, name)
+    state.spectators[peer] = {name = name}
+    authority.add_client(state.authority, peer, true)
+    send(peer, {type = "welcome", id = peer, spectator = true})
+    local message = session_message(state, true)
+    message.spectator = true
+    send(peer, message)
+    send_log(state, peer)
+    state.agreed = 0
+    broadcast(state, {type = "notice", text = name .. " watches the game"})
+    log(state, "watching: " .. name)
 end
 
 -- One frame: the messages of the clients, then the due ticks of a session. Returns the lines to log.
