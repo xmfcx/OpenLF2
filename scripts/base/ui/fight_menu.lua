@@ -80,6 +80,7 @@ function menu.update(state, input, env)
     if volume and volume ~= values.sound_volume then values.sound_volume, changed = volume, true end
     if clicked.fullscreen then values.fullscreen, changed = not values.fullscreen, true end
     if clicked.show_fps then values.show_fps, changed = not values.show_fps, true end
+    if clicked.classic_menus then values.classic_menus, changed = not values.classic_menus, true end
     if changed then
         local stopped = values.music_track == -1 and music.choice ~= -1
         user_options.save(values)
@@ -133,6 +134,8 @@ local function display_page(context)
     imgui.text(context, i18n.tr("[only on this computer]"))
     imgui.selectable(context, "fullscreen", i18n.tr("Fullscreen"), values.fullscreen, 0, 0)
     imgui.selectable(context, "show_fps", i18n.tr("Show FPS"), values.show_fps, 0, 0)
+    imgui.selectable(context, "classic_menus", i18n.tr("Classic menus (the character selection of the original)"),
+        values.classic_menus, 0, 0)
 end
 
 function menu.draw(state, context, env)

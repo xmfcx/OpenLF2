@@ -28,6 +28,7 @@ local fight_menu = require("base/ui/fight_menu")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
+    if name == "setup" then return require("base/ui/setup_screen") end
     if name == "backgrounds" then return require("base/ui/background_preview") end
     if name == "match" then return require("base/ui/match_screen") end
     if name == "battle" then return require("base/ui/battle_setup") end
@@ -53,6 +54,11 @@ local function gamepad_mode(state)
         return "match"
     end
     return "full"
+end
+-- The match setup screen replaces the classic character selection, except with "Classic menus" (or --classic-menus)
+-- and in network games, which keep the classic screens in lockstep.
+local function setup_screen_used(state)
+    return not state.session and not state.options.classic_menus and not user_options.current().classic_menus
 end
 local function screen_state(state)
     return state[state.active]
@@ -215,6 +221,12 @@ local function route(state, input, context)
         state.network.session.online = true
         requested = "network_ready"
     end
+    -- The setup screen hands its choices to the classic selection, which the fight, the Stage progression and
+    -- Battle mode's troop panel read.
+    if state.active == "setup" and (requested == "start_match" or requested == "battle_setup") then
+        state.characters = require("base/ui/setup_screen").selection(state.setup)
+        if state.characters.mode == constants.modes.versus then music.play_selected() end
+    end
     if requested == "versions" then
         state.versions = require("base/ui/versions").create(state.options)
         state.active = "versions"
@@ -260,6 +272,11 @@ local function route(state, input, context)
         state.active = "launch"
         state.session = nil
         controls.replace_names(nil)
+    elseif (requested == "versus" or requested == "stage" or requested == "battle") and setup_screen_used(state) then
+        -- The match setup screen (base/ui/setup_screen); the values of the last visit stay.
+        state.setup = require("base/ui/setup_screen").create(constants.modes[requested], state.setup)
+        state.active = "setup"
+        state.wait_release = true
     elseif requested == "versus" or requested == "stage" or requested == "battle" then
         -- The previous visit's state carries the values the original keeps in globals.
         state.characters = require("base/ui/character_select").create({mode = requested,
@@ -292,6 +309,9 @@ local function route(state, input, context)
         state.battle_config = state.battle_config or setup.create_config()
         state.battle = setup.create(state.characters, state.battle_config)
         state.active = "battle"
+        state.wait_release = true
+    elseif requested == "characters" and state.setup and setup_screen_used(state) then
+        state.active = "setup"
         state.wait_release = true
     elseif requested == "characters" then
         -- Reset All / back from the Battle setup: the character menu starts over.
@@ -333,6 +353,11 @@ local function route(state, input, context)
             state.characters = selection.resume_options(state.characters, outcome)
             state.match = require("base/ui/match_screen").create(with_recording(state, selection.match_options(state.characters)))
             state.active = "match"
+        elseif state.setup and setup_screen_used(state) then
+            -- The setup screen again, with the Results buttons; a lost stage starts at the stage the players reached.
+            state.setup = require("base/ui/setup_screen").after_fight(state.setup)
+            if outcome.stage_level then state.setup.setup.stage_level = outcome.stage_level - outcome.stage_level % 10 end
+            state.active = "setup"
         else
             state.characters = selection.resume_options(state.characters, outcome)
             state.active = "characters"
@@ -450,7 +475,7 @@ function flow.probe(state)
     return table.concat(parts, " ")
 end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
-local imgui_screens = {online_menu = true, online_lobby = true}
+local imgui_screens = {online_menu = true, online_lobby = true, setup = true}
 local function pointer_position(state)
     return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
 end

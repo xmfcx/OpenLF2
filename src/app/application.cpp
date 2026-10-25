@@ -122,6 +122,8 @@ struct Configuration {
     // The server asks the home router to open its UDP port (UPnP).
     bool upnp = false;
     int game_speed_tenths = 10;
+    // The classic character selection in place of the match setup screen (input traces of the original menus).
+    bool classic_menus = false;
     // A client of a server program: its address (with --port).
     std::string connect_address;
     bool jit = OPENLF2_DEFAULT_JIT != 0;
@@ -434,6 +436,7 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
         else if (argument == "--rollback-check") config.rollback_check = true;
+        else if (argument == "--classic-menus") config.classic_menus = true;
         else if (argument == "--game-speed") {
             // The game speed of local fights, 0.1 to 1.0 (the settings menu's slider), for input traces.
             if (++index == arguments.size()) return fail(ErrorCode::format, "--game-speed needs a value from 0.1 to 1.0");
@@ -1066,6 +1069,7 @@ Result<void> run(const Configuration& config) {
         (config.mouse_touch ? ", mouse_touch=true" : "") +
         (std::getenv("OPENLF2_PROBE") != nullptr ? ", probe=true" : "") +
         (config.rollback_check ? ", rollback_check=true" : "") +
+        (config.classic_menus ? ", classic_menus=true" : "") +
         (config.game_speed_tenths < 10 ? ", game_speed_tenths=" + std::to_string(config.game_speed_tenths) : std::string{}) +
         (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
@@ -1612,6 +1616,7 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "--stop-with-parent stops the server when its standard input closes (the hosting game ended).\n"
                          "--upnp makes the server ask the home router to open its UDP port.\n"
                          "--game-speed 0.4 sets the game speed of local fights (0.1 to 1.0).\n"
+                         "--classic-menus uses the character selection of the original in place of the match setup screen.\n"
                          "FILE.lfr or --replay FILE opens a recording immediately, without navigating the menus.\n"
                          "        Use -- before a file name beginning with '-'; open one recording per process.\n"
                          "--config-dir keeps config.json there instead of the per-user directory (headless: in memory).\n"
