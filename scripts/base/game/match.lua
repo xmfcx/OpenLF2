@@ -32,6 +32,7 @@ local combat = require("base/game/combat")
 local ai = require("base/game/ai")
 local brains = require("base/ai/brains")
 local ai_trace = require("base/ai/trace")
+local perception = require("base/ai/perception")
 local objects = require("base/game/objects")
 local grab = require("base/game/grab")
 local weapons = require("base/game/weapons")
@@ -399,6 +400,8 @@ local function read_input(state, held)
     end
     local scan
     if ai_trace.on then ai_trace.begin_tick(state) end
+    -- The past of the characters for the delayed view of brains other than classic (base/ai/perception).
+    if state.ai_brain or state.ai_brains then perception.record_past(state) end
     if computer_humans then
         for index = 0, 7 do
             local value = state.items[index]

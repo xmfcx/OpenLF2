@@ -16,7 +16,11 @@
 --   trigonometric functions or ^ with a fraction, compares whole numbers, uses only its own random stream after its
 --   start, writes the trace and never reads it, and never reads a timer.
 --
--- A brain is a table {name, version, start, tick, describe}:
+-- A brain is a table {name, version, interface, start, tick, describe}. Interface 2 (docs/ai-plan.md "Brain context")
+-- calls tick(context) with one reused table: state, index, self (the fighter), memory, scan, world (the snapshot), me
+-- (this fighter's entry), view (the delayed view for the reaction of the difficulty), book, row (the difficulty row),
+-- persona (or nil), log (or nil) and random(range) (the brain's stream). A brain never keeps the context.
+-- Interface 1 (the default) calls:
 --   start(state, index, seed) returns the memory (numbers, short strings and short arrays only);
 --   tick(state, index, memory, scan, log, book) writes the keys of item `index` for this tick. `scan` is ai.prepare's
 --     scan of the tick. `log` is nil, or a function(state, index, text) that writes an event to the trace. `book` is
@@ -28,7 +32,12 @@ local trace = require("base/ai/trace")
 local classic = require("base/ai/brains/classic")
 local move_book = require("base/ai/move_book")
 local rollback = require("base/game/rollback")
+local perception = require("base/ai/perception")
+local difficulty = require("base/ai/difficulty")
 local brains = {}
+
+local context = {}
+function context.random(range) return random.next(context.memory, range) end
 
 -- The names that base/game/rollback shares instead of copying, at any depth (its `shared_keys`).
 local banned = {record = true, records = true, stage = true, view = true, capture = true, last_snapshot = true}
@@ -67,7 +76,7 @@ function brains.validate(memory, name)
 end
 
 local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry"),
-    drill = require("base/ai/brains/drill")}
+    drill = require("base/ai/brains/drill"), guard = require("base/ai/brains/guard")}
 
 -- The brains of the computer fighters of local fights when the match names none (--ai-brain, a developer option;
 -- base/ui/match_screen applies it): `default` for all of them, `by_index` for single item indices. nil means
@@ -140,7 +149,19 @@ control = function(state, index, scan)
             trace.add(state, index, string.format("ev=start brain=%s version=%d id=%d", name, brain.version or 0, value.record.id))
         end
     end
-    brain.tick(state, index, memory, scan, logging and trace.add or nil, move_book.get(value.record))
+    if brain.interface == 2 then
+        local row = difficulty.of(state)
+        local world = perception.world(state, scan)
+        context.state, context.index, context.self, context.memory, context.scan = state, index, value, memory, scan
+        context.world, context.me, context.book, context.row = world, world.entries[index], move_book.get(value.record), row
+        context.view = perception.view(state, scan, row.reaction, index)
+        context.persona = state.ai_personas and state.ai_personas[index] or nil
+        context.log = logging and trace.add or nil
+        brain.tick(context)
+        context.memory, context.self = nil, nil
+    else
+        brain.tick(state, index, memory, scan, logging and trace.add or nil, move_book.get(value.record))
+    end
     if rollback.check then brains.validate(memory, name) end
 end
 

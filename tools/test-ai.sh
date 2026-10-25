@@ -45,6 +45,13 @@ run classic_menus --scripts scripts --seed 1234 --classic-menus --input-trace "$
 run rollback_idle --scripts "$WORK/scripts9" --seed 1234 --ai-brain idle --rollback-check --input-trace "$VERSUS" &
 run rollback_sentry --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$VERSUS" &
 run rollback_drill --scripts "$WORK/scripts9" --seed 1234 --ai-brain 11=drill,12=sentry --rollback-check --input-trace "$VERSUS" &
+run rollback_guard --scripts "$WORK/scripts9" --seed 1234 --ai-brain 11=guard --rollback-check --input-trace "$VERSUS" &
+run netsim_guard --scripts scripts --seed 1234 --ai-brain 11=guard --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
+for level in easy crazy; do
+    for number in 1 2 3 4 5 6 7 8; do
+        run "guard_${level}_$number" --scripts scripts --ai-log 10,11 --fight "davis/guard|firen;time=1800;difficulty=$level;first=$number" &
+    done
+done
 run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$STAGE" &
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
@@ -74,14 +81,14 @@ for name in classic_versus classic_menus; do
 done
 
 # Rollback: no failure, and no error of the memory validator.
-for name in rollback_idle rollback_sentry rollback_drill rollback_stage; do
+for name in rollback_idle rollback_sentry rollback_drill rollback_guard rollback_stage; do
     line=$(grep -o "rollback=checks:[0-9]*,failures:[0-9]*" "$WORK/$name.out" | tail -1)
     echo "$line" | grep -qE "checks:[1-9][0-9]*,failures:0$"; check "rollback: $name" $? "${line:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
 grep -q "screen=match.*stage=" "$WORK/rollback_stage.out"; check "rollback: the Stage trace reaches a stage fight" $? "$(description rollback_stage | cut -c1-120)"
 
 # The simulated network: both clients agree on every hash.
-for name in netsim_idle netsim_sentry; do
+for name in netsim_idle netsim_sentry netsim_guard; do
     hashes=$(grep -o "hashes=[0-9]*/[0-9]*" "$WORK/$name.out" | tr '\n' ' ')
     echo "$hashes" | grep -qE "hashes=[1-9][0-9]*/0 hashes=[1-9][0-9]*/0"; check "net-sim: $name" $? "${hashes:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
@@ -95,6 +102,15 @@ check "arena: a batch of 4 fights equals 4 single runs" $? "$(echo "$batch" | he
 # The actuator: the drill starts every special move of every fighter, at the human and the fast rate.
 result=$(python3 -I tools/ai_drill_check.py "$WORK"/drill_*.out)
 check "actuator: the drill starts every special move ($(echo "$result" | grep -c "started") runs)" $? "$(echo "$result" | grep -B1 FAIL | head -8)"
+
+# Reflexes: on Crazy, at least 80% of the guard's answers work. Easy answers fewer threats in time than Crazy.
+crazy=$(python3 -I tools/ai_reflex_check.py "$WORK"/guard_crazy_*.out | tail -1)
+easy=$(python3 -I tools/ai_reflex_check.py "$WORK"/guard_easy_*.out | tail -1)
+worked=$(echo "$crazy" | grep -oE "^all: [0-9]+ of [0-9]+" | grep -oE "[0-9]+" | head -1)
+answers=$(echo "$crazy" | grep -oE "^all: [0-9]+ of [0-9]+" | grep -oE "[0-9]+" | tail -1)
+easy_answers=$(echo "$easy" | grep -oE "^all: [0-9]+ of [0-9]+" | grep -oE "[0-9]+" | tail -1)
+[ "${answers:-0}" -gt 0 ] && [ $((worked * 100)) -ge $((answers * 80)) ] && [ "${easy_answers:-0}" -lt "$answers" ]
+check "reflexes: $crazy (Crazy), ${easy_answers:-0} answers on Easy" $? "crazy: $crazy easy: $easy"
 
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then

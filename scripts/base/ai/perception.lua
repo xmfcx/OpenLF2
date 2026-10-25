@@ -79,6 +79,7 @@ local function fill_entry(entry, state, index, value)
     entry.facing, entry.frame, entry.state, entry.wait_counter = value.facing, value.frame, frame.state, value.wait_counter
     entry.hp, entry.mp, entry.blink, entry.owner, entry.born = value.hp, value.mp, value.blink, value.owner, value.born or 0
     entry.attack_rest, entry.rest, entry.record = value.timer_ec, value.pair_rest, value.record
+    entry.guard = value.timer_b8 or 0 -- the defend points that the last hits added (a defend breaks at 31)
     entry.holder = frame.state == states.held_item and value.holder or nil
     entry.character = kind == record_kinds.character
     entry.ball = flying[frame.state] == true
@@ -133,6 +134,113 @@ function perception.world(state, scan)
     world.tick = state.frame_number
     scan.world = world
     return world
+end
+
+-- The past of the fight (docs/ai-plan.md "Perception and senses", the delayed view): the match keeps the last
+-- `past_depth` ticks of every character in `state.ai_past` (in the match table, so a rollback restores it), and a
+-- brain with a reaction of R ticks sees the characters as they were R ticks ago. Flying objects and weapons stay in
+-- the present: the senses delay a brain's notice of them instead. The match records the past only when a brain other
+-- than classic plays, so classic fights do not change.
+local past_depth, past_fields = 13, 10
+perception.past_depth = past_depth
+
+-- Called once per tick before the brains (base/game/match read_input): the state of each character at the start of
+-- the tick.
+function perception.record_past(state)
+    local past = state.ai_past
+    if not past then
+        past = {slots = {}}
+        state.ai_past = past
+    end
+    local tick = state.frame_number
+    past.tick = tick
+    local base = (tick % past_depth) * past_fields
+    for index = 0, constants.item_slots - 1 do
+        local value = state.items[index]
+        if value and value.record.kind == record_kinds.character then
+            local ring = past.slots[index]
+            if not ring then
+                ring = {}
+                for position = 1, past_depth * past_fields do ring[position] = 0 end
+                ring[past_depth * past_fields + 1] = tick -- the first recorded tick
+                past.slots[index] = ring
+            end
+            ring[base + 1], ring[base + 2], ring[base + 3] = value.x_int, value.y_int, value.z_int
+            ring[base + 4], ring[base + 5], ring[base + 6] = value.vx, value.vy, value.vz
+            ring[base + 7], ring[base + 8], ring[base + 9], ring[base + 10] = value.frame, value.wait_counter, value.facing, value.hp
+        end
+    end
+end
+
+local views = {} -- by reaction: {world = ..., pool = {...}}
+
+local function fill_from_past(entry, present, ring, base, state)
+    for key, value in pairs(present) do
+        if key ~= "bodies" and key ~= "hits" then entry[key] = value end
+    end
+    entry.x, entry.y, entry.z = ring[base + 1], ring[base + 2], ring[base + 3]
+    entry.vx, entry.vy, entry.vz = ring[base + 4], ring[base + 5], ring[base + 6]
+    entry.frame, entry.wait_counter, entry.facing, entry.hp = ring[base + 7], ring[base + 8], ring[base + 9], ring[base + 10]
+    local record = present.record
+    local frame = record.frame(entry.frame)
+    entry.state = frame.state
+    local fake = {x_int = entry.x, y_int = entry.y, facing = entry.facing}
+    fill_boxes(entry, fake, frame)
+    local book = present.book
+    entry.class = book.class[entry.frame] or "busy"
+    local free = book.free_in[entry.frame] or -1
+    entry.free_in = free >= 0 and math.max(free - entry.wait_counter, 0) or -1
+    local at = book.move_at[entry.frame]
+    entry.move, entry.move_tick = nil, nil
+    if at and entry.class == "attacking" then entry.move, entry.move_tick = at.move, at.tick + entry.wait_counter end
+end
+
+-- The world as a brain with a reaction of `reaction` ticks sees it: the characters other than `self_index` as they
+-- were then (or as early as the past goes), everything else as now. Built once per tick and reaction, from a pool.
+-- `view.delay` is the number of ticks that the view is old: prediction from it counts that many ticks less.
+function perception.view(state, scan, reaction, self_index)
+    local present = perception.world(state, scan)
+    local past = state.ai_past
+    if reaction <= 0 or not past then return present end
+    scan.views = scan.views or {}
+    local key = reaction * 1000 + self_index
+    local cached = scan.views[key]
+    if cached then return cached end
+    local holder = views[key]
+    if not holder then
+        holder = {world = {entries = {}, list = {}, by_x = {}}, pool = {}}
+        views[key] = holder
+    end
+    local view, pool = holder.world, holder.pool
+    for position = 1, #view.list do view.entries[view.list[position].index] = nil end
+    local count, delay = 0, 0
+    for _, entry in ipairs(present.list) do
+        count = count + 1
+        local ring = entry.character and entry.index ~= self_index and past.slots[entry.index]
+        local copy = pool[count]
+        if not copy then copy = {bodies = {}, hits = {}}; pool[count] = copy end
+        if ring then
+            local first = ring[past_depth * past_fields + 1]
+            local tick = math.max(state.frame_number - reaction, first, state.frame_number - past_depth + 1)
+            fill_from_past(copy, entry, ring, (tick % past_depth) * past_fields, state)
+            delay = math.max(delay, state.frame_number - tick)
+        else
+            for key_name, value in pairs(entry) do
+                if key_name ~= "bodies" and key_name ~= "hits" then copy[key_name] = value end
+            end
+            local bodies, hits = copy.bodies, copy.hits
+            for position = 1, math.max(#bodies, #entry.bodies) do bodies[position] = entry.bodies[position] end
+            for position = 1, math.max(#hits, #entry.hits) do hits[position] = entry.hits[position] end
+        end
+        view.entries[copy.index] = copy
+        view.list[count] = copy
+        view.by_x[count] = copy
+    end
+    for position = count + 1, #view.list do view.list[position], view.by_x[position] = nil, nil end
+    table.sort(view.by_x, by_position)
+    view.tick, view.delay = state.frame_number, delay
+    scan.views[key] = view
+    return view
 end
 
 -- Whether `other` can hurt `self` in combat: another item of another team (a held weapon has its holder's team).

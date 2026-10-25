@@ -106,7 +106,7 @@ The move book stays fixed data. It gets these additions:
 - The snapshot updates its entries in place on each tick, without new tables. A chasing ball does not throw the snapshot away when the slot list stays the same.
 - Culling: queries use the list sorted by `x` (`by_x`) and look only within reach plus speed times the horizon.
 - Two rules: `can_hurt(a, b)` follows combat (different teams, a held weapon takes its holder's team), and `enemy(a, b)` follows the classic AI's rule for targets in each mode.
-- Reaction delay by structure: the match keeps a short ring of past states (`state.ai_past`: position, frame and hp of each character for the last 12 ticks, in arrays). A brain sees the world as it was `reaction` ticks ago and predicts the present from there. Its reflexes see the same delayed world. Only Superhuman sees the present.
+- Reaction delay by structure: the match keeps a short ring of past states (`state.ai_past`: position, speed, frame, facing and hp of each character for the last 13 ticks, in arrays). A brain sees the world as it was `reaction` ticks ago and predicts the present from there. Its reflexes see the same delayed world. Only Superhuman sees the present.
 - Attention: a brain follows a few sources closely and sees the rest as positions only.
 - Senses key a source by slot, record id and spawn tick, so that a reused slot is a new source.
 
@@ -271,6 +271,11 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - Interface version 2, the past ring (`state.ai_past`), the difficulty table, the reflexes.
 - The test brain `guard`: it only defends and dodges. A checker counts the threats that it blocked or avoided.
 - Tests: on Crazy, the guard blocks or avoids most hits that it can see in time. On Easy, it blocks clearly fewer. Rollback and network tests pass.
+- Status: built.
+    - Interface 2: `brain.tick(context)` with one reused context (state, index, self, memory, scan, world, me, view, book, row, persona, log, random). The test brains `idle`, `sentry` and `drill` keep interface 1.
+    - The delayed view: when a brain other than classic plays, the match records the last 13 ticks of every character in `state.ai_past` (10 numbers each), and `perception.view` shows the other characters as they were `reaction` ticks ago. Flying objects and weapons stay in the present. `view.delay` tells prediction how old the view is.
+    - base/ai/reflex: defend toward the source when the hit comes within 6 ticks, step aside in depth from a ball or from a hit that a defend cannot stop (a catch, `bdefend` of 61 or more, or defend points that reach 31 with the hit), and jump when there is no time.
+    - The test brain `guard` only answers threats. tools/ai_reflex_check.py: on Crazy (a reaction of 4 ticks), 30 of 32 answers worked (94%), on Superhuman 136 of 175 (78%), on Easy (12 ticks) the guard sees no threat in time. Most hits on a pure guard come from punches that hit 3 ticks after their start: no reflex sees them in time, so a brain must defend early when an enemy comes near (phase 8).
 
 ### Phase 8: the first strong brain
 
