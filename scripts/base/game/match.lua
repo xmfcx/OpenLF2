@@ -65,7 +65,10 @@ end
 -- options: mode, difficulty, background row (100 = random), fighters (catalog list),
 -- backgrounds (catalog list), slots[0..7] = {kind = "human"|"computer"|nil, fighter, team}.
 function match.create(options)
-    local state = {mode = options.mode, difficulty = options.difficulty, running = true,
+    -- free_transform: the rule of the original's `lf2.net` word, Firen and Freeze merge and Louis turns into Louis EX
+    -- at any hp (OpenLF2 keeps every fighter selectable, and this rule is a match option, docs/pregame-ui-redesign.md
+    -- "No locks").
+    local state = {mode = options.mode, difficulty = options.difficulty, running = true, free_transform = options.free_transform == true,
         items = {}, counter_12 = 0, counter_3 = 0, shake = 0,
         camera = 0, camera_step = 0, frame_number = 0, input_phase = 0,
         random_game = options.demo ~= nil, ai_skill = 0,
@@ -250,6 +253,7 @@ start_recording = function(state, options)
     end
     local fighters, index = stage.random_list()
     recording.begin(state, {difficulty = options.difficulty, stage_level = options.stage_level, mode = options.mode,
+        free_transform = state.free_transform,
         names = record.names, background = state.background_row, music = record.music, version = record.version,
         battle = options.mode == mode_battle and options.battle or nil,
         random_fighters = fighters, random_index = index,

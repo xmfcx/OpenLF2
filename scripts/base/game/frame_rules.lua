@@ -5,7 +5,6 @@ local constants = require("base/game/constants")
 local record_kinds = constants.record_kinds
 local objects = require("base/game/objects")
 local merge = require("base/game/merge")
-local unlock = require("base/game/unlock")
 local frame_rules = {}
 
 local function cdiv(a, b)
@@ -63,8 +62,10 @@ function frame_rules.round_end(state)
                     value.record = record
                     value.transform = -1
                 end
-            elseif value.record.id == constants.fighter_ids.louis_ex and unlock.flags.characters == 0 then
+            elseif value.record.id == constants.fighter_ids.louis_ex and value.from_louis and not state.free_transform then
+                -- A Louis who turned into Louis EX is Louis again (not a Louis EX picked on the setup screen).
                 value.record = objects.record(state, constants.fighter_ids.louis) or value.record
+                value.from_louis = nil
             elseif value.twin > constants.fusion_states.unmerged then
                 merge.split_at_round_end(state, value)
             end
@@ -164,6 +165,7 @@ function frame_rules.before_advance(state, index, value)
     if value.record.kind == record_kinds.character
        and state_of(value) == constants.frame_states.transform_louis_ex then
         value.record = objects.record(state, constants.fighter_ids.louis_ex) or value.record
+        value.from_louis = true
         value.frame = 0
     end
     local current = state_of(value)

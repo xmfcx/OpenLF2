@@ -164,7 +164,7 @@ local function start_replay(state, block)
     if replay.mode ~= constants.modes.stage and replay.music ~= "" then music.play_selected() end
     local options = {mode = replay.mode, difficulty = replay.difficulty, background = replay.background,
         stage_level = replay.stage_level, fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = {},
-        replay = replay, battle = replay.battle}
+        replay = replay, battle = replay.battle, free_transform = replay.unlock_characters == 1}
     state.match = require("base/ui/match_screen").create(options)
     state.active = "match"
     state.wait_release = true
@@ -256,7 +256,7 @@ local function route(state, input, context)
         local model = state.setup.setup
         if state.session and state.session.online then
             online.send(state.session, {type = "setup_used", mode = model.mode, difficulty = model.difficulty,
-                background = model.background, stage_level = model.stage_level})
+                background = model.background, stage_level = model.stage_level, free_transform = model.free_transform and 1 or 0})
         end
         state.characters = require("base/ui/setup_screen").selection(state.setup)
         if state.characters.mode == constants.modes.versus then music.play_selected() end

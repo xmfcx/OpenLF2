@@ -19,7 +19,6 @@ local none = constants.weapon_holder_codes.none
 local velocity_encoding = constants.velocity_encoding
 local move_cost_encoding = constants.move_cost_encoding
 local sounds = require("base/game/sounds")
-local unlock = require("base/game/unlock")
 local control = {}
 
 local function cdiv(a, b)
@@ -123,7 +122,7 @@ local function recognize(match, value, index)
         local frame = value.record.frame(value.frame)
         local target = frame.hits[spec[5]]
         if index == combo_jump_attack then
-            if value.record.id == constants.fighter_ids.louis and target == 300 and value.hp > 177 and unlock.flags.characters == 0 then
+            if value.record.id == constants.fighter_ids.louis and target == 300 and value.hp > 177 and not match.free_transform then
                 value.sequences[index] = state
                 return
             end

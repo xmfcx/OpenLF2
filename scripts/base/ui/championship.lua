@@ -520,7 +520,7 @@ function screen.match_options(state)
     local options = state.options
     local mode = state.team and constants.modes.team_championship or constants.modes.championship
     return {mode = mode, difficulty = options.difficulty, background = options.background,
-        fighters = state.fighters, backgrounds = state.backgrounds, slots = slots, tournament_round = state.round}
+        free_transform = options.free_transform == true, fighters = state.fighters, backgrounds = state.backgrounds, slots = slots, tournament_round = state.round}
 end
 
 -- State "round_over" (after the round): dark hp/transformations return to entrants; the winner

@@ -268,6 +268,7 @@ local function clicks(state, events, context)
     for _, mode in ipairs({modes.versus, modes.stage, modes.battle}) do
         if clicked["mode_" .. mode] then apply(state, {type = "mode", value = mode}) end
     end
+    if clicked.free_transform then apply(state, {type = "free_transform", value = not state.setup.free_transform}) end
     local current = state.network and state.network.get_speed() or speed.tenths
     local tenths = imgui.slider_value(events, "setup_speed", current, 1, 10)
     if tenths and tenths ~= current then
@@ -544,6 +545,9 @@ local function rules_panel(state, context)
     imgui.text(context, i18n.tr("Speed %s", tenths == 10 and "1.0" or "0." .. tenths), 0xa8b8e8)
     imgui.same_line(context, 480)
     imgui.slider(context, "setup_speed", "", tenths, 1, 10, -1)
+    -- The fight rule of the original's `lf2.net` word; every fighter stays selectable without it.
+    imgui.selectable(context, "free_transform", i18n.tr("Transform at any HP: Firen and Freeze merge into Firzen, "
+        .. "Louis turns into Louis EX (the lf2.net rule)"), model.free_transform, 0, 0)
     if #cursor_frames(state, "computers") > 0 then
         imgui.text(context, "> " .. i18n.tr("Computers: Attack adds one, Defend removes the last"), 0x8090c0)
     end

@@ -76,7 +76,8 @@ function recording.begin(match_state, setup)
     put_int(header, 0, setup.difficulty)
     put_int(header, 4, setup.stage_level or 0)
     local unlock = require("base/game/unlock")
-    put_int(header, 8, unlock.flags.characters)
+    -- The `lf2.net` flag of the original: its fight rule (free_transform), which a replay of the original reads too.
+    put_int(header, 8, setup.free_transform and 1 or 0)
     put_int(header, 0xc, unlock.flags.function_keys)
     put_int(header, 0x148, setup.mode)
     for index = 1, 8 do put_text(header, 0x14c + (index - 1) * constants.text_limits.player_name_field_bytes, setup.names[index] or tostring(index), constants.text_limits.player_name_field_bytes) end

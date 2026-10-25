@@ -4,7 +4,6 @@
 -- Merge and split behavior follows the original game's pair-pass routine.
 local constants = require("base/game/constants")
 local objects = require("base/game/objects")
-local unlock = require("base/game/unlock")
 local merge = {}
 
 local merged_id = constants.fighter_ids.firzen
@@ -23,13 +22,13 @@ local function state_of(value) return value.record.frame(value.frame).state end
 
 -- A running type-7/8 fighter (slots 0-9) finds a partner of the other type on its team in
 -- slots 0-19: running, or (slots 10-19 only) on the ground and not lying. Both need hp below
--- 177, or the characters-unlock cheat. The partner must be within 50px/8px, to the fighter's
+-- 177, or the rule of the `lf2.net` word (the match option free_transform). The partner must be within 50px/8px, to the fighter's
 -- left unless it is in slots 10-19.
 local function try_merge(state, index, value)
     local kind = value.record.id
     if not ((kind == constants.fighter_ids.firen or kind == constants.fighter_ids.freeze)
             and value.hp > 0 and state_of(value) == constants.frame_states.running and value.merge_timer == 0
-            and (value.hp < constants.fusion.hp_limit_exclusive or unlock.flags.characters == 1)) then
+            and (value.hp < constants.fusion.hp_limit_exclusive or state.free_transform)) then
         return
     end
     local partner_id = kind == constants.fighter_ids.firen and constants.fighter_ids.freeze
@@ -40,7 +39,7 @@ local function try_merge(state, index, value)
         if other then
             local health = other.hp
             if other.record.id == partner_id and health > 0 and value.team == other.team
-               and other.merge_timer == 0 and (health < constants.fusion.hp_limit_exclusive or unlock.flags.characters == 1)
+               and other.merge_timer == 0 and (health < constants.fusion.hp_limit_exclusive or state.free_transform)
                and other.frame > -1 and other.frame < constants.frame_limit then
                 local other_state = state_of(other)
                 if (other_state == constants.frame_states.running

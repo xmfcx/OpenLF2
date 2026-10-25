@@ -638,7 +638,7 @@ function selection.match_options(state)
         end
     end
     return {mode = state.mode, difficulty = state.options.difficulty, background = state.options.background,
-        stage_level = state.options.stage_level,
+        stage_level = state.options.stage_level, free_transform = state.options.free_transform == true,
         fighters = state.fighters, backgrounds = state.backgrounds, slots = slots}
 end
 

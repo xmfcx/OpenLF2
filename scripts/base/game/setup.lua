@@ -21,7 +21,7 @@ setup.difficulty_order = {difficulties.easy, difficulties.normal, difficulties.d
 -- values of the server's last match ({difficulty, background, stage_level}) for a first visit.
 function setup.create(mode, previous, last)
     local state = {mode = mode, slots = {}, background = constants.background_rows.random, stage_level = 0,
-        difficulty = difficulties.difficult, countdown = nil, changed_by = nil}
+        difficulty = difficulties.difficult, countdown = nil, changed_by = nil, free_transform = false}
     for slot = 0, 7 do state.slots[slot] = {kind = nil, fighter = 0, team = teams.independent, ready = false} end
     if previous then
         for slot = 0, 7 do
@@ -29,10 +29,12 @@ function setup.create(mode, previous, last)
             state.slots[slot] = {kind = before.kind, fighter = before.fighter, team = before.team, ready = before.ready}
         end
         state.background, state.stage_level, state.difficulty = previous.background, previous.stage_level, previous.difficulty
+        state.free_transform = previous.free_transform == true
     elseif last then
         state.difficulty = tonumber(last.difficulty) or state.difficulty
         state.background = tonumber(last.background) or state.background
         state.stage_level = tonumber(last.stage_level) or state.stage_level
+        state.free_transform = tonumber(last.free_transform) == 1
     end
     setup.apply(state, {type = "mode", value = mode})
     return state
@@ -134,6 +136,11 @@ function setup.apply(state, command, fighters)
         if state.mode == modes.battle and value == difficulties.crazy then return false end
         state.difficulty = value
         return true
+    elseif kind == "free_transform" then
+        -- The rule of the original's `lf2.net` word: Firen and Freeze merge, and Louis turns into Louis EX, at any hp.
+        if type(command.value) ~= "boolean" or command.value == state.free_transform then return false end
+        state.free_transform = command.value
+        return true
     elseif kind == "start" then
         if setup.problem(state) then return false end
         state.countdown = setup.countdown_frames
@@ -213,6 +220,7 @@ function setup.selection(state)
     -- Battle mode's options panel picks a random arena only for Random.
     selection.options.random_background = state.background == constants.background_rows.random
     selection.options.stage_level = state.stage_level
+    selection.options.free_transform = state.free_transform
     selection.menu, selection.last_menu = constants.character_menus.options, constants.character_menus.options
     return selection
 end
@@ -224,8 +232,9 @@ function setup.describe(state)
         slots[#slots + 1] = entry.kind and string.format("%s:%d:%d:%s", entry.kind:sub(1, 1), entry.fighter, entry.team,
             entry.ready and "r" or "-") or "."
     end
-    return string.format("mode=%d slots=%s arena=%d stage=%d difficulty=%d countdown=%s", state.mode,
-        table.concat(slots, ","), state.background, state.stage_level, state.difficulty, tostring(state.countdown))
+    return string.format("mode=%d slots=%s arena=%d stage=%d difficulty=%d countdown=%s%s", state.mode,
+        table.concat(slots, ","), state.background, state.stage_level, state.difficulty, tostring(state.countdown),
+        state.free_transform and " free_transform" or "")
 end
 
 return setup
