@@ -66,7 +66,9 @@ end
 
 -- options: mode, difficulty, background row (100 = random), fighters (catalog list),
 -- backgrounds (catalog list), slots[0..7] = {kind = "human"|"computer"|nil, fighter, team}, ai_brain (the brain of the
--- computer fighters, base/ai/brains; nil for the original's), ai_brains (brain names by item index).
+-- computer fighters, base/ai/brains; nil for the original's), ai_brains (brain names by item index), ai_personas
+-- (persona names by item index), ai_level (a row of base/ai/difficulty, for example "superhuman"), start_mp (the mp of
+-- every fighter at the start, for the arena).
 function match.create(options)
     -- free_transform: the rule of the original's `lf2.net` word, Firen and Freeze merge and Louis turns into Louis EX
     -- at any hp (OpenLF2 keeps every fighter selectable, and this rule is a match option, docs/pregame-ui-redesign.md
@@ -75,6 +77,7 @@ function match.create(options)
         items = {}, counter_12 = 0, counter_3 = 0, shake = 0,
         camera = 0, camera_step = 0, frame_number = 0, input_phase = 0,
         random_game = options.demo ~= nil, ai_skill = 0, ai_brain = options.ai_brain, ai_brains = options.ai_brains,
+        ai_personas = options.ai_personas, ai_level = options.ai_level,
         round_counter = 0, winner = -1, elapsed = 0, finished = false,
         paused = false, pause_request = false, pause_next = false, cheat_lock = 0,
         heal_all = false, weapon_command = 0, function_counts = {[6] = 0, [7] = 0, [8] = 0, [9] = 0}}
@@ -122,7 +125,7 @@ function match.create(options)
             local high_mp_mode = options.mode == mode_stage
                 or options.mode == mode_championship
                 or options.mode == mode_team_championship
-            value.mp = high_mp_mode and points_full or 200
+            value.mp = options.start_mp or (high_mp_mode and points_full or 200)
             if entry.hp then
                 value.hp, value.dark_hp, value.max_hp = entry.hp, entry.hp, entry.hp
                 value.transformed_to = entry.transform or -1

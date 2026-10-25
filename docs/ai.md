@@ -215,6 +215,11 @@ The brain of a fighter is the first of: the name in its memory, `state.ai_brains
 
 The test brain `sentry` measures the prediction. Over 8 seeds of 3000 ticks with classic attackers, 133 of 143 hits from hit boxes had the exact tick predicted, 1 was 1 tick away and 9 were missed. Grabs (base/game/grab) and the landing after a throw hurt without a hit box, and prediction does not cover them yet.
 
+### The actuator and the difficulty
+
+- base/ai/difficulty has five rows (easy, normal, difficult, crazy, superhuman): reaction ticks, the input rate, key changes a second, timing errors, distance noise, attention, the think interval. The match option `ai_level` picks a row, or the game difficulty does.
+- base/ai/actuator types key programs at that rate and is the only writer of a brain's keys. It reads `value.sequences` and types only the keys that a waiting sequence still needs. The drill brain proves that it starts every special move of every fighter (tools/ai_drill_check.py).
+
 ### Logs and the development view
 
 - `--ai-log [all|INDICES]` writes `ai t=TICK i=ITEM ev=...` lines. The classic brain writes `ev=target`, `ev=move` and `ev=sum`. The sentry writes `ev=threat` and `ev=hurt`. A fight that can roll back writes a tick 32 ticks later, so that no rollback can change it.

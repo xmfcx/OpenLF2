@@ -44,12 +44,20 @@ run classic_versus --scripts scripts --seed 1234 --input-trace "$VERSUS" &
 run classic_menus --scripts scripts --seed 1234 --classic-menus --input-trace "$CLASSIC" &
 run rollback_idle --scripts "$WORK/scripts9" --seed 1234 --ai-brain idle --rollback-check --input-trace "$VERSUS" &
 run rollback_sentry --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$VERSUS" &
+run rollback_drill --scripts "$WORK/scripts9" --seed 1234 --ai-brain 11=drill,12=sentry --rollback-check --input-trace "$VERSUS" &
 run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --rollback-check --input-trace "$STAGE" &
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run book --scripts scripts --seed 1 --ai-book --input-trace ",," &
 run arena_batch --scripts scripts --fight "henry/sentry|dennis;seed=3" --fights 4 &
 for number in 1 2 3 4; do run "arena_$number" --scripts scripts --fight "henry/sentry|dennis;seed=3;first=$number" & done
+FIGHTERS="deep john henry rudolf louis firen freeze dennis woody davis bandit hunter mark jack sorcerer monk jan knight bat justin louisex firzen julian"
+for fighter in $FIGHTERS; do
+    for level in crazy superhuman; do
+        run "drill_${fighter}_$level" --scripts scripts --ai-log 10 \
+            --fight "$fighter/drill|bandit/sentry;mp=500;time=20000;difficulty=$level;mirror=0" &
+    done
+done
 for seed in 1234 1 2 3 4 5 6 7; do
     run "predict_$seed" --scripts scripts --seed "$seed" --ai-brain 11=sentry --ai-log 11 --input-trace "$LONG" &
 done
@@ -66,7 +74,7 @@ for name in classic_versus classic_menus; do
 done
 
 # Rollback: no failure, and no error of the memory validator.
-for name in rollback_idle rollback_sentry rollback_stage; do
+for name in rollback_idle rollback_sentry rollback_drill rollback_stage; do
     line=$(grep -o "rollback=checks:[0-9]*,failures:[0-9]*" "$WORK/$name.out" | tail -1)
     echo "$line" | grep -qE "checks:[1-9][0-9]*,failures:0$"; check "rollback: $name" $? "${line:-$(grep -m1 -i error "$WORK/$name.out")}"
 done
@@ -83,6 +91,10 @@ batch=$(grep "^ai-result" "$WORK/arena_batch.out" | sed 's/ us=.*//')
 single=$(for number in 1 2 3 4; do grep "^ai-result" "$WORK/arena_$number.out" | sed 's/ us=.*//'; done)
 [ "$(echo "$batch" | grep -c .)" = 4 ] && [ "$batch" = "$single" ]
 check "arena: a batch of 4 fights equals 4 single runs" $? "$(echo "$batch" | head -2)"
+
+# The actuator: the drill starts every special move of every fighter, at the human and the fast rate.
+result=$(python3 -I tools/ai_drill_check.py "$WORK"/drill_*.out)
+check "actuator: the drill starts every special move ($(echo "$result" | grep -c "started") runs)" $? "$(echo "$result" | grep -B1 FAIL | head -8)"
 
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then

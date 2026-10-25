@@ -15,7 +15,7 @@
 --   forward = {distance from the start per tick, in the starting facing}, turns = {[tick] = true where the fighter
 --   turns}, projectiles = {...}, follow = {{key, to, from_tick}...},
 --   loops, holds, tags = {name = true}}.
--- A hit box: {kind, x0, x1, y0, y1, zwidth, injury, fall, bdefend, effect, dvx}, with x forward from the fighter's
+-- A hit box: {kind, x0, x1, y0, y1, zwidth, injury, fall, bdefend, effect, dvx} (also the catches, kinds 1 and 3), with x forward from the fighter's
 -- center for a fighter that faces right and y up from the feet as negative numbers (base/game/collision).
 local constants = require("base/game/constants")
 local catalog = require("base/game/catalog")

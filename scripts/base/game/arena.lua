@@ -9,7 +9,8 @@
 -- (the data name such as davis or louisex, or the id), then `;key=value` options:
 --   time=TICKS (3600: at the limit the side with more hp wins, equal hp is a draw), difficulty=easy|normal|difficult|
 --   crazy|superhuman (crazy), background=ROW (1), seed=N (1), mirror=0|1 (1: every seed plays twice, the second time
---   with the sides in swapped slots), first=K (the number of the first fight, for a single run of one fight).
+--   with the sides in swapped slots), first=K (the number of the first fight, for a single run of one fight), mp=N (the
+--   mp of every fighter at the start).
 -- Fight K uses seed + (K - 1) / 2 with mirroring (seed + K - 1 without), and the engine's random streams start from
 -- that number alone, so a fight is the same in a batch and in a single run.
 local constants = require("base/game/constants")
@@ -66,6 +67,7 @@ function arena.parse(text)
         elseif key == "seed" then spec.seed = assert(tonumber(value), "arena: seed is a number")
         elseif key == "mirror" then spec.mirror = value ~= "0"
         elseif key == "first" then spec.first = assert(tonumber(value), "arena: first is a number")
+        elseif key == "mp" then spec.mp = assert(tonumber(value), "arena: mp is a number")
         elseif parts[position] ~= "" then error("arena: unknown option " .. parts[position]) end
     end
     return spec
@@ -109,7 +111,7 @@ local function options_of(spec, number)
     end
     local options = {mode = constants.modes.versus, difficulty = spec.difficulty, background = spec.background,
         fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = slots,
-        ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level}
+        ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level, start_mp = spec.mp}
     return options, seed, mirrored, members
 end
 

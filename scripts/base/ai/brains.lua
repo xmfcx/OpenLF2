@@ -66,7 +66,8 @@ function brains.validate(memory, name)
     assert(arrays <= array_limit, name .. " memory: more than " .. array_limit .. " arrays")
 end
 
-local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry")}
+local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry"),
+    drill = require("base/ai/brains/drill")}
 
 -- The brains of the computer fighters of local fights when the match names none (--ai-brain, a developer option;
 -- base/ui/match_screen applies it): `default` for all of them, `by_index` for single item indices. nil means

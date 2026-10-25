@@ -258,6 +258,13 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - The actions, the key programs, the closed loop, the input rate, the dry run of control.lua, the input latency in the move book.
 - The test brain `drill`: it starts every move of the book from each starting class and logs whether the move started on the predicted tick.
 - Tests: the drill starts all special moves of all fighters, at the fast rate and at the human rate. The checker reports each move that fails.
+- Status: built.
+    - base/ai/actuator types key programs (masks for each sample) at the rate of base/ai/difficulty (the human rate on the four classic levels, every tick on Superhuman), with a limit of key changes a second and a timing error. It is the only writer of a brain's keys and previous keys, and it releases a held key before it presses it again.
+    - Closed loop: the sequences of base/game/control have no timeout, so a sequence can still wait after an earlier Defend, and a fresh Defend then resets it. The actuator reads `value.sequences` and types only the missing keys. The same rule starts a combo by accident (for example up, then attack, long after a Defend), for humans too.
+    - Latency: the human rate needs 4 ticks for a full input (D, direction, key on three human input ticks), the fast rate 1 tick (D, then direction and key together). A sequence that already waits needs less.
+    - The test brain `drill` types every special move of its book from standing and from a jump. tools/ai_drill_check.py: all special moves of all 23 fighters start at both rates, except Louis's transform (it needs hp of 177 or less) and Rudolf's transform (it needs a fighter that he caught before).
+    - Prediction now follows catches (kind 3, and kind 1 only on a dizzy fighter) as threats of the kind `catch`.
+    - Not built: a dry run of control.lua. The drill checks the actuator against control.lua for every move instead. The planner of phase 8 gets a small table of what Attack does in each state (punch, run attack, jump attack, pick up, super punch).
 
 ### Phase 7: the brain context, reflexes and the delayed view
 

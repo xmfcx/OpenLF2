@@ -51,10 +51,18 @@ end
 predict.earliest = earliest
 
 -- Whether a box of the move book or of the snapshot can touch the defender: a falling victim is not touched by weak
--- attacks (base/game/combat record_targets).
+-- attacks (base/game/combat record_targets), and a catch of the nearest (kind 1) takes only a dizzy fighter.
 local function touches(box, defender)
-    return not (defender.state == constants.frame_states.falling and box.fall < 41)
+    if box.kind == constants.attack_kinds.catch_nearest then return defender.class == "dizzy" end
+    return not (defender.state == constants.frame_states.falling and (box.fall or 0) < 41)
 end
+
+-- The boxes that prediction follows: those that hurt, and catches (a grab hurts later, by base/game/grab).
+local catching = {[constants.attack_kinds.catch_nearest] = true, [constants.attack_kinds.catch] = true}
+local function follows(box)
+    return (perception.hurting[box.kind] or catching[box.kind]) and box.effect ~= constants.effects.skip_characters
+end
+predict.is_catch = function(box) return catching[box.kind] == true end
 
 -- Whether the defender's bodies, shifted by shift_x, overlap the box.
 local function overlaps_body(defender, x0, x1, y0, y1, shift_x)
@@ -104,8 +112,7 @@ function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, 
             local shift_x = moving and defender.vx * (ahead + 1) or 0
             local depth = az - (defender.z + (moving and defender.vz * (ahead + 1) or 0))
             for _, box in ipairs(list) do
-                if perception.hurting[box.kind] and box.effect ~= constants.effects.skip_characters
-                   and depth < box.zwidth and depth > -box.zwidth and touches(box, defender) then
+                if follows(box) and depth < box.zwidth and depth > -box.zwidth and touches(box, defender) then
                     local x0, x1
                     if direction > 0 then x0, x1 = x + box.x0, x + box.x1 else x0, x1 = x - box.x1, x - box.x0 end
                     if overlaps_body(defender, x0, x1, y + box.y0, y + box.y1, shift_x) then return ahead, box, t end
@@ -228,7 +235,8 @@ function predict.threats(state, world, self, horizon, known)
                 if not threat then threat = {}; threat_pool[#result + 1] = threat end
                 local holder = other.holder and world.entries[other.holder]
                 threat.source, threat.ticks, threat.damage, threat.fall = other.index, ticks, box.injury, box.fall
-                threat.bdefend, threat.ball, threat.kind = box.bdefend, other.ball, other.ball and "ball" or (holder and "weapon" or "move")
+                threat.bdefend, threat.ball = box.bdefend, other.ball
+                threat.kind = other.ball and "ball" or (holder and "weapon" or (catching[box.kind] and "catch" or "move"))
                 threat.move = other.move and other.move.start or (holder and holder.move and holder.move.start) or 0
                 result[#result + 1] = threat
             end
