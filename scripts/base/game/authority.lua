@@ -10,6 +10,7 @@ local sounds = require("base/game/sounds")
 local rumble = require("base/game/rumble")
 local rollback = require("base/game/rollback")
 local ticks = require("base/game/ticks")
+local speed_gate = require("base/game/speed_gate")
 local authority = {}
 
 -- Without input for this long, a client's slots are predicted with no keys, so that its fighter does not run off.
@@ -86,6 +87,8 @@ local function finalize(state, tick, now)
             final.function_presses = ticks.merge(final.function_presses, input.function_presses or "")
         end
     end
+    -- The game speed of the session (set_speed): every final tick carries it, so all clients skip the same ticks.
+    if state.speed and state.speed < 10 then final.speed = state.speed end
     state.final[tick], state.last_final = final, final
     -- Inputs for a final tick are not needed anymore, from any client.
     for _, client in pairs(state.clients) do
@@ -95,7 +98,8 @@ local function finalize(state, tick, now)
     end
     if not state.match then return end
     local result = ticks.with_random(state, function()
-        local stepped = match.step(state.match, ticks.held(final))
+        local due, held = speed_gate.step(state.match, ticks.held(final))
+        local stepped = due and match.step(state.match, held) or nil
         sounds.flush(state.match)
         rumble.flush(state.match)
         if tick % authority.hash_interval == 0 then state.hashes[tick] = rollback.hash(state.match) end

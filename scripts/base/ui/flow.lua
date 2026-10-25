@@ -63,6 +63,7 @@ local function can_drop_replay(state)
 end
 function flow.create(options)
     require("base/game/rollback").check = options.rollback_check == true
+    if options.game_speed_tenths then speed.tenths = options.game_speed_tenths end
     require("base/game/netsim").params = require("base/game/netsim").parse(options.net_sim)
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
@@ -412,7 +413,7 @@ local function menu_env(state)
     local fight = state.active == "match" and state.match and state.match.match
     local session = state.session and state.session.online and state.session
     local env = {online = session and true or false, fight = fight and not fight.replay and true or false,
-        mode = fight and fight.mode, speed = session and 10 or speed.tenths, speed_shared = false,
+        mode = fight and fight.mode, speed = session and (session.speed or 10) or speed.tenths, speed_shared = session and true or false,
         cheat_keys = unlock.flags.function_keys == 1, cheats_online = false, fighters = {}}
     if env.fight then
         local slots = session and {session.slot} or {0, 1, 2, 3, 4, 5, 6, 7}
@@ -613,7 +614,7 @@ end
 -- and `click`, a fresh press of the left button.
 function flow.update(state, raw, context)
     if state.server then
-        for _, line in ipairs(require("base/game/server").update(state.server)) do context.action("log " .. line) end
+        for _, line in ipairs(require("base/game/server").update(state.server, raw)) do context.action("log " .. line) end
         return
     end
     local input = controls.read(controls.current(), raw)
@@ -776,6 +777,7 @@ function flow.update(state, raw, context)
                 return
             end
             if answer and answer.control then state.control_request = {letter = answer.control[2], frames = 3} end
+            if answer and answer.speed then online.send(session, {type = "set_speed", tenths = answer.speed}) end
             if answer and answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer and answer.close then state.fight_menu = nil end
             for slot = 0, 7 do input[slot] = "" end
@@ -837,9 +839,9 @@ function flow.update(state, raw, context)
     if input.keys[virtual_keys.escape] and not state.escape_held then escape_pressed = true end
     state.escape_held = input.keys[virtual_keys.escape] == true
     local closed_now = false
-    -- Typing M, F, D opens the game speed menu, and typing it again closes it (network games handle it above). A
-    -- server program's lobby and fights have no speed menu: the server runs the ticks.
-    local speed_keys = not state.session and not online_connection(state) and speed_menu.observe(state.speed_keys, input)
+    -- The game speed is a value of the settings menu (base/ui/fight_menu); the secret keys M, F, D of the speed menu
+    -- stay only in the old two-computer game (above).
+    local speed_keys = false
     if state.quit_dialog then
         -- While the question is open the screen below is frozen.
         local answer = quit_dialog.update(state.quit_dialog, input, context)

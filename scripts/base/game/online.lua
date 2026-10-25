@@ -111,13 +111,20 @@ function handlers.session(state, message)
     engine.set_random_position(random.index, random.sequence, random.crt)
     state.phase, state.session_start = "session", message
     state.names, state.host = message.names, message.role == state.id
-    state.finals, state.next_tick, state.local_inputs, state.sent_tick = {}, 0, {}, -1
+    state.finals, state.next_tick, state.local_inputs, state.sent_tick, state.speed = {}, 0, {}, -1, nil
     state.input_acknowledged, state.frames, state.client, state.base = -1, 0, nil, nil
     state.events[#state.events + 1] = message
 end
 handlers["end"] = function(state, message)
     state.phase, state.client, state.finals = "lobby", nil, nil
     state.events[#state.events + 1] = message
+end
+-- A line from the server for every screen (who changed the game speed); it shows in the chat.
+function handlers.notice(state, message)
+    local log = state.chat
+    log[#log + 1] = {name = "*", text = tostring(message.text), at = engine.network_time()}
+    if #log > chat_kept then table.remove(log, 1) end
+    if tonumber(message.speed) then state.speed = tonumber(message.speed) end
 end
 function handlers.difference(state, message)
     state.difference = tonumber(message.tick)
@@ -228,6 +235,8 @@ function online.begin_match(state, fight)
     local first = state.base + 1
     local client = rollback_client.create({id = state.id, match = fight, random = {engine.random_position()},
         owned = {[state.slot] = true}, owns_functions = true})
+    -- A speed set in the menus holds in the fight until a final tick says otherwise.
+    if state.speed and state.speed < 10 then client.last_speed = state.speed end
     for tick = first, state.sent_tick do
         if state.local_inputs[tick] then client.local_inputs[tick - first] = state.local_inputs[tick] end
     end

@@ -16,6 +16,7 @@
 #include "openlf2/ports/scripts.hpp"
 #include "openlf2/ports/versions.hpp"
 #include "openlf2/ports/messages.hpp"
+#include "openlf2/ports/port_mapping.hpp"
 #include "openlf2_build_info.hpp"
 #include "openlf2/resources/background_data.hpp"
 #include "openlf2/resources/stage_data.hpp"
@@ -118,6 +119,9 @@ struct Configuration {
     bool server = false;
     // The server stops when its standard input closes (a pipe from the program that started it, which ended).
     bool stop_with_parent = false;
+    // The server asks the home router to open its UDP port (UPnP).
+    bool upnp = false;
+    int game_speed_tenths = 10;
     // A client of a server program: its address (with --port).
     std::string connect_address;
     bool jit = OPENLF2_DEFAULT_JIT != 0;
@@ -430,8 +434,19 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
         else if (argument == "--rollback-check") config.rollback_check = true;
+        else if (argument == "--game-speed") {
+            // The game speed of local fights, 0.1 to 1.0 (the settings menu's slider), for input traces.
+            if (++index == arguments.size()) return fail(ErrorCode::format, "--game-speed needs a value from 0.1 to 1.0");
+            const double value = std::atof(arguments[index].c_str());
+            const int tenths = static_cast<int>(std::lround(value * 10.0));
+            if (tenths < 1 || tenths > 10) return fail(ErrorCode::format, "--game-speed needs a value from 0.1 to 1.0");
+            config.game_speed_tenths = tenths;
+        }
         else if (argument == "--stop-with-parent") {
             config.stop_with_parent = true;
+        }
+        else if (argument == "--upnp") {
+            config.upnp = true;
         }
         else if (argument == "--server") {
             config.server = true;
@@ -1051,6 +1066,7 @@ Result<void> run(const Configuration& config) {
         (config.mouse_touch ? ", mouse_touch=true" : "") +
         (std::getenv("OPENLF2_PROBE") != nullptr ? ", probe=true" : "") +
         (config.rollback_check ? ", rollback_check=true" : "") +
+        (config.game_speed_tenths < 10 ? ", game_speed_tenths=" + std::to_string(config.game_speed_tenths) : std::string{}) +
         (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
         (config.connect_address.empty() ? std::string{} : ", connect_address=\"" + config.connect_address +
@@ -1077,10 +1093,33 @@ Result<void> run(const Configuration& config) {
                 parent_gone->store(true);
             }).detach();
         }
+        // UPnP: the scripts hear the state in each frame's input ("upnp:working", "upnp:mapped:ADDRESS",
+        // "upnp:failed"), and the log says why it failed.
+        std::unique_ptr<PortMapping> mapping;
+        if (config.upnp) {
+            auto started = map_udp_port(config.network_port);
+            if (started) mapping = std::move(*started);
+            else std::cout << "UPnP: " << started.error().message << std::endl;
+        }
+        std::string upnp_input;
         while (!parent_gone->load()) {
             if (messages) (*messages)->wait(server_wait_ms);
             else std::this_thread::sleep_for(std::chrono::milliseconds(server_wait_ms));
-            auto frame = simulation.frame("");
+            if (mapping) {
+                const auto status = mapping->status();
+                std::string input = status.state == PortMappingStatus::State::working ? "upnp:working"
+                    : status.state == PortMappingStatus::State::failed ? "upnp:failed"
+                    : "upnp:mapped:" + status.public_address;
+                if (input != upnp_input) {
+                    if (status.state == PortMappingStatus::State::failed) std::cout << "UPnP: " << status.problem << std::endl;
+                    if (status.state == PortMappingStatus::State::mapped) {
+                        std::cout << "UPnP: UDP port " << config.network_port << " is open, public address "
+                                  << status.public_address << std::endl;
+                    }
+                    upnp_input = input;
+                }
+            }
+            auto frame = simulation.frame(upnp_input);
             if (!frame) return std::unexpected(frame.error());
             for (const auto& action : frame->actions) {
                 if (action == "quit") return {};
@@ -1457,6 +1496,8 @@ Result<void> run(const Configuration& config) {
                     const auto directory = config.config_directory->u8string();
                     arguments.insert(arguments.end(), {"--config-dir", std::string(directory.begin(), directory.end())});
                 }
+                // The friend joins through the home router; tests on one machine leave the router alone.
+                if (std::getenv("OPENLF2_NO_UPNP") == nullptr) arguments.emplace_back("--upnp");
                 auto started = start_child_program(program, arguments);
                 if (started) server_program = std::move(*started);
                 else std::cerr << "Server: " << started.error().message << '\n';
@@ -1569,6 +1610,8 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "--host IPv4 / --join IPv4 starts an OpenLF2 network game; --port N defaults to 12345.\n"
                          "--server runs the server program (no window) on UDP --port N; --connect IPv4 joins a server.\n"
                          "--stop-with-parent stops the server when its standard input closes (the hosting game ended).\n"
+                         "--upnp makes the server ask the home router to open its UDP port.\n"
+                         "--game-speed 0.4 sets the game speed of local fights (0.1 to 1.0).\n"
                          "FILE.lfr or --replay FILE opens a recording immediately, without navigating the menus.\n"
                          "        Use -- before a file name beginning with '-'; open one recording per process.\n"
                          "--config-dir keeps config.json there instead of the per-user directory (headless: in memory).\n"

@@ -62,6 +62,7 @@ module=game/authority|game/authority.lua
 module=game/net_link|game/net_link.lua
 module=game/netsim|game/netsim.lua
 module=game/ticks|game/ticks.lua
+module=game/speed_gate|game/speed_gate.lua
 module=game/wire|game/wire.lua
 module=game/server|game/server.lua
 module=game/online|game/online.lua

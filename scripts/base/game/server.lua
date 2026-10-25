@@ -46,7 +46,8 @@ local function lobby_message(state)
         local player = state.players[peer]
         players[position] = {id = peer, name = player.name, slot = player.slot, ready = player.ready, role = position == 1}
     end
-    return {type = "lobby", players = players, phase = state.phase}
+    return {type = "lobby", players = players, phase = state.phase, public_address = state.public_address,
+        upnp = state.upnp}
 end
 local function broadcast_lobby(state) broadcast(state, lobby_message(state)) end
 
@@ -137,6 +138,17 @@ function handlers.start(state, peer, message, now)
     start_session(state, now)
 end
 -- The title's Quit runs on every client on the same tick; the first client that reports it ends the session.
+-- The game speed of a session (docs/pregame-ui-redesign.md "Who sets it"): any player sets it, the last change wins,
+-- and every screen shows who changed it. The fights skip ticks by it (base/game/speed_gate).
+function handlers.set_speed(state, peer, message)
+    local player, tenths = state.players[peer], tonumber(message.tenths)
+    if state.phase ~= "session" or not player or not tenths then return end
+    tenths = math.max(1, math.min(10, math.floor(tenths)))
+    state.authority.speed = tenths
+    local text = tenths == 10 and "1.0" or string.format("0.%d", tenths)
+    broadcast(state, {type = "notice", text = player.name .. " set the speed to " .. text, speed = tenths})
+    log(state, player.name .. " set the speed to " .. text)
+end
 function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end
 end
@@ -184,7 +196,13 @@ function handlers.hash(state, peer, message)
 end
 
 -- One frame: the messages of the clients, then the due ticks of a session. Returns the lines to log.
-function server.update(state)
+-- raw: the program's input; "upnp:STATE[:ADDRESS]" while it opens the port on the home router (--upnp).
+function server.update(state, raw)
+    local upnp, address = (raw or ""):match("^upnp:(%a+):?([%d.]*)")
+    if upnp and (upnp ~= state.upnp or address ~= (state.public_address or "")) then
+        state.upnp, state.public_address = upnp, address ~= "" and address or nil
+        broadcast_lobby(state)
+    end
     local now = engine.network_time()
     local events = engine.messages("service") or {}
     for _, event in ipairs(events) do

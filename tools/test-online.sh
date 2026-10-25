@@ -86,7 +86,17 @@ run_session quit 23603 "$START${QUIT}c$(wait_frames 15)f$(wait_frames 90)" "$STA
 for side in one two; do client_checks quit $side "screen=title"; done
 grep -c "session started" "$WORK/quit.server" | grep -q "^2$"; check "quit: the server started a second session" $? "$(grep -c 'session started' "$WORK/quit.server") sessions"
 
-# 4. A player leaves during a fight: the other one goes on (the server predicts the missing keys as none).
+# 4. The game speed in a fight: client one sets 0.4 in the settings menu; both fights skip the same ticks.
+SPEED="#27,,,=speed:4,,,#27,,,"
+run_session speed 23605 "$START$TITLE$PICK$MENU$SPEED$FIGHT$FIGHT" "$START$(wait_frames 31)$PICK$(wait_frames 145)$FIGHT$FIGHT"
+for side in one two; do client_checks speed $side "screen=match"; done
+server_checks speed 1
+grep -q "set the speed to 0.4" "$WORK/speed.server"; check "speed: the server took the speed" $? "no speed line"
+line=$(grep -oE "screen=match frame=[0-9]+" "$WORK/speed.one" | tail -1); ticks=$(grep -oE "online=tick=[0-9]+" "$WORK/speed.one" | tail -1)
+frame=${line##*=}; tick=${ticks##*=}
+[ -n "$frame" ] && [ -n "$tick" ] && [ $((frame * 10)) -lt $((tick * 6)) ]; check "speed: the fight runs on fewer ticks (frame $frame of tick $tick)" $? "frame=$frame tick=$tick"
+
+# 5. A player leaves during a fight: the other one goes on (the server predicts the missing keys as none).
 LONG=$(printf 'r,,rc,,c,,%.0s' $(seq 1 60))
 run_session leave 23604 "$START$TITLE$PICK$MENU$FIGHT$LONG" "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))"
 client_checks leave one "screen=match"

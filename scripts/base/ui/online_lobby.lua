@@ -88,6 +88,15 @@ function screen.draw(state, context)
         imgui.text(context, tostring(connection.problem or "Not connected"), 0xff9b9b, imgui.wrap)
     elseif lobby then
         local me = own_player(state)
+        -- UPnP (the server program of a hosting game): the address that friends on the internet type.
+        if lobby.upnp == "mapped" and lobby.public_address then
+            imgui.text(context, "Friends on the internet join with " .. lobby.public_address .. ":" .. connection.port, 0xffd24a)
+        elseif lobby.upnp == "working" then
+            imgui.text(context, "Opening the port on the router (UPnP)...", 0x8090c0)
+        elseif lobby.upnp == "failed" then
+            imgui.text(context, "The router did not open the port (UPnP): friends on the internet cannot join unless "
+                .. "UDP port " .. connection.port .. " is forwarded to this computer.", 0xff9b9b, imgui.wrap)
+        end
         imgui.text(context, "Players", 0xa8b8e8)
         imgui.child(context, "players", -1, 170, true)
         for _, player in ipairs(lobby.players) do

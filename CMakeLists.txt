@@ -243,7 +243,7 @@ if(WIN32)
 endif()
 # UDP messages to many peers (docs/netcode.md): ENet, built from its release archive. The web build has no UDP.
 if(OPENLF2_DEPENDENCY_PROVIDER STREQUAL "web")
-    target_sources(openlf2_adapter_network PRIVATE src/adapters/web/messages.cpp)
+    target_sources(openlf2_adapter_network PRIVATE src/adapters/web/messages.cpp src/adapters/web/port_mapping.cpp)
 else()
     include(FetchContent)
     FetchContent_Declare(enet
@@ -254,6 +254,20 @@ else()
     # ENet's own build sets its include folder for its directory only.
     target_include_directories(openlf2_adapter_network SYSTEM PRIVATE ${enet_SOURCE_DIR}/include)
     target_link_libraries(openlf2_adapter_network PRIVATE enet)
+    # UPnP opens the port of a hosted game on the home router: miniupnpc, a static library from its release archive.
+    set(UPNPC_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+    set(UPNPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(UPNPC_BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
+    set(UPNPC_NO_INSTALL ON CACHE BOOL "" FORCE)
+    FetchContent_Declare(miniupnpc
+        URL https://github.com/miniupnp/miniupnp/archive/refs/tags/miniupnpc_2_2_8.tar.gz
+        URL_HASH SHA256=3d0d49f761f09c1321ceb663d1b008825361d7bd242640c60ae467e82642502a
+        SOURCE_SUBDIR miniupnpc)
+    FetchContent_MakeAvailable(miniupnpc)
+    target_sources(openlf2_adapter_network PRIVATE src/adapters/network/upnp.cpp)
+    target_link_libraries(openlf2_adapter_network PRIVATE libminiupnpc-static)
+    # Its headers are C with a zero-size array, which -Wpedantic rejects in C++.
+    target_include_directories(openlf2_adapter_network SYSTEM PRIVATE ${miniupnpc_SOURCE_DIR}/miniupnpc/include)
 endif()
 
 add_library(openlf2_adapter_download STATIC ${openlf2_download_source})

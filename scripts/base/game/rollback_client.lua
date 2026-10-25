@@ -11,6 +11,7 @@ local sounds = require("base/game/sounds")
 local rumble = require("base/game/rumble")
 local rollback = require("base/game/rollback")
 local ticks = require("base/game/ticks")
+local speed_gate = require("base/game/speed_gate")
 local client = {}
 
 local tick_ms = ticks.tick_ms
@@ -57,6 +58,8 @@ local function input_for(state, tick)
         else input.slots[slot] = state.last_known[slot] or "" end
     end
     if state.owns_functions then input.functions, input.function_presses = own.functions, own.function_presses end
+    -- The speed stays as the newest final tick has it.
+    input.speed = state.last_speed
     return input
 end
 
@@ -65,7 +68,8 @@ end
 local function run_tick(state, tick)
     local input = input_for(state, tick)
     state.saved[tick] = rollback.save(state.match)
-    state.results[tick] = match.step(state.match, ticks.held(input))
+    local due, held = speed_gate.step(state.match, ticks.held(input))
+    state.results[tick] = due and match.step(state.match, held) or nil
     state.used[tick] = input
     local played, counts = state.played[tick] or {}, {}
     state.played[tick] = played
@@ -119,7 +123,7 @@ function client.update(state, now)
         while state.final[state.confirmed + 1] do
             local tick = state.confirmed + 1
             state.confirmed = tick
-            state.last_known = state.final[tick].slots
+            state.last_known, state.last_speed = state.final[tick].slots, state.final[tick].speed
             if tick < state.tick and not ticks.same(state.final[tick], state.used[tick]) then wrong = wrong or tick end
         end
         if wrong then

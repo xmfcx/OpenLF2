@@ -90,7 +90,7 @@ for display in 95 96; do
 done
 sleep 1
 start_window() { # display, name
-    DISPLAY=":$1" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy OPENLF2_PROBE=1 OPENLF2_LOG_SOUNDS=1 \
+    DISPLAY=":$1" SDL_VIDEODRIVER=x11 SDL_AUDIODRIVER=dummy OPENLF2_PROBE=1 OPENLF2_LOG_SOUNDS=1 OPENLF2_NO_UPNP=1 \
         "$GAME" --installer "$INSTALLER" --scripts scripts --renderer software --config-dir "$WORK/$2" --port "$PORT" \
         > "$WORK/$2.log" 2>&1 &
     PIDS+=($!)
