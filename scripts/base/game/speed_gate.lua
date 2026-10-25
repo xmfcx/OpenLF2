@@ -95,8 +95,6 @@ function gate.step(fight, held)
         local entry = state.slots[slot]
         if reads and #entry.queue > 0 then entry.given = table.remove(entry.queue, 1).keys end
         out[slot] = entry.given .. (state.commands[slot] or "")
-        -- The menu hold of base/game/match ("M") is a state: it goes with the tick that runs.
-        if (held[slot] or ""):find("M", 1, true) then out[slot] = out[slot] .. "M" end
     end
     state.commands = {}
     -- The fight reads function keys on every second tick, and a release clears a key it has not read

@@ -7,6 +7,9 @@
 local colors = {}
 
 colors.slots = {0x3e59f8, 0xeb0000, 0x00fe00, 0xffff01, 0x00ffff, 0xbd2bbb, 0x797979, 0xf99200}
+-- The enemies' color: the magenta of the "Com" label under an enemy boss (the original's pe/words5 font, with its dark
+-- outline), for the boss bars and the minimap.
+colors.enemy, colors.enemy_outline = 0xff4cec, 0x8c009a
 
 -- The player slot (0 to 7) of item `index`, or nil: a human in slots 0-7, a computer player of the match setup in
 -- slots 10-17 (base/game/match).

@@ -152,29 +152,19 @@ press 95 Return
 expect "host: chat in a fight sends and closes" host "screen=match .*chat_open=false chat_lines=2"
 press 95 Escape
 expect "host: Escape opens the settings menu" host "settings=game"
-expect "host: the menu pauses the fight" host "screen=match online=session.* paused"
-expect "join: the fight pauses for the other player too" join "screen=match online=session.* paused"
+expect_not "host: the menu does not pause the fight" host "paused"
+expect_not "join: the fight goes on for the other player" join "paused"
 press 95 Escape
 expect_not "host: Escape again closes the menu" host "settings="
-expect_not "host: closing the menu resumes the fight" host "paused"
-expect_not "join: the fight resumes for the other player too" join "paused"
-# A fast Escape, Escape keeps the menu and the pause (the menu holds the fight by a state, base/game/match "menu_hold").
+# A fast Escape, Escape keeps the menu open, and the fight still goes on.
 press 95 Escape
-expect "host: the menu pauses the fight again" host "screen=match online=session.* paused"
 xdo 95 keydown Escape; sleep 0.08; xdo 95 keyup Escape; sleep 0.08; xdo 95 keydown Escape; sleep 0.08; xdo 95 keyup Escape
 sleep 1
 expect "host: a fast Escape, Escape keeps the menu open" host "settings=game"
-expect "host: the fight stays paused after a fast Escape, Escape" host "screen=match online=session.* paused"
-expect "join: the fight stays paused there too" join "screen=match online=session.* paused"
-# Two menus: the fight goes on only when both are closed.
-focus 96; press 96 Escape
-expect "join: Escape opens the settings menu" join "settings=game"
-focus 95; press 95 Escape
-expect_not "host: the host's menu closes" host "settings="
-expect "host: the fight stays paused while the other menu is open" host "screen=match online=session.* paused"
-focus 96; press 96 Escape
-expect_not "join: closing the last menu resumes the fight" join "paused"
-expect_not "host: the fight resumes for the host too" host "paused"
+expect_not "host: the fight goes on behind the menu" host "paused"
+expect_not "join: the fight goes on there too" join "paused"
+press 95 Escape
+expect_not "host: Escape closes the menu again" host "settings="
 focus 95
 press 95 Escape; sleep 0.5; shot 95 settings; click 95 "$(gx 395)" "$(gy 98)"
 expect_not "host: Resume closes the menu" host "settings="

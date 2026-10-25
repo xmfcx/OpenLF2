@@ -71,8 +71,19 @@ function hud.stage_info(current)
                     if id and id >= 0 then boss_items[id] = true end
                 end
             end
+            -- Only the enemies that really come, by the rules of stage.update: an entry spawns again only through its
+            -- slots that still hold an item, so an entry without slots (ratio x players under 1, such as a soldier
+            -- entry of `ratio: 0.7` and the `times: 50` of every soldier for one player) or whose slots ran out sends
+            -- no more. Soldiers come only while a boss is alive, and milk and beer are no enemies.
             local waiting = (runtime.total or 0) - (runtime.count or 0)
-            if waiting > 0 then add(entry.id, waiting, boss) end
+            local coming = false
+            for slot = 0, (runtime.parallel or 0) - 1 do
+                if (runtime.ids[slot] or -1) >= 0 then coming = true end
+            end
+            if entry.kind == constants.stage_entry_kinds.soldier and run.boss_alive == 0 then coming = false end
+            local known = catalog.objects().by_id[entry.id]
+            if known and known.kind ~= record_kinds.character then coming = false end
+            if waiting > 0 and coming then add(entry.id, waiting, boss) end
         end
     end
     for index = constants.first_spawned_slot, constants.item_slots - 1 do
@@ -195,13 +206,14 @@ function hud.draw_bosses(context, layout)
     for position, value in ipairs(layout.bosses) do
         local small = resource(value.record.data.small)
         if small then
-            imgui.image(context, "boss" .. position, small, nil, 18, 20, {0xff4040})
+            imgui.image(context, "boss" .. position, small, nil, 18, 20, {player_colors.enemy})
             imgui.same_line(context)
         end
         imgui.group(context)
-        imgui.text(context, i18n.tr("BOSS") .. "  " .. (value.record.data.name or "?"), 0xff7070, imgui.small)
+        imgui.text(context, i18n.tr("BOSS") .. "  " .. (value.record.data.name or "?"), player_colors.enemy, imgui.small)
         local most = math.max(value.max_hp or full, 1)
-        imgui.bar(context, math.max(value.hp, 0) / most, 0xd81e1e, math.max(value.dark_hp, 0) / most, dark_color,
+        imgui.bar(context, math.max(value.hp, 0) / most, player_colors.enemy, math.max(value.dark_hp, 0) / most,
+            player_colors.shade(player_colors.enemy, 0.4),
             back_color, string.format("%d / %d", math.max(value.hp, 0), most), 0, 7)
         imgui.end_group(context)
     end
@@ -228,8 +240,8 @@ function hud.draw_stage_panel(context, info, x, y, width, height)
 end
 
 -- The minimap at (x, y, width, height): the whole stage from above, the open part, the view of this computer's
--- camera (`view_left`, `view_width`, or nil), a dot in the player color for each fighter, small marks for the
--- enemies and a large one for a boss.
+-- camera (`view_left`, `view_width`, or nil), a dot in the player color for each fighter, small marks in the enemy
+-- color for the enemies and a large one for a boss. Invisible fighters have no mark.
 function hud.draw_minimap(context, current, info, x, y, width, height, view_left, view_width)
     local stage_width = current.stage.width or constants.screen.width
     local near, far = current.stage.zboundary[1] or 0, current.stage.zboundary[2] or 1
@@ -251,18 +263,22 @@ function hud.draw_minimap(context, current, info, x, y, width, height, view_left
     for _, value in ipairs(info and info.bosses or {}) do bosses[value] = true end
     for index = 0, constants.item_slots - 1 do
         local value = current.items[index]
-        if value and value.hp > 0 and value.record.kind == record_kinds.character then
+        -- An invisible fighter (Rudolf's invisibility: blink -25 or less, the rule of its name label) has no mark.
+        if value and value.hp > 0 and value.record.kind == record_kinds.character and value.blink > -25 then
             local px, py = map_x(value.x_int), map_y(value.z_int)
             local slot = player_colors.slot(index)
             if bosses[value] then
-                context.fill(px - 3, py - 3, 7, 7, 0x20, 0, 0)
-                context.fill(px - 2, py - 2, 5, 5, 0xff, 0x30, 0x30)
+                local r, g, b = player_colors.rgb(player_colors.enemy_outline)
+                context.fill(px - 3, py - 3, 7, 7, r, g, b)
+                r, g, b = player_colors.rgb(player_colors.enemy)
+                context.fill(px - 2, py - 2, 5, 5, r, g, b)
             elseif slot and value.team ~= teams.enemies then
                 local r, g, b = player_colors.rgb(player_colors.of(slot))
                 context.fill(px - 2, py - 2, 5, 5, 0, 0, 0)
                 context.fill(px - 1, py - 1, 3, 3, r, g, b)
             elseif value.team == teams.enemies then
-                context.fill(px - 1, py - 1, 2, 2, 0xc0, 0x60, 0x60)
+                local r, g, b = player_colors.rgb(player_colors.enemy)
+                context.fill(px - 1, py - 1, 2, 2, r, g, b)
             else
                 context.fill(px - 1, py - 1, 3, 3, 0xc0, 0xc0, 0xc8)
             end

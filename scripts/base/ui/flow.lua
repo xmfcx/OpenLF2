@@ -460,8 +460,10 @@ local function budgeted(context)
 end
 -- The mouse pointer (OpenLF2 extension): every screen's pointer image (pe/lf2_cursor) shows where this computer's
 -- mouse really is, also in a network game, whose exchanged input has no pointer. Screens without a pointer of their
--- own (the character selection, the fight) show it for three seconds after the mouse moves. Drawing only: the
--- screens' own logic keeps the pointer it always had.
+-- own (the character selection, the fight) show it for three seconds after the mouse moves. It follows the system
+-- mouse over the whole window, also over the bars at the sides of the picture (where the coordinates are below 0 or
+-- past the picture), and it hides while the mouse is outside the window (the platform's pointer -1,-1). Drawing only:
+-- the screens' own logic keeps the pointer it always had.
 local pointer_shown_ms = 3000
 -- The connection to a server program while its lobby or its session shows (base/game/online), and whether the
 -- session shows (it has the chat window of base/ui/chat; the lobby has its own chat panel).
@@ -540,7 +542,7 @@ function flow.probe(state)
             if fight.items[slot] and fight.items[slot].ai_control then computer[#computer + 1] = tostring(slot) end
         end
         if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
-        if fight.paused or fight.menu_hold then parts[#parts + 1] = "paused" end
+        if fight.paused then parts[#parts + 1] = "paused" end
         local view = state.match.camera_view
         if view and view.width then
             parts[#parts + 1] = string.format("camera=%d,%d,zoom=%s", math.floor(view.center), math.floor(view.width),
@@ -602,18 +604,19 @@ end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
 local imgui_screens = {online_menu = true, online_lobby = true, setup = true}
 local function pointer_position(state)
-    return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
+    return state.local_pointer_x, state.local_pointer_y + 2
 end
 function flow.draw(state, context)
     -- The server draws nothing, but the runtime expects a viewport on every frame.
     if state.server then return context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0) end
     context = budgeted(context)
+    -- A screen's pointer is drawn last, over the whole window (see draw_pointer).
     local pointer_drawn = false
     local draw_image = context.image
     context.image = function(resource, x, y, keyed)
         if resource == "pe/lf2_cursor" then
             pointer_drawn = true
-            if state.local_pointer_x then x, y = pointer_position(state) end
+            return
         end
         return draw_image(resource, x, y, keyed)
     end
@@ -669,9 +672,13 @@ function flow.draw(state, context)
     end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
-    if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
-       and engine.network_time() - (state.pointer_moved_at or -pointer_shown_ms) < pointer_shown_ms then
+    -- The pointer: where the screen drew one, or for a while after the mouse moved. A menu of Dear ImGui that takes
+    -- clicks (the settings menu, an open chat line) draws its own pointer.
+    local recent = engine.network_time() - (state.pointer_moved_at or -pointer_shown_ms) < pointer_shown_ms
+    if state.local_pointer_x and (pointer_drawn or (recent and not imgui_screens[state.active]))
+       and not state.fight_menu and not state.chat_open then
         local x, y = pointer_position(state)
+        if context.overlay then context.overlay(true) end
         draw_image("pe/lf2_cursor", x, y, true)
     end
 end
@@ -925,12 +932,14 @@ update_frame = function(state, raw, context)
             end
         end
     end
-    -- This computer's mouse, for drawing the pointer (see flow.draw).
-    if input.pointer_x and input.pointer_x >= 0 and input.pointer_y and input.pointer_y >= 0 then
+    -- This computer's mouse, for drawing the pointer (see flow.draw); -1,-1 is a mouse outside the window.
+    if input.pointer_x and input.pointer_y and not (input.pointer_x == -1 and input.pointer_y == -1) then
         if input.pointer_x ~= state.local_pointer_x or input.pointer_y ~= state.local_pointer_y then
             state.pointer_moved_at = engine.network_time()
         end
         state.local_pointer_x, state.local_pointer_y = input.pointer_x, input.pointer_y
+    else
+        state.local_pointer_x, state.local_pointer_y = nil, nil
     end
     -- The chat of a server program (base/ui/chat), in its lobby and its fights: while its line is open, it takes the
     -- keys, and the players' keys are held back.
@@ -1006,10 +1015,8 @@ update_frame = function(state, raw, context)
         local again = state.exchange_waited
         state.exchange_waited = nil
         -- Escape opens the settings menu (base/ui/fight_menu), with this computer's keys held back. Escape closes it
-        -- again, or its question first. In a fight the open menu holds the fight for everybody, so that nobody misses
-        -- a moment: this computer's keys carry the letter "M" while it is open (base/game/match "menu_hold"), and the
-        -- fight goes on when every player's menu is closed. A state, not a toggle, so a fast Escape, Escape cannot
-        -- lose it. The menu's Pause button (F1) pauses the fight as the original's pause key, also after the menu.
+        -- again, or its question first. The menu does not stop the fight, and closing it does not resume a paused
+        -- one: only F1 (also the menu's Pause button) pauses, as the original's pause key.
         local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
         if escape and not state.escape_held then
             if not state.fight_menu then state.fight_menu = fight_menu.create()
@@ -1029,7 +1036,6 @@ update_frame = function(state, raw, context)
             if answer and answer.close then state.fight_menu = nil end
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses = "", ""
-            if state.fight_menu and state.active == "match" and state.match.online then input[0] = "M" end
         end
         hold_functions(state, input, again)
         drop_choices(state, imgui.events(input))
@@ -1128,7 +1134,8 @@ update_frame = function(state, raw, context)
             state.speed_menu, state.wait_release, state.swallow_pointer, closed_now = nil, true, true, true
         end
     elseif state.fight_menu and not state.session then
-        -- A local fight stops while the settings menu is open (base/ui/fight_menu); Escape closes it.
+        -- The settings menu (base/ui/fight_menu) does not stop a local fight either: only F1 pauses it. The keys of
+        -- this computer's players are held back while it is open; Escape closes it.
         local answer = fight_menu.update(state.fight_menu, input, menu_env(state))
         if escape_pressed then
             if state.fight_menu.confirm then state.fight_menu.confirm = nil else answer = {close = true} end
@@ -1141,16 +1148,18 @@ update_frame = function(state, raw, context)
             if answer.cheat_keys then unlock.mark_function_keys() end
             if answer.close then state.fight_menu, state.swallow_pointer = nil, true end
         end
-        closed_now = true
+        if state.fight_menu then
+            for slot = 0, 7 do input[slot] = "" end
+        end
     elseif speed_keys then
         state.speed_menu = speed_menu.create()
     elseif escape_pressed and escape_free(state) and state.active == "match" and not state.match.match.replay then
         state.fight_menu = fight_menu.create()
-        closed_now = true
+        for slot = 0, 7 do input[slot] = "" end
     elseif escape_pressed and escape_free(state) then
         state.quit_dialog = quit_dialog.create(state.active == "match" and "leave" or "exit")
     end
-    if not state.session and not state.fight_menu then hold_functions(state, input) end
+    if not state.session then hold_functions(state, input) end
     if state.pending_leave and not state.quit_dialog then
         if state.active == "match" and not input.functions:find("4", 1, true) then input.functions = input.functions .. "4" end
         state.pending_leave = state.pending_leave > 1 and state.pending_leave - 1 or nil
@@ -1182,9 +1191,9 @@ update_frame = function(state, raw, context)
         if request then
             local slot = state.session and state.session.online and 0 or request.slot
             input[slot] = (input[slot] or "") .. request.letter
-            -- A paused fight reads no keys: the letter waits until it runs (the settings menu pauses it).
+            -- A paused fight reads no keys: the letter waits until it runs.
             local current = state.match.match
-            if not (current and (current.paused or current.menu_hold)) then request.frames = request.frames - 1 end
+            if not (current and current.paused) then request.frames = request.frames - 1 end
             if request.frames <= 0 then state.control_request = nil end
         elseif state.active ~= "match" then
             state.control_request = nil

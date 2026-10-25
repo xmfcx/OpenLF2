@@ -314,6 +314,7 @@ The pause depends on the game:
 - Network game: one player cannot stop the fight for the others. The fight goes on, and the keys of this computer are held back while the menu is open, as the leave dialog does today. "Pause for everyone" sends F1, so all computers pause on the same tick.
 - Changed (723d449): in a network fight, the menu sends F1 when it opens, so the fight pauses for everybody, and it sends F1 again when it closes. A fight that was paused before stays paused. In the menus of a network game, the game goes on. Step one frame (F2) and End the round (F4) have no button. A local fight has "End the fight" (F4) with a question.
 - Changed again (docs/fight-screen.md "Pause"): the menu holds the fight by a state, not by the F1 toggle. While the menu is open, this computer's keys carry the letter `M`, and the fight stays paused while the keys of any player carry it. A fast Escape, Escape cannot lose the pause, and the fight goes on only when every menu is closed. The paused picture names who holds it.
+- Changed again (docs/fight-screen.md "Pause"): the menu does not stop the fight at all, in local and network games, and closing it does not resume a paused fight. Only F1 pauses. The keys of this computer are held back while the menu is open.
 
 The Controls page shows the keys in a fight, but a change of the keys waits until the fight ends. A change in the middle of a fight can make a held key stick.
 

@@ -56,8 +56,8 @@ A 16:9 window, zoomed out:
 
 ### Stage mode
 
-- A stage panel shows "Stage 2-3" (or "Survival 7"), the phase, and the enemies that are left, by type: a small face and "x7". The count includes the enemies that are on the field and the ones that still wait to come.
-- Each boss has a large bar under the cards, with its face, name and HP. Several bosses stack.
+- A stage panel shows "Stage 2-3" (or "Survival 7"), the phase, and the enemies that are left, by type: a small face and "x7". The count includes the enemies that are on the field and the ones that will still come. An entry of the stage data sends its enemies through its slots (`ratio` times the number of players, rounded down), so an entry with no slot sends nothing: with one player, a `<soldier>` entry of `ratio: 0.7` has no slot, and its `times: 50` do not count. Soldiers come only while a boss is alive, so their count drops to the field when the last boss dies.
+- Each boss has a large bar under the cards, with its face, name and HP, in the magenta of the "Com" label under a boss (the original's pe/words5 font). Several bosses stack. The minimap shows the enemies in the same color.
 - All of it comes from the stage data and the fight state (base/game/stage `run.runtime`), so it is the same on all computers.
 
 ### Panels
@@ -96,18 +96,17 @@ The same color shows on the card, on the name under the fighter, in the damage c
 
 ## Minimap
 
-A panel like the others: the whole stage as a thin strip, the open section, the view of the camera, a dot in the player color for each fighter, small marks for enemies and a large mark for a boss.
+A panel like the others: the whole stage as a thin strip, the open section, the view of the camera, a dot in the player color for each fighter, small marks for enemies and a large mark for a boss. The enemy marks have the magenta of a boss's "Com" label. An invisible fighter (Rudolf) has no mark, as it has no name label.
 
 ## Pause
 
-- The settings menu pauses by a state, not by a toggle. While your menu is open, your keys carry a letter, like the letter `A` of the computer control. The fight stays paused while the keys of any player carry it. Every player sees "Paused by mfc".
-- A fast Escape, Escape cannot lose a pause, because each tick carries the state again.
-- The fight goes on only when all menus are closed.
-- F1 keeps its own toggle, as in the original.
+- Only F1 pauses, as in the original. The settings menu has a Pause button that sends F1.
+- The settings menu does not stop the fight, in a local game and in a network game. Your keys are held back while it is open, so your fighter stands still. Closing the menu does not resume a paused fight.
+- Earlier the menu held the fight while it was open (the letter `M` in the keys). Players asked for F1 alone.
 
 ## Damage chart
 
-The chart takes its samples by fight time (`elapsed`), which stops during a pause, at game speed 0.4 and while the menu holds the fight.
+The chart takes its samples by fight time (`elapsed`), which stops during a pause and at game speed 0.4.
 
 ## Decisions
 
@@ -115,7 +114,7 @@ The chart takes its samples by fight time (`elapsed`), which stops during a paus
 - Auto zoom plus a saved zoom of your own, up to the whole stage.
 - The player colors in all modes, by slot.
 - In Stage mode the closed part shows darker.
-- The fight stays paused while any menu is open.
+- Only F1 pauses. The settings menu does not stop the fight.
 - The world sits in the middle.
 - A minimap panel.
 - The new screen is the default. Configs with the old Wide or dynamic layouts change to it, and a config with the classic layout keeps it.

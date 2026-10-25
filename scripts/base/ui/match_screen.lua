@@ -98,6 +98,14 @@ function screen.snapshot(state, snapshot)
             entry.pic_offset, entry.weapon, entry.team = value.pic_offset, value.weapon, value.team
             entry.hp, entry.max_hp, entry.human = value.hp, value.max_hp, value.human
             entry.lives = value.lives
+            -- A clone (a character that another character spawned, such as Rudolf's) shows the name label of its
+            -- owner, in the owner's color (OpenLF2 extension).
+            local owner = state.items[value.owner]
+            entry.label_index = index
+            if index >= constants.first_spawned_slot and value.record.kind == record_kinds.character and owner
+               and owner ~= value and owner.record.kind == record_kinds.character then
+                entry.label_index = value.owner
+            end
             advance_sparks(value.sparks, entry.sparks)
             order[count] = entry
         end
@@ -113,7 +121,7 @@ function screen.snapshot(state, snapshot)
         order[position] = entry
     end
     snapshot.camera, snapshot.shake = state.camera, state.shake
-    snapshot.paused, snapshot.held_by, snapshot.stage = nil, nil, nil
+    snapshot.paused, snapshot.stage = nil, nil
     return snapshot
 end
 
@@ -376,8 +384,10 @@ local function draw_item(context, stage, view, entry, bounds, lighting, colored)
     end
     local is_character = entry.record.kind == record_kinds.character
     local label, sheet
-    if entry.index < 20 or (entry.team ~= constants.teams.enemies and is_character) then
-        label = entry.index < 8 and controls.name(entry.index) or "Com"
+    -- The slot whose name the label shows: the item's own, or a clone's owner (see screen.snapshot).
+    local named = entry.label_index or entry.index
+    if named < 20 or (entry.team ~= constants.teams.enemies and is_character) then
+        label = named < 8 and controls.name(named) or "Com"
         sheet = label_font(entry.team)
     elseif is_character and entry.team == constants.teams.enemies
            and (entry.record.id < constants.record_id_ranges.enemy_character_first
@@ -394,7 +404,7 @@ local function draw_item(context, stage, view, entry, bounds, lighting, colored)
             if x < 0 then x = 0 end
             if x > constants.screen.width - length * 9 then x = constants.screen.width - length * 9 end
         end
-        local slot = colored and player_colors.slot(entry.index)
+        local slot = colored and player_colors.slot(named)
         if slot then
             -- A dark shadow keeps the light colors readable on light ground.
             glyphs(context, "pe/words0", label, x + 1, entry.z + 4, 9, 0x101018)
@@ -513,7 +523,6 @@ function screen.describe(state)
     local parts = {"frame=" .. current.frame_number, "background=" .. current.background_row,
         "camera=" .. current.camera, "round=" .. current.round_counter, "winner=" .. current.winner}
     if current.paused then parts[#parts + 1] = "paused" end
-    if current.menu_hold then parts[#parts + 1] = "menu_hold=" .. current.menu_hold end
     if current.mode == constants.modes.demo then parts[#parts + 1] = current.random_game and "demo" or "demo_ending" end
     if current.cheat_lock > 0 then
         local counts = current.function_counts
@@ -646,7 +655,7 @@ function screen.draw(state, context, window_bounds, camera)
     if not view then return end
     local spectated = state.follow and state.spectated
     if state.follow and state.follow_camera then
-        view = {camera = math.floor(state.follow_camera), items = view.items, paused = view.paused, held_by = view.held_by, shake = view.shake,
+        view = {camera = math.floor(state.follow_camera), items = view.items, paused = view.paused, shake = view.shake,
             stage = view.stage}
     end
     local bounds, passable_bounds, wide, closed, layout
@@ -674,7 +683,7 @@ function screen.draw(state, context, window_bounds, camera)
         layout.view_left, layout.view_width, layout.scale, layout.art_top = left, width, scale, art_top
         local stage_width = current.stage.width or constants.screen.width
         wide = {left = 0, right = width, camera = left}
-        view = {camera = left, items = view.items, paused = view.paused, held_by = view.held_by, shake = view.shake,
+        view = {camera = left, items = view.items, paused = view.paused, shake = view.shake,
             stage = view.stage}
         bounds = {left = math.max(0, -left), right = math.min(width, stage_width - left)}
         passable_bounds = {left = bounds.left, right = bounds.right}
@@ -757,13 +766,6 @@ function screen.draw(state, context, window_bounds, camera)
     end
     if view.paused then
         context.image("pe/pause", 360, 288, true)
-        -- A network game's settings menus hold the fight (base/game/match "menu_hold"): who holds it.
-        if view.held_by then
-            local names = {}
-            for slot in view.held_by:gmatch("%d") do names[#names + 1] = controls.name(tonumber(slot)) end
-            font.gdi(context, "Paused by " .. table.concat(names, ", ") .. " (settings menu)",
-                math.floor(constants.screen.width / 2), 330, 0xffffff, nil, "center")
-        end
         return
     end
     -- After the end loop: the demo's exit hint and DEMO picture, or the function-key line (GDI
