@@ -334,10 +334,42 @@ local function each_item(state, callback)
     end
 end
 
+-- The control of a human fighter (OpenLF2 extension, plan.md "AI control"): the letter "A" in a slot's keys hands
+-- the fighter to the computer, "P" gives it back. The letters come through the combined input like the keys, so
+-- every computer changes the control on the same tick. A fresh key press of the player also takes the control back
+-- once the computer played for a second. A recording keeps the control in the free bit 1 of each key byte.
+local control_return_ticks = 30
+local function read_control(state, value, keys)
+    if state.replay then
+        -- The key bytes are recorded on the ticks that read keys.
+        if state.input_phase == 0 then value.ai_control = keys:find("A", 1, true) ~= nil end
+        return
+    end
+    if keys:find("P", 1, true) then
+        value.ai_control = false
+    elseif keys:find("A", 1, true) and not value.ai_control then
+        value.ai_control, value.ai_ticks = true, 0
+    elseif value.ai_control then
+        value.ai_ticks = value.ai_ticks + 1
+        local before = value.control_keys or ""
+        for letter in keys:gmatch("[udlrcbf]") do
+            if not before:find(letter, 1, true) and value.ai_ticks > control_return_ticks then
+                value.ai_control = false
+                break
+            end
+        end
+    end
+    value.control_keys = keys
+end
+
 local function read_input(state, held)
+    local computer_humans = false
     for index = 0, 7 do
         local value = state.items[index]
-        if value and value.human then
+        if value and value.human then read_control(state, value, held[index] or "") end
+        if value and value.human and value.ai_control then
+            computer_humans = true
+        elseif value and value.human then
             for _, key in ipairs(item.keys) do value.previous_keys[key] = value.keys[key] end
             if state.input_phase == 0 then
                 local keys = held[index] or ""
@@ -352,6 +384,15 @@ local function read_input(state, held)
         end
     end
     local scan
+    if computer_humans then
+        for index = 0, 7 do
+            local value = state.items[index]
+            if value and value.human and value.ai_control then
+                if not scan and ai.prepare then scan = ai.prepare(state) end
+                ai.control(state, index, state.mode, scan)
+            end
+        end
+    end
     for index = 10, 399 do
         local value = state.items[index]
         if value then
@@ -776,7 +817,10 @@ function match.step(state, held)
         elseif state.recording and not state.recording.saved then
             local bytes = {0, 0, 0, 0, 0, 0, 0, 0, state.function_flags, state.unlock_bits or 0}
             if state.input_phase == 0 then
-                for slot = 0, live.network and 7 or 3 do bytes[slot + 1] = recording.pack_keys(live[slot] or "") end
+                for slot = 0, live.network and 7 or 3 do
+                    local value = state.items[slot]
+                    bytes[slot + 1] = recording.pack_keys(live[slot] or "") + (value and value.ai_control and 1 or 0)
+                end
             end
             recording.capture(state, bytes)
         end
