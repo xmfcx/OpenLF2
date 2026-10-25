@@ -95,6 +95,9 @@ end
 
 local function activate(state, slot, value)
     if state.removed then state.removed[slot] = nil end
+    -- The tick of the spawn (OpenLF2 extension): the AI's senses (base/ai/senses) tell a new object in a reused slot
+    -- from the old one. Nothing of the fight reads it.
+    value.born = state.frame_number
     state.items[slot] = value
 end
 

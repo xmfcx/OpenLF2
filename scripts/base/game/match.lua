@@ -358,7 +358,8 @@ local function read_control(state, value, keys)
     if keys:find("P", 1, true) then
         value.ai_control = false
     elseif keys:find("A", 1, true) and not value.ai_control then
-        value.ai_control, value.ai_ticks = true, 0
+        -- A brain other than classic starts again (base/ai/brains): its old memory is from an earlier part of the fight.
+        value.ai_control, value.ai_ticks, value.ai = true, 0, nil
     elseif value.ai_control then
         value.ai_ticks = value.ai_ticks + 1
         local before = value.control_keys or ""

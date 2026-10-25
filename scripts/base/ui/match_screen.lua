@@ -60,13 +60,9 @@ function screen.create(options, connection)
     end
     local state = {match = match.create(options), effects = fight_effects.create()}
     ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)
-    -- A brain other than `classic` reads the move books: build them now, not on the first tick of the fight.
-    if state.match.ai_brain or state.match.ai_brains then
-        for index = 0, constants.item_slots - 1 do
-            local value = state.match.items[index]
-            if value and value.record.kind == record_kinds.character then move_book.get(value.record) end
-        end
-    end
+    -- A brain other than `classic` reads the move books: build them all now (also for Stage spawns, transforms and
+    -- clones), not inside a tick of the fight.
+    if state.match.ai_brain or state.match.ai_brains then move_book.prepare_all() end
     state.match.capture = make_capture()
     if connection then
         online.begin_match(connection, state.match)

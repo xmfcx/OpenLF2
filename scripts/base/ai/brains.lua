@@ -3,8 +3,18 @@
 
 -- The brain registry of the AI (OpenLF2 extension, docs/ai-plan.md): the match asks it to control each computer
 -- fighter. A fighter's brain is the name in its memory (`value.ai.brain`), or the match's `ai_brains[index]`, or the
--- match's `ai_brain`, or `classic` (the original's routines, base/game/ai). A brain other than `classic` keeps its memory in `value.ai`, in the match
--- table, so a rollback saves and restores it, and it uses its own random stream (base/ai/random).
+-- match's `ai_brain`, or `classic` (the original's routines, base/game/ai). A brain other than `classic` keeps its
+-- memory in `value.ai`, in the match table, so a rollback saves and restores it, and it uses its own random stream
+-- (base/ai/random). A brain starts again when the fighter's record changes (a transform or a merge changes
+-- `value.record` in place) and when the computer takes a human fighter again (base/game/match read_control).
+--
+-- The rules for brains (docs/ai-plan.md "Rules for brains"; --rollback-check checks the memory):
+--   the memory holds numbers, short strings, booleans and dense arrays of them: no functions, no tables of the move
+--   book or the snapshot, no field named record, records, stage, view, capture or last_snapshot (base/game/rollback
+--   shares these names at any depth), at most 64 fields and 8 arrays of at most 32 entries;
+--   a brain updates its arrays in place, never walks a table with pairs or next, uses no math.exp, math.log,
+--   trigonometric functions or ^ with a fraction, compares whole numbers, uses only its own random stream after its
+--   start, writes the trace and never reads it, and never reads a timer.
 --
 -- A brain is a table {name, version, start, tick, describe}:
 --   start(state, index, seed) returns the memory (numbers, short strings and short arrays only);
@@ -17,7 +27,44 @@ local random = require("base/ai/random")
 local trace = require("base/ai/trace")
 local classic = require("base/ai/brains/classic")
 local move_book = require("base/ai/move_book")
+local rollback = require("base/game/rollback")
 local brains = {}
+
+-- The names that base/game/rollback shares instead of copying, at any depth (its `shared_keys`).
+local banned = {record = true, records = true, stage = true, view = true, capture = true, last_snapshot = true}
+local field_limit, array_limit, array_length = 64, 8, 32
+
+-- Checks a brain's memory against the rules (with --rollback-check). Raises an error that names the field.
+function brains.validate(memory, name)
+    local fields, arrays = 0, 0
+    for key, value in pairs(memory) do
+        local where = name .. " memory." .. tostring(key)
+        assert(type(key) == "string", where .. ": the memory's keys must be names")
+        assert(not banned[key], where .. ": base/game/rollback shares this name, so a rollback would not copy it")
+        fields = fields + 1
+        local kind = type(value)
+        if kind == "table" then
+            arrays = arrays + 1
+            local length = #value
+            assert(length <= array_length, where .. ": an array holds at most " .. array_length .. " entries")
+            local count = 0
+            for inner_key, inner in pairs(value) do
+                count = count + 1
+                assert(type(inner_key) == "number" and inner_key >= 1 and inner_key <= length and inner_key % 1 == 0,
+                    where .. ": a memory table must be a dense array")
+                local inner_kind = type(inner)
+                assert(inner_kind == "number" or inner_kind == "boolean" or (inner_kind == "string" and #inner <= 64),
+                    where .. ": an array holds numbers, booleans and short strings only")
+            end
+            assert(count == length, where .. ": a memory table must be a dense array")
+        else
+            assert(kind == "number" or kind == "boolean" or (kind == "string" and #value <= 64),
+                where .. ": a memory field holds a number, a boolean, a short string or an array")
+        end
+    end
+    assert(fields <= field_limit, name .. " memory: more than " .. field_limit .. " fields")
+    assert(arrays <= array_limit, name .. " memory: more than " .. array_limit .. " arrays")
+end
 
 local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry")}
 
@@ -64,15 +111,19 @@ function brains.control(state, index, scan)
     local brain = registry[name]
     if brain == nil or brain == classic then return classic.tick(state, index, scan) end
     local logging = trace.active(state, index)
-    if not memory then
-        memory = brain.start(state, index, random.seed(state, index, value.record.id))
-        memory.brain = name
+    if not memory or memory.record_id ~= value.record.id then
+        -- A new start, or a new record: the memory's frame numbers belong to the old move book. A restart takes its
+        -- seed from the old stream, so it calls engine.random only once per fighter.
+        local seed = memory and random.next(memory, 2147483646) + 1 or random.seed(state, index, value.record.id)
+        memory = brain.start(state, index, seed)
+        memory.brain, memory.record_id = name, value.record.id
         value.ai = memory
         if logging then
             trace.add(state, index, string.format("ev=start brain=%s version=%d id=%d", name, brain.version or 0, value.record.id))
         end
     end
     brain.tick(state, index, memory, scan, logging and trace.add or nil, move_book.get(value.record))
+    if rollback.check then brains.validate(memory, name) end
 end
 
 -- The text of the fight description for a fighter with a brain other than `classic`, or nil.

@@ -5,14 +5,31 @@
 -- snapshot (base/ai/perception) and the move books, with simple motion. It reads, it never writes.
 --
 -- Tick counts: 0 is the current tick (combat.detect of this tick, after the keys, the control and the physics of the
--- tick), 1 the next tick, and so on. A character in its move moves by the move book's forward distance, a ball by its
--- speed. The defender stays where it is, or moves at its current speed with `moving`.
+-- tick), 1 the next tick, and so on. A character in its move moves from its speed by the frames of its move, a flying
+-- object by its speed and its gravity. The defender stays where it is, or moves at its current speed with `moving`.
+-- The lists that `threats` returns are reused by the next call: read them at once.
 local constants = require("base/game/constants")
 local perception = require("base/ai/perception")
 local facing_left = constants.facings.left
 local velocity_encoding = constants.velocity_encoding
 local gravity = constants.gravity.default
+local item_ids = constants.item_ids
+local record_kinds = constants.record_kinds
 local predict = {}
+
+-- The gravity of a flying object, by base/game/physics: balls fly straight, thrown and dropped items fall.
+local function gravity_of(entry)
+    if entry.kind == record_kinds.ball then return 0 end
+    if entry.kind == record_kinds.drink then return constants.gravity.drink end
+    if entry.kind == record_kinds.baseball then return constants.gravity.baseball end
+    if entry.state == constants.frame_states.thrown_item then
+        if entry.id == item_ids.boomerang then return constants.gravity.thrown_boomerang end
+        if entry.id == item_ids.knife then return constants.gravity.thrown_knife end
+        if entry.id == item_ids.hoe then return constants.gravity.thrown_hoe end
+        return constants.gravity.thrown_item
+    end
+    return gravity
+end
 
 -- base/game/control frame_velocity in the facing direction: dvx above the threshold sets the speed, a positive dvx
 -- is a minimum speed forward, a negative one a minimum speed backward.
@@ -65,6 +82,7 @@ function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, 
     local last = math.min(move.ticks, from_tick + horizon)
     local first = from_tick + earliest(attacker, defender)
     for t = from_tick, last do
+        if t > from_tick and move.turns[t] then direction, speed = -direction, -speed end
         local frame = frames[move.frames[t]]
         if frame then
             speed = advance_speed(speed, frame.dvx)
@@ -102,13 +120,20 @@ end
 -- hit boxes of its current frame. The physics moves it before combat.detect, so tick k sees it k + 1 steps ahead.
 function predict.ball_hit(ball, defender, horizon)
     horizon = horizon or predict.horizon
-    for k = earliest(ball, defender), horizon do
-        local dx, dz = ball.vx * (k + 1), ball.vz * (k + 1)
-        local depth = ball.z + dz - defender.z
-        for _, box in ipairs(ball.hits) do
-            if box.damaging and depth < box.zwidth and depth > -box.zwidth and touches(box, defender)
-               and overlaps_body(defender, box.x0 + dx, box.x1 + dx, box.y0 + ball.vy * (k + 1), box.y1 + ball.vy * (k + 1), 0) then
-                return k, box
+    local fall = gravity_of(ball)
+    local first = earliest(ball, defender)
+    local dx, dy, dz, vy = 0, 0, 0, ball.vy
+    for k = 0, horizon do
+        -- base/game/physics: the object moves, then gravity changes its vertical speed while it is in the air.
+        dx, dz, dy = dx + ball.vx, dz + ball.vz, dy + vy
+        if ball.y + dy < 0 then vy = vy + fall elseif fall > 0 then return nil end
+        if k >= first then
+            local depth = ball.z + dz - defender.z
+            for _, box in ipairs(ball.hits) do
+                if box.damaging and depth < box.zwidth and depth > -box.zwidth and touches(box, defender)
+                   and overlaps_body(defender, box.x0 + dx, box.x1 + dx, box.y0 + dy, box.y1 + dy, 0) then
+                    return k, box
+                end
             end
         end
     end
@@ -165,11 +190,28 @@ end
 -- The threats to `self` (a perception entry) within `horizon` ticks, the soonest first: {source, ticks, damage,
 -- fall, bdefend, ball, move (start frame or 0)}. An attacking character counts with the rest of its move, a flying
 -- object with its speed. `known` (optional) filters the sources that the brain has noticed (base/ai/senses).
+local threat_list, threat_pool = {}, {}
+local function threat_order(a, b)
+    if a.ticks ~= b.ticks then return a.ticks < b.ticks end
+    return a.source < b.source
+end
+-- Whether `other` can reach `self` within the horizon at all: a cheap test before the exact one. Moves reach at most
+-- a few hundred pixels plus their speed, flying objects their speed times the horizon.
+local function in_range(other, self, horizon)
+    local distance = math.abs(other.x - self.x)
+    local speed = math.abs(other.vx)
+    if other.ball then return distance <= 200 + (speed + 2) * (horizon + 1) end
+    return distance <= 400 + speed * (horizon + 1)
+end
+
 function predict.threats(state, world, self, horizon, known)
-    local result = {}
+    local result = threat_list
+    for position = #result, 1, -1 do result[position] = nil end
     if #self.bodies == 0 then return result end
+    horizon = horizon or predict.horizon
     for _, other in ipairs(world.list) do
-        if perception.hostile(state, self, other) and (not known or known(other)) then
+        if (other.ball or other.holder or (other.character and other.move)) and in_range(other, self, horizon)
+           and perception.can_hurt(state, self, other) and (not known or known(other)) then
             local ticks, box
             if other.character and other.move then
                 ticks, box = predict.move_hit(other, other.move, other.move_tick, other.facing, self, horizon)
@@ -182,17 +224,17 @@ function predict.threats(state, world, self, horizon, known)
                 end
             end
             if ticks then
-                result[#result + 1] = {source = other.index, ticks = ticks, damage = box.injury, fall = box.fall,
-                    bdefend = box.bdefend, ball = other.ball, move = other.move and other.move.start
-                        or (other.holder and world.entries[other.holder] and world.entries[other.holder].move
-                            and world.entries[other.holder].move.start) or 0}
+                local threat = threat_pool[#result + 1]
+                if not threat then threat = {}; threat_pool[#result + 1] = threat end
+                local holder = other.holder and world.entries[other.holder]
+                threat.source, threat.ticks, threat.damage, threat.fall = other.index, ticks, box.injury, box.fall
+                threat.bdefend, threat.ball, threat.kind = box.bdefend, other.ball, other.ball and "ball" or (holder and "weapon" or "move")
+                threat.move = other.move and other.move.start or (holder and holder.move and holder.move.start) or 0
+                result[#result + 1] = threat
             end
         end
     end
-    table.sort(result, function(a, b)
-        if a.ticks ~= b.ticks then return a.ticks < b.ticks end
-        return a.source < b.source
-    end)
+    table.sort(result, threat_order)
     return result
 end
 
@@ -223,7 +265,7 @@ function predict.risk(state, world, self, move)
     local busy = move.ticks
     local worst, who = 0, nil
     for _, other in ipairs(world.list) do
-        if other.character and other.hp > 0 and perception.hostile(state, self, other) then
+        if other.character and other.hp > 0 and perception.can_hurt(state, self, other) then
             local delay = predict.opening(other)
             if delay >= 0 then
                 local speed = (other.book.movement.running_speed or 9)

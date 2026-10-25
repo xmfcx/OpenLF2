@@ -223,18 +223,14 @@ The test brain `sentry` measures the prediction. Over 8 seeds of 3000 ticks with
 
 ### Limits of the framework today
 
-- Perception has one notion of an enemy: a different team. Combat agrees, but the classic AI does not choose players of other teams as targets in Stage mode. Target choice needs its own rule.
+- Perception has two rules: `can_hurt` (combat: another team, and a held weapon has its holder's team) and `enemy` (the classic AI's rule for targets, where players of different teams are not enemies in Stage mode).
 - Grabs, throws and the catch moves (`catch` hit boxes) are not threats in the prediction.
 - A brain other than `classic` can play only in local fights (`--ai-brain`). The setup screen and network sessions do not offer brains yet, and such a fight makes no recording.
 - Positions and speeds are numbers with a fraction, like the physics of the game. A brain must turn them into whole numbers before it compares scores, so that small differences between platforms do not change a decision.
-- Known bugs, from a review of the code (docs/ai-plan.md phase 4 fixes them):
-    - Prediction uses a held weapon's own team, but combat uses the team of its holder (base/game/combat).
-    - Thrown items, drinks and baseballs fly with gravity, but prediction moves them in straight lines.
-    - A negative `next` turns a fighter, but the move book and prediction keep the direction.
-    - The senses key a source by slot and record id. A new ball in a reused slot keeps the old reaction start.
-    - The engine changes `value.record` in place on a transform or a merge. A brain's memory then points into the wrong move book.
-    - `base/game/rollback` skips the fields `record`, `records`, `stage`, `view`, `capture` and `last_snapshot` at any depth, so a brain memory must never use these names.
-    - The snapshot makes new tables for every item on every tick, and a chasing ball makes the next brain build it again.
+- Phase 4 fixed the bugs that a review found: the team of a held weapon, gravity for thrown items, turns (a negative `next`), reused slots in the senses (objects now keep their spawn tick, `born`), and the restart of a brain when the fighter's record changes or the computer takes a human fighter again.
+- `base/game/rollback` shares the fields `record`, `records`, `stage`, `view`, `capture` and `last_snapshot` at any depth. The memory validator (`brains.validate`, on with `--rollback-check`) stops a fight whose brain memory uses such a name or breaks the other rules of docs/ai-plan.md.
+- The snapshot reuses a pool of tables. A chasing ball still makes the next brain fill it again, but without new tables.
+- `tools/test-ai.sh` runs all AI checks in about 6 seconds: the classic descriptions against tools/ai-tests/, the rollback check every 9 ticks with idle and sentry brains (VS and Stage mode), `--net-sim`, the move book, and the prediction rate.
 
 ## Tools that help with the AI today
 

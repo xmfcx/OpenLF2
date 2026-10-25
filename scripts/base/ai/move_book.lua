@@ -12,7 +12,8 @@
 -- A move: {start, name, kind ("special", "basic", or "fragment" for an attacking chain that no move starts), inputs = {{input, sources = {frame...}}}, label, mp, hp, hold_mp,
 --   ticks, first_hit, last_hit, active, recovery, reach, reach_back, high, low, damage, fall, bdefend, effect,
 --   frames = {frame per tick}, hits = {hit boxes or false per tick}, body = {true or false per tick},
---   forward = {distance from the start per tick}, projectiles = {...}, follow = {{key, to, from_tick}...},
+--   forward = {distance from the start per tick, in the starting facing}, turns = {[tick] = true where the fighter
+--   turns}, projectiles = {...}, follow = {{key, to, from_tick}...},
 --   loops, holds, tags = {name = true}}.
 -- A hit box: {kind, x0, x1, y0, y1, zwidth, injury, fall, bdefend, effect, dvx}, with x forward from the fighter's
 -- center for a fighter that faces right and y up from the feet as negative numbers (base/game/collision).
@@ -66,15 +67,17 @@ local function frame_of(frames, id) return frames[id] end
 
 -- The frames from `start` until the move ends: a frame of a free state, 999, 1000 (removed) or a loop.
 -- `character` is false for a ball, which has no free states. Returns the list, `loops` and `holds` (next 0: the
--- frame stays until something else changes it).
+-- frame stays until something else changes it). A step entered through a negative `next` has `turn`: the fighter
+-- turns around there (base/game/animation).
 local function chain(frames, start, character)
-    local order, seen, current = {}, {}, start
+    local order, seen, current, turn = {}, {}, start, false
     while #order < chain_limit do
         if seen[current] then return order, true, false end
         local frame = frame_of(frames, current)
         if not frame then break end
         seen[current] = true
-        order[#order + 1] = {id = current, frame = frame}
+        order[#order + 1] = {id = current, frame = frame, turn = turn}
+        turn = frame.next < 0
         local following = math.abs(frame.next)
         if following == 0 then return order, false, true end
         if following == return_to_standing or following == 1000 then break end
@@ -148,9 +151,11 @@ local function analyse_move(frames, start, kind)
     local mp, hp = cost(first.mp)
     local move = {start = start, name = first.name, kind = kind, inputs = {}, mp = mp, hp = hp, hold_mp = 0,
         ticks = 0, active = 0, reach = 0, reach_back = 0, high = 0, low = 0, damage = 0, fall = 0, bdefend = 0, effect = 0,
-        heal = 0, frames = {}, hits = {}, body = {}, forward = {}, projectiles = {}, follow = {}, loops = loops, holds = holds,
+        heal = 0, frames = {}, hits = {}, body = {}, forward = {}, turns = {}, projectiles = {}, follow = {}, loops = loops, holds = holds,
         tags = {}}
-    local speed, distance, tick = 0, 0, 0
+    -- `sign` is the fighter's facing relative to the start: a turn flips it, and the speed, which counts in the facing
+    -- direction, changes its sign with it.
+    local speed, distance, tick, sign = 0, 0, 0, 1
     local followed = {}
     for position, step in ipairs(order) do
         local frame = step.frame
@@ -203,10 +208,14 @@ local function analyse_move(frames, start, kind)
         if state_class == states.heal_self then move.tags.heal = true end
         if state_class == states.defending then move.tags.defends = true end
         local has_body = #frame.bodies > 0
-        for _ = 0, frame.wait do
+        for repeat_tick = 0, frame.wait do
             tick = tick + 1
+            if repeat_tick == 0 and step.turn then
+                sign, speed = -sign, -speed
+                move.turns[tick] = true
+            end
             speed = advance_speed(speed, frame.dvx)
-            distance = distance + speed
+            distance = distance + sign * speed
             if speed > 0.0001 then speed = math.max(speed - 1, 0) elseif speed < -0.0001 then speed = math.min(speed + 1, 0) end
             move.frames[tick], move.hits[tick], move.body[tick], move.forward[tick] = step.id, boxes, has_body, math.floor(distance)
             if boxes then
@@ -340,6 +349,17 @@ function move_book.get(record)
     end
     cache[data] = book
     return book
+end
+
+-- Builds the books of every fighter of the catalog (except the template), so that no book builds inside a tick when a
+-- Stage spawn, a transform or a clone first needs it. The object files of their projectiles load with them.
+function move_book.prepare_all()
+    local item = require("base/game/item")
+    for _, fighter in ipairs(catalog.load()) do
+        if fighter.id ~= constants.fighter_ids.template then
+            move_book.get(item.record({id = fighter.id, kind = constants.record_kinds.character}, object_data.load(fighter.path)))
+        end
+    end
 end
 
 -- The special moves that a fighter in frame `id` can start: the frame's own fields and, for a fighter that can

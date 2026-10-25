@@ -244,6 +244,7 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 - The books of Stage spawns, transforms and clones build before the fight.
 - tools/test-ai.sh with the checks that exist today.
 - Tests: the sentry's exact rate does not go down, tools/test-ai.sh passes, and a Stage mode trace with sentries passes the rollback check.
+- Status: built. The sentry still predicts 133 of 143 hits exactly. tools/test-ai.sh passes (classic descriptions, rollback every 9 ticks in VS and Stage mode, `--net-sim`, the move book, the prediction rate), and so does tools/test-online.sh. Not done: the snapshot is still filled again after a chasing ball (from the pool, without new tables), and grab and throw threats wait for phase 6 (the control model).
 
 ### Phase 5: the arena
 
