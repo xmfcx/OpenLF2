@@ -544,9 +544,9 @@ local function room_update(state, now)
     for peer, player in pairs(state.players) do
         local client = state.authority.clients[peer]
         local plays = session.slots[player.slot] and session.slots[player.slot].peer == peer
-        if plays and client and client.heard > 0 and now - state.start_at - client.heard > drop_ms then
+        if plays and client and client.heard ~= 0 and now - state.start_at - client.heard > drop_ms then
             drop_player(state, player.slot, now)
-        elseif client and client.heard > 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
+        elseif client and client.heard ~= 0 and session.drops[player.slot] and not session.drops[player.slot].decided then
             -- Its messages arrive again (it was only slow).
             session.slots[player.slot].peer = peer
             end_drop(state, player.slot, player.name .. " is back")

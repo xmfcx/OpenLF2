@@ -93,8 +93,10 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 ### 3. Drops and returns
 
 - The server does not run the game. A return, a spectator and a resume run the session's ticks again from its start, about 8 times faster than real time in a fight and 40 ticks a frame in the menus. A session of an hour takes some minutes to catch up. A snapshot would need a way to copy the whole game state.
-- Untested: "give the fighter to another player" (built, no test), a return in a Stage survival run.
-- One saved session for each server computer (in its config.json); a second stopped session replaces the first.
+- One saved session for each server computer (in its config.json); a second stopped session replaces the first, and every room can resume it.
+- If the room role itself drops, only the 30-second rule decides (the other players see no buttons).
+- Spectators who turn into lobby players after a stop keep the resume from showing until they leave (the names must match).
+- A return in a Stage survival run is not tested.
 
 ### 4. Rooms
 
