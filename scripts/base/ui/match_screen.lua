@@ -24,6 +24,7 @@ local online = require("base/game/online")
 local brains = require("base/ai/brains")
 local ai_trace = require("base/ai/trace")
 local move_book = require("base/ai/move_book")
+local ai_view = require("base/ui/ai_view")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
@@ -53,14 +54,14 @@ function screen.create(options, connection)
     -- --ai-brain (developer, base/ai/brains): the brain of the computer fighters of a local fight. A network session
     -- takes the match options of the server only, the demo and the replays need the original's AI, and a recording
     -- cannot hold another brain (its records only have the players' keys).
-    if brains.default and brains.default ~= "classic" and not connection and not options.demo and not options.replay then
-        options.ai_brain = brains.default
+    if (brains.default or brains.by_index) and not connection and not options.demo and not options.replay then
+        options.ai_brain, options.ai_brains = brains.default, brains.by_index
         options.record = nil
     end
     local state = {match = match.create(options), effects = fight_effects.create()}
     ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)
     -- A brain other than `classic` reads the move books: build them now, not on the first tick of the fight.
-    if state.match.ai_brain then
+    if state.match.ai_brain or state.match.ai_brains then
         for index = 0, constants.item_slots - 1 do
             local value = state.match.items[index]
             if value and value.record.kind == record_kinds.character then move_book.get(value.record) end
@@ -725,6 +726,8 @@ function screen.draw(state, context, window_bounds, camera)
     for _, entry in ipairs(view.items) do
         draw_item(context, current.stage, view, entry, passable_bounds, lighting, modern)
     end
+    -- The development view of the AI (base/ui/ai_view): boxes, classes and threats over the fighters.
+    ai_view.draw_world(context, current, view.camera)
     context.clip()
     -- Ghosts and combo counters (OpenLF2 extension); the new fight screen draws them after the world (below).
     if not modern then fight_effects.draw(state.effects, context, view) end

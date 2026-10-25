@@ -357,6 +357,15 @@ Each phase ends with tests that pass. A phase changes the classic AI in no way, 
 - The snapshot of the tick, the senses, the threats, the openings, the hit chance and the risk.
 - The first world layer of the development view: hit boxes, body boxes, threats with their ticks to impact.
 - Tests: in fixed situations (a trace that sets up a ball at a known distance), the prediction gives the tick of impact that the fight shows.
+- Status: built.
+    - base/ai/perception builds one snapshot for each tick in the tick's scan: position, speed, frame class, ticks until free, the place in the move book (`move`, `move_tick`), the body and hit boxes in world coordinates, the rest timers of combat, and the holder of a held weapon.
+    - base/ai/senses keeps, in the memory, the nearest attacking sources and the tick when the brain first saw what each one does, so a brain can react only after its reaction time.
+    - base/ai/predict gives the threats to a fighter (attacking characters, flying objects and held weapons), the opening of a fighter, the hit chance of a move and the punish risk of a move. It follows the combat rules that block a hit: the attack rest, the pair rest, the blink and weak hits on a falling fighter. An attacker moves from its current speed by the `dvx` and `dvy` of its frames, with gravity and ground friction.
+    - The move book also maps each frame to its place in a move (`move_at`). An attacking frame that no move reaches from its start gets a fragment (a short move from that frame).
+    - The test brain `sentry` stands still, predicts and logs (`ev=threat ... impact=TICK`, `ev=hurt hit=TICK cause=hit|grab|throw`). `--ai-brain` takes `INDEX=NAME` pairs, so `--ai-brain 11=sentry` gives the sentry to item 11 only, and the other computers play classic. tools/ai_prediction_check.py compares the predictions with the hits.
+    - Result over 8 seeds (3000 ticks, classic attackers): 133 of 143 hit-box hits had the exact tick predicted, 1 was 1 tick away, 9 were missed. Grabs (6) and throw landings (3) hurt without a hit box and count apart. Known gaps: a heavy weapon thrown from very close hits on the tick when it leaves the hand, and a few hits had no prediction for reasons that the log does not show yet.
+    - The world layer of the development view (base/ui/ai_view): `--ai-view` or F10. It draws the body boxes (blue), the hit boxes (red when they hurt, yellow for the others), the path of flying objects, the frame class with the ticks until free, and the ticks to the next threat in red. The same trace gives the same fight with the view on and off.
+    - Tests: the VS traces give the same description as before. Sentries pass 156 rollback checks with `rollback.interval` 9 and `--net-sim` (hashes 47/0). tools/test-online.sh (87) and tools/test-online-ui.sh (36) pass.
 
 ### Phase 4: the first strong brain
 

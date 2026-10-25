@@ -2,8 +2,8 @@
 -- Copyright (c) 2026 OpenLF2 contributors
 
 -- The brain registry of the AI (OpenLF2 extension, docs/ai-plan.md): the match asks it to control each computer
--- fighter. A fighter's brain is the name in its memory (`value.ai.brain`), or the match's `ai_brain`, or `classic`
--- (the original's routines, base/game/ai). A brain other than `classic` keeps its memory in `value.ai`, in the match
+-- fighter. A fighter's brain is the name in its memory (`value.ai.brain`), or the match's `ai_brains[index]`, or the
+-- match's `ai_brain`, or `classic` (the original's routines, base/game/ai). A brain other than `classic` keeps its memory in `value.ai`, in the match
 -- table, so a rollback saves and restores it, and it uses its own random stream (base/ai/random).
 --
 -- A brain is a table {name, version, start, tick, describe}:
@@ -19,11 +19,32 @@ local classic = require("base/ai/brains/classic")
 local move_book = require("base/ai/move_book")
 local brains = {}
 
-local registry = {classic = classic, idle = require("base/ai/brains/idle")}
+local registry = {classic = classic, idle = require("base/ai/brains/idle"), sentry = require("base/ai/brains/sentry")}
 
--- The brain that the computer fighters of local fights use when the match names none (--ai-brain, a developer
--- option; base/ui/match_screen applies it). nil means `classic`.
+-- The brains of the computer fighters of local fights when the match names none (--ai-brain, a developer option;
+-- base/ui/match_screen applies it): `default` for all of them, `by_index` for single item indices. nil means
+-- `classic`.
 brains.default = nil
+brains.by_index = nil
+
+-- Reads the value of --ai-brain: "NAME" for all computer fighters, "INDEX=NAME" for one fighter, or a list of both,
+-- such as "idle,11=sentry". Returns the default name (or nil) and a table of names by item index (or nil). Raises an
+-- error for an unknown brain.
+function brains.parse(text)
+    local default, by_index
+    for part in text:gmatch("[^,]+") do
+        local index, name = part:match("^(%d+)=([a-z_]+)$")
+        name = name or part
+        assert(registry[name], "unknown brain: " .. name)
+        if index then
+            by_index = by_index or {}
+            by_index[tonumber(index)] = name
+        else
+            default = name
+        end
+    end
+    return default, by_index
+end
 
 -- Adds a brain, for example from a mod. The name must be lower-case letters and underscores.
 function brains.register(brain)
@@ -39,7 +60,7 @@ function brains.known(name) return registry[name] ~= nil end
 function brains.control(state, index, scan)
     local value = state.items[index]
     local memory = value.ai
-    local name = memory and memory.brain or state.ai_brain
+    local name = memory and memory.brain or (state.ai_brains and state.ai_brains[index]) or state.ai_brain
     local brain = registry[name]
     if brain == nil or brain == classic then return classic.tick(state, index, scan) end
     local logging = trace.active(state, index)

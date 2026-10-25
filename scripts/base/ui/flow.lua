@@ -100,9 +100,10 @@ function flow.create(options)
     require("base/game/netsim").params = require("base/game/netsim").parse(options.net_sim)
     -- --ai-log and --ai-brain (developer, docs/ai-plan.md): the AI log and the brain of local computer fighters.
     require("base/ai/trace").configure(options.ai_log)
+    require("base/ui/ai_view").configure(options)
     if options.ai_brain then
-        assert(require("base/ai/brains").known(options.ai_brain), "unknown brain: " .. tostring(options.ai_brain))
-        require("base/ai/brains").default = options.ai_brain
+        local brains = require("base/ai/brains")
+        brains.default, brains.by_index = brains.parse(options.ai_brain)
     end
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
@@ -1000,6 +1001,8 @@ update_frame = function(state, raw, context)
     -- the input timeline.
     if state.active == "match" then
         if input_timeline.toggled(state.timeline, input) then panels.toggle(state.panels, "timeline") end
+        -- F10 shows or hides the development view of the AI (base/ui/ai_view).
+        require("base/ui/ai_view").toggled(input)
         local layout = panel_layout(state)
         if layout then panels.pointer(state.panels, input, layout, panel_ids(state)) end
     end

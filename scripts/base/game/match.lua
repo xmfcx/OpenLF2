@@ -66,7 +66,7 @@ end
 
 -- options: mode, difficulty, background row (100 = random), fighters (catalog list),
 -- backgrounds (catalog list), slots[0..7] = {kind = "human"|"computer"|nil, fighter, team}, ai_brain (the brain of the
--- computer fighters, base/ai/brains; nil for the original's).
+-- computer fighters, base/ai/brains; nil for the original's), ai_brains (brain names by item index).
 function match.create(options)
     -- free_transform: the rule of the original's `lf2.net` word, Firen and Freeze merge and Louis turns into Louis EX
     -- at any hp (OpenLF2 keeps every fighter selectable, and this rule is a match option, docs/pregame-ui-redesign.md
@@ -74,7 +74,7 @@ function match.create(options)
     local state = {mode = options.mode, difficulty = options.difficulty, running = true, free_transform = options.free_transform == true,
         items = {}, counter_12 = 0, counter_3 = 0, shake = 0,
         camera = 0, camera_step = 0, frame_number = 0, input_phase = 0,
-        random_game = options.demo ~= nil, ai_skill = 0, ai_brain = options.ai_brain,
+        random_game = options.demo ~= nil, ai_skill = 0, ai_brain = options.ai_brain, ai_brains = options.ai_brains,
         round_counter = 0, winner = -1, elapsed = 0, finished = false,
         paused = false, pause_request = false, pause_next = false, cheat_lock = 0,
         heal_all = false, weapon_command = 0, function_counts = {[6] = 0, [7] = 0, [8] = 0, [9] = 0}}

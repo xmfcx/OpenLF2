@@ -151,6 +151,7 @@ A headless run of 3000 fight ticks with 5 computer fighters took 3.9 s with the 
 | Recordings and replays | a fight again, with the same AI decisions |
 | `--ai-log [all\|INDICES]` | the AI log: a line for each new target and each special move, and a summary every 30 ticks (docs/ai-plan.md "Logs for agents") |
 | `--ai-brain NAME` | another brain for the computer fighters of local fights, for example `idle` |
+| `--ai-view`, F10 | the development view of the AI over the fight: hit boxes, body boxes, frame classes, threats (docs/ai-plan.md phase 3) |
 | `--ai-book [all\|ID]` | the move book of the AI as log lines (base/ai/move_book), which `tools/lf2_moves.py FOLDER --check LOG` compares with the data files |
 | tools/lf2_moves.py | the move list of every fighter from the data files (docs/ai-moves.md) |
 

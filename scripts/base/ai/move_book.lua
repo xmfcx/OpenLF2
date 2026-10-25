@@ -7,8 +7,9 @@
 -- never sees it. It reads nothing of a fight and changes nothing.
 --
 -- A book: {id, name, movement, moves = {move...}, by_start = {[frame] = move}, inputs = {[frame] = {entry...}},
---   class = {[frame] = class name}, free_in = {[frame] = ticks or -1}}.
--- A move: {start, name, kind ("special" or "basic"), inputs = {{input, sources = {frame...}}}, label, mp, hp, hold_mp,
+--   class = {[frame] = class name}, free_in = {[frame] = ticks or -1},
+--   move_at = {[frame] = {move = move, tick = timeline index of the frame's first tick}}}.
+-- A move: {start, name, kind ("special", "basic", or "fragment" for an attacking chain that no move starts), inputs = {{input, sources = {frame...}}}, label, mp, hp, hold_mp,
 --   ticks, first_hit, last_hit, active, recovery, reach, reach_back, high, low, damage, fall, bdefend, effect,
 --   frames = {frame per tick}, hits = {hit boxes or false per tick}, body = {true or false per tick},
 --   forward = {distance from the start per tick}, projectiles = {...}, follow = {{key, to, from_tick}...},
@@ -269,7 +270,7 @@ function move_book.get(record)
     if book then return book end
     local frames = data.frames
     book = {id = record.id, name = data.name or tostring(record.id), movement = data.movement or {}, moves = {}, by_start = {},
-        inputs = {}, class = {}, free_in = {}}
+        inputs = {}, class = {}, free_in = {}, move_at = {}}
     local ids = {}
     for id in pairs(frames) do ids[#ids + 1] = id end
     table.sort(ids)
@@ -314,6 +315,26 @@ function move_book.get(record)
                 move.inputs[1] = {input = basic[2], sources = {}}
                 book.by_start[id] = move
                 book.moves[#book.moves + 1] = move
+            end
+        end
+    end
+    -- Where each frame sits in a move, so that prediction can read the rest of an enemy's move from its frame: the move
+    -- that starts at the frame, or else the first move whose chain holds it.
+    for _, move in ipairs(book.moves) do book.move_at[move.start] = {move = move, tick = 1} end
+    for _, move in ipairs(book.moves) do
+        for tick, id in ipairs(move.frames) do
+            if not book.move_at[id] then book.move_at[id] = {move = move, tick = tick} end
+        end
+    end
+    -- An attacking frame that no move reaches from its start (for example the second weapon swing, or a frame that a
+    -- follow-up enters) gets a fragment: the chain from that frame. Fragments are not in `moves`.
+    for _, id in ipairs(ids) do
+        if not book.move_at[id] and book.class[id] == "attacking" then
+            local fragment = analyse_move(frames, id, "fragment")
+            if fragment then
+                for tick, frame_id in ipairs(fragment.frames) do
+                    if not book.move_at[frame_id] then book.move_at[frame_id] = {move = fragment, tick = tick} end
+                end
             end
         end
     end
