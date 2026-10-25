@@ -3,7 +3,8 @@
 
 -- Fight effects (OpenLF2 extension), drawn over the fighters; they only read the fight, so they never change a
 -- network game or a recording, and they run on fight frames, so the game speed menu slows them too.
--- * A ghost: when a character's HP reaches 0, a small skull pops up above its head, sways up and fades away.
+-- * A ghost: when a character's HP reaches 0, a small skull pops up above its head, sways up and fades away. A fighter
+--   with a personal skull (base/ui/skulls, found by its face picture) shows that one, others a plain white skull.
 -- * A combo counter: damage that a character deals within 30 frames of its previous damage adds to its combo, and
 --   from the second hit the combo's damage shows above it. The number grows flashier along the milestones 200, 500,
 --   1000 and 2500 damage (intensity 0 to 4, linear between them): bigger, warmer colors, a glow, shaking, sparks,
@@ -12,6 +13,7 @@
 --   its name label), the combo and its sparks are hidden too.
 local constants = require("base/game/constants")
 local font = require("base/ui/font")
+local skulls = require("base/ui/skulls")
 
 local effects = {}
 
@@ -31,6 +33,54 @@ local digits = {
     ["8"] = {"111", "101", "111", "101", "111"}, ["9"] = {"111", "101", "111", "001", "111"},
 }
 local skull = {".XXXXX.", "XXXXXXX", "X..X..X", "X..X..X", "XXX.XXX", ".XXXXX.", ".X.X.X."}
+-- The fill strips of each personal skull, made once from its rows: runs of one color, merged down while the run in
+-- the next row is the same, so that a skull of 24 cells draws with about 150 fills.
+local skull_strips = {}
+
+local function strips_of(name)
+    local strips = skull_strips[name]
+    if strips then return strips end
+    local data = skulls[name]
+    strips = {width = 0, height = #data.rows}
+    local open = {}
+    for row, line in ipairs(data.rows) do
+        strips.width = math.max(strips.width, #line)
+        local next_open = {}
+        local first = 1
+        while first <= #line do
+            local cell = line:sub(first, first)
+            local last = first
+            while line:sub(last + 1, last + 1) == cell do last = last + 1 end
+            if cell ~= "." then
+                local key = first .. ":" .. last .. ":" .. cell
+                local strip = open[key]
+                if strip then
+                    strip.h = strip.h + 1
+                else
+                    local color = data.palette[tonumber(cell)]
+                    strip = {x = first - 1, y = row - 1, w = last - first + 1, h = 1, r = math.floor(color / 65536),
+                        g = math.floor(color / 256) % 256, b = color % 256}
+                    strips[#strips + 1] = strip
+                end
+                next_open[key] = strip
+            end
+            first = last + 1
+        end
+        open = next_open
+    end
+    skull_strips[name] = strips
+    return strips
+end
+
+-- The personal skulls by the face picture of a fighter's data (`head:`, lower case with "/"), so that Template's
+-- sprite\template1\face.bmp finds its skull as well as sprite\sys\davis_f.bmp.
+local skull_by_head = {}
+for name, data in pairs(skulls) do skull_by_head[data.head:lower()] = name end
+
+local function skull_name(value)
+    local head = value.record.data and value.record.data.head
+    return head and skull_by_head[(head:gsub("\\", "/"):lower())]
+end
 
 -- The effects' own generator (Park-Miller), so they never touch the game's random numbers.
 local function random(state)
@@ -96,7 +146,7 @@ function effects.observe(state, match)
             local before_hp = state.hp[index]
             if before_hp and before_hp > 0 and value.hp <= 0 then
                 state.ghosts[#state.ghosts + 1] = {x = value.x + (value.draw_offset or 0), y = head_y(value) - 4,
-                    born = frame, sway = random(state) * 6.283}
+                    born = frame, sway = random(state) * 6.283, skull = skull_name(value)}
             end
             state.hp[index] = value.hp
             local dealt = value.damage_dealt or 0
@@ -170,6 +220,22 @@ local function draw_ghost(context, ghost, frame, at)
     local alpha = age < 24 and 230 or math.floor(230 * (ghost_frames - age) / (ghost_frames - 24))
     if alpha <= 0 then return end
     local ghost_x, ghost_y = at(ghost.x, ghost.y)
+    if ghost.skull then
+        -- A personal skull: it fades in over 4 frames in place of the plain skull's growth.
+        local strips = strips_of(ghost.skull)
+        if age < 4 then alpha = math.floor(alpha * (age + 1) / 4) end
+        local x = math.floor(ghost_x + math.sin(ghost.sway + age * 0.25) * 3) - math.floor(strips.width / 2)
+        local y = math.floor(ghost_y - age * 1.1) - strips.height - 2
+        for wisp = 0, 2 do
+            local wobble = math.floor(math.sin(ghost.sway + age * 0.4 + wisp) * 2)
+            context.fill(x + math.floor(strips.width / 2) - 4 + wisp * 3 + wobble, y + strips.height - 1, 2,
+                3 + wisp % 2 * 2, 0xdc, 0xe6, 0xff, math.floor(alpha / 3))
+        end
+        for _, strip in ipairs(strips) do
+            context.fill(x + strip.x, y + strip.y, strip.w, strip.h, strip.r, strip.g, strip.b, alpha)
+        end
+        return
+    end
     local x = math.floor(ghost_x + math.sin(ghost.sway + age * 0.25) * 3) - 7
     local y = math.floor(ghost_y - age * 1.1) - 16
     -- The wispy tail under the skull.
