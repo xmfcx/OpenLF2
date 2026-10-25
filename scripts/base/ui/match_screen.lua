@@ -7,6 +7,7 @@ local camera_view = require("base/ui/camera_view")
 local player_colors = require("base/ui/player_colors")
 local fight_hud = require("base/ui/fight_hud")
 local match = require("base/game/match")
+local stage = require("base/game/stage")
 local background = require("base/game/background")
 local object_data = require("base/game/object_data")
 local font = require("base/ui/font")
@@ -193,7 +194,8 @@ local function rollback_update(state, held, context)
     for _ = 1, stepped do follow_step(state, state.match) end
     state.view = state.match.last_snapshot
     for _, result in ipairs(results) do
-        if result == "finished" then context.action("round_over") return end
+        -- The fight is back at its final tick here (base/game/online end_match).
+        if result == "finished" then stage.end_fight(state.match) context.action("round_over") return end
         if result == "leave" then context.action("title") return end
         if result == "replay_error" then context.action("replay_error") return end
     end
@@ -230,6 +232,7 @@ function screen.update(state, held, context)
     fight_effects.observe(state.effects, state.match)
     follow_step(state, state.match)
     if result == "finished" then
+        stage.end_fight(state.match)
         context.action("round_over")
         return
     end

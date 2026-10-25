@@ -38,12 +38,25 @@ local random_fighters = {constants.fighter_ids.deep, constants.fighter_ids.john,
     constants.fighter_ids.freeze, constants.fighter_ids.firen}
 local random_index = -1
 
+-- The random fighters of the stages (`id: 1000`): a list that the original keeps for the whole program and shuffles
+-- when it is used up. These module values carry it from one fight to the next; a fight works on its own copy in its
+-- state (`stage_random`, made by stage.begin_fight), so that a rollback restores it with the rest of the fight. A
+-- module value that a fight changed directly was not restored: a client that ran a spawn again picked another fighter
+-- (the desync of 2026-10-25).
 function stage.random_list()
     return {unpack(random_fighters)}, random_index
 end
 function stage.set_random_list(fighters, index)
     for position = 1, constants.stage_random_fighters.count do random_fighters[position] = fighters[position] end
     random_index = index
+end
+function stage.begin_fight(state)
+    state.stage_random = {fighters = {unpack(random_fighters)}, index = random_index}
+end
+-- A fight that ended (at its final tick in a network game) hands its list to the next fight.
+function stage.end_fight(state)
+    local own = state.stage_random
+    if own then stage.set_random_list(own.fighters, own.index) end
 end
 
 local list
@@ -85,15 +98,17 @@ local function spawn(state, run, entry, runtime, slot)
         if id ~= constants.record_ids.criminal then health = trunc(health * constants.stage_health.easy_multiplier) end
     end
     if id == constants.stage_record_selectors.random_fighter then
-        if random_index == constants.stage_random_fighters.count or random_index == -1 then
+        local own = state.stage_random
+        if own.index == constants.stage_random_fighters.count or own.index == -1 then
+            local list = own.fighters
             for _ = 1, constants.stage_random_fighters.shuffle_swaps do
                 local a, b = random(constants.stage_random_fighters.count), random(constants.stage_random_fighters.count)
-                random_fighters[a + 1], random_fighters[b + 1] = random_fighters[b + 1], random_fighters[a + 1]
+                list[a + 1], list[b + 1] = list[b + 1], list[a + 1]
             end
-            random_index = 0
+            own.index = 0
         end
-        id = random_fighters[random_index + 1]
-        random_index = random_index + 1
+        id = own.fighters[own.index + 1]
+        own.index = own.index + 1
     elseif id == constants.stage_record_selectors.random_stage_enemy then
         id = random(2) + constants.fighter_ids.bandit
     elseif id == constants.stage_record_selectors.random_stage_enemy_with_rare then
@@ -263,7 +278,7 @@ function stage.update(state, run)
         end
         return display
     end
-    if run.phase == -1 and run.id % 10 == 0 then random_index = -1 end
+    if run.phase == -1 and run.id % 10 == 0 then state.stage_random.index = -1 end
     local data = stage_data(run)
     local phase = run.phase
     if (phase < data.phase_count - 1 or (phase > -1 and phase_data(run, phase).when_clear_goto_phase ~= -1))

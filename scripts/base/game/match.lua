@@ -153,9 +153,9 @@ function match.create(options)
         engine.reset_random_sequence()
         stage.set_random_list(replay.random_fighters, replay.random_list_index)
         state.input_phase = replay.input_phase
-    elseif options.record then
-        start_recording(state, options)
     end
+    stage.begin_fight(state)
+    if not options.replay and options.record then start_recording(state, options) end
     return state
 end
 
@@ -251,7 +251,7 @@ start_recording = function(state, options)
         local format = options.mode == mode_championship and "_1on1_" or "_2on2_"
         suffix = format .. (rounds[options.tournament_round or 0] or "")
     end
-    local fighters, index = stage.random_list()
+    local fighters, index = state.stage_random.fighters, state.stage_random.index
     recording.begin(state, {difficulty = options.difficulty, stage_level = options.stage_level, mode = options.mode,
         free_transform = state.free_transform,
         names = record.names, background = state.background_row, music = record.music, version = record.version,

@@ -70,6 +70,7 @@ docs/architecture.md shows the parts, one frame, the network game and the game v
 
 ## Rules
 
+- Fight state lives in the match table, never in a module variable: a rollback saves and restores only the match table (base/game/rollback), so a module value that a fight changes differs after a client goes back over a tick. The random fighters of Stage mode were such a value (the desync of 2026-10-25, now `match.stage_random`). `--rollback-check` with a smaller `rollback.interval` (for example 9) runs almost every tick twice and finds such state.
 - Determinism: everything that changes a fight (keys, speed, random numbers) must be the same on all computers. It comes through the combined input or the shared random generator (`engine.random`). Never use `math.random` (the sandbox removes it). Screens and overlays that only draw can use local data, such as the local mouse.
 - The network profile is a SHA-256 of the script bytes and bootstrap.lua. Keep LF line endings, or two computers do not match.
 - Script sharing sends the sandboxed modules, never bootstrap.lua or the engine. A host can send scripts to an older engine, so check new engine functions before use (`if engine.versions then`).
