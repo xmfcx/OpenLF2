@@ -8,12 +8,15 @@
 --
 -- A brain is a table {name, version, start, tick, describe}:
 --   start(state, index, seed) returns the memory (numbers, short strings and short arrays only);
---   tick(state, index, memory, scan, log) writes the keys of item `index` for this tick. `scan` is ai.prepare's
---     scan of the tick. `log` is nil, or a function(state, index, text) that writes an event to the trace;
+--   tick(state, index, memory, scan, log, book) writes the keys of item `index` for this tick. `scan` is ai.prepare's
+--     scan of the tick. `log` is nil, or a function(state, index, text) that writes an event to the trace. `book` is
+--     the move book of the fighter's record (base/ai/move_book). It is fixed data: a brain keeps frame numbers in its
+--     memory, never the book's tables, because a rollback copies the memory;
 --   describe(memory) returns a short text without spaces or braces for the fight description (optional).
 local random = require("base/ai/random")
 local trace = require("base/ai/trace")
 local classic = require("base/ai/brains/classic")
+local move_book = require("base/ai/move_book")
 local brains = {}
 
 local registry = {classic = classic, idle = require("base/ai/brains/idle")}
@@ -48,7 +51,7 @@ function brains.control(state, index, scan)
             trace.add(state, index, string.format("ev=start brain=%s version=%d id=%d", name, brain.version or 0, value.record.id))
         end
     end
-    brain.tick(state, index, memory, scan, logging and trace.add or nil)
+    brain.tick(state, index, memory, scan, logging and trace.add or nil, move_book.get(value.record))
 end
 
 -- The text of the fight description for a fighter with a brain other than `classic`, or nil.

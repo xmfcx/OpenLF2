@@ -183,7 +183,7 @@ A first list of personas (the arena tunes the numbers later):
 | Firen | Pyro (burn run and flames), Zoner (balls from a distance), Bomber (explosion when surrounded) |
 | Freeze | Controller (whirlwind and ice column), Glacier (defends with the ice sword), Zoner |
 | John | Medic (heals and shields the team), Disc (disks and biscuits from a distance) |
-| Henry | Sniper (arrows, keeps the distance), Bard (flute against groups) |
+| Henry | Sniper (arrows, keeps the distance), CloseCombat (keeps hitting with the bow and punches instead of arrows) |
 | Rudolf | Assassin (hides, clones, comes in from the side), Duelist (jump sword) |
 | Louis | Bruiser (thousand-foot kick and catches), Armored (goes for the transform to Louis EX) |
 | Dennis | Kicker (whirlwind kick and many foot), Chaser (chase balls) |
@@ -343,6 +343,14 @@ Each phase ends with tests that pass. A phase changes the classic AI in no way, 
 - scripts/base/ai/move_book.lua: the timelines, the frame classes and the tags of every move, cached on the record.
 - A command that prints the book of one fighter, and a test that compares it with tools/lf2_moves.py.
 - Tests: the book of every fighter builds without errors, and the build time of all records stays under 50 ms.
+- Status: built. The comment at the top of move_book.lua lists the fields of a book and of a move.
+    - `move_book.get(record)` builds the book on the first call and caches it by the record's data table (base/game/object_data shares one table for each file). The book is outside the match table, so a rollback does not copy it. A brain keeps frame numbers in its memory, never the tables of the book.
+    - A move ends where its frame chain reaches a free frame (standing, walking, running or jumping), 999, 1000, a hold (`next: 0`) or a loop. The timeline gives each tick its frame, its hit boxes (relative to the fighter's center and feet, for a fighter that faces right), its body and the forward distance from a start at rest (the `dvx` rule of base/game/control and a ground friction of 1 for each tick).
+    - Each frame has a class (free, moving, attacking, air, defending, hurt, falling, lying, dizzy, caught, catching, frozen, recovering, busy) and the ticks until the fighter is free (-1 for a hold or a loop). `move_book.inputs_from(book, frame)` gives the special moves that a fighter in that frame can start, also through its defend frame.
+    - The tags: `close`, `ranged`, `summon`, `knockdown`, `guard_break`, `anti_air`, `movement`, `air`, `catch`, `heal`, `reflect`, `hits_balls`, `teleport`, `transform`, `defends`, `untouchable`.
+    - `brain.tick` gets the book of its fighter as a sixth argument. The match screen builds the books of the fighters before a fight with a brain other than `classic`.
+    - `--ai-book [all|ID]` prints the books as `book ...` log lines: one line for each fighter (its frame classes and the moves from standing) and one for each move. tools/lf2_moves.py and the book end a move by the same rule, and `tools/lf2_moves.py FOLDER --check LOG` compares them: 425 moves of 23 fighters, 0 differences.
+    - Time: the books of all 23 fighters take 11 ms (debug build). The object files of the projectiles take 228 ms more in a debug build, but the game loads them anyway when the objects spawn.
 
 ### Phase 3: perception and prediction
 

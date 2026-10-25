@@ -532,6 +532,41 @@ local function menu_env(state)
 end
 -- A short line about the screens and the network session, which the tests read from a window (OPENLF2_PROBE=1:
 -- the flow logs it every 15 frames).
+-- --ai-book all|ID (developer, docs/ai-plan.md phase 2): the move book of every fighter (or of one fighter id) as log
+-- lines, and the time that the books took to build. tools/lf2_moves.py --check compares the lines with the data files.
+function flow.move_book_lines(wanted)
+    local move_book = require("base/ai/move_book")
+    local item = require("base/game/item")
+    local object_data = require("base/game/object_data")
+    local records = {}
+    for _, fighter in ipairs(catalog.load()) do
+        if fighter.id ~= constants.fighter_ids.template and (wanted == "all" or tonumber(wanted) == fighter.id) then
+            records[#records + 1] = item.record({id = fighter.id, kind = constants.record_kinds.character}, object_data.load(fighter.path))
+        end
+    end
+    -- The object files (balls and other spawned objects) load first: the game loads them anyway when they spawn, so
+    -- `ms` is the time of the books alone.
+    local loading = engine.network_time()
+    for _, entry in ipairs(catalog.objects().list) do
+        if entry.kind ~= constants.record_kinds.character then object_data.load(entry.path) end
+    end
+    local load_ms = engine.network_time() - loading
+    local started = engine.network_time()
+    local books = {}
+    for _, record in ipairs(records) do books[#books + 1] = move_book.get(record) end
+    local elapsed = engine.network_time() - started
+    local lines, moves = {}, 0
+    for _, book in ipairs(books) do
+        for _, line in ipairs(move_book.lines(book)) do
+            -- An engine log line holds at most 512 bytes.
+            lines[#lines + 1] = #line > 500 and line:sub(1, 500) or line
+        end
+        moves = moves + #book.moves
+    end
+    lines[#lines + 1] = string.format("book done fighters=%d moves=%d ms=%d load_ms=%d", #books, moves, elapsed, load_ms)
+    return lines
+end
+
 function flow.probe(state)
     local connection = online_connection(state)
     local parts = {"probe screen=" .. state.active}
@@ -1262,6 +1297,10 @@ update_frame = function(state, raw, context)
     end
     -- The AI log, here for the same reason as the taunts.
     ai_trace.flush(context, state.active ~= "match" or state.match.match.finished)
+    if state.options.ai_book and not state.ai_book_written then
+        state.ai_book_written = true
+        for _, line in ipairs(flow.move_book_lines(state.options.ai_book)) do context.action("log " .. line) end
+    end
     recording.tick_status(state.active == "match" and state.match.match.paused)
     context.speed(speed.fast)
     -- Show FPS (OpenLF2 extension): measured FPS, nil for a trace unless given; drawn in flow.draw.

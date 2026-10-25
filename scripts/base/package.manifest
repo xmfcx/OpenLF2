@@ -52,6 +52,7 @@ module=ai/trace|ai/trace.lua
 module=ai/brains|ai/brains.lua
 module=ai/brains/classic|ai/brains/classic.lua
 module=ai/brains/idle|ai/brains/idle.lua
+module=ai/move_book|ai/move_book.lua
 module=game/objects|game/objects.lua
 module=game/grab|game/grab.lua
 module=game/weapons|game/weapons.lua

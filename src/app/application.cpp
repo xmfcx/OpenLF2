@@ -135,6 +135,8 @@ struct Configuration {
     std::string ai_log;
     // --ai-brain NAME: the brain of the computer fighters of local fights (docs/ai-plan.md), e.g. "idle".
     std::string ai_brain;
+    // --ai-book [all|ID]: the move book of every fighter (or of one fighter id) as log lines on the first frame.
+    std::string ai_book;
     bool preview_ending = false;
     // Lets a held mouse button stand in for touch when testing the on-screen gamepad.
     bool mouse_touch = false;
@@ -479,6 +481,16 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
                 const auto& value = arguments[index + 1];
                 if (value == "all" || (!value.empty() && value.find_first_not_of("0123456789,") == std::string::npos)) {
                     config.ai_log = value;
+                    ++index;
+                }
+            }
+        }
+        else if (argument == "--ai-book") {
+            config.ai_book = "all";
+            if (index + 1 < arguments.size()) {
+                const auto& value = arguments[index + 1];
+                if (value == "all" || (!value.empty() && value.size() <= 4 && value.find_first_not_of("0123456789") == std::string::npos)) {
+                    config.ai_book = value;
                     ++index;
                 }
             }
@@ -1096,6 +1108,7 @@ Result<void> run(const Configuration& config) {
         (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
         (config.ai_log.empty() ? std::string{} : ", ai_log=\"" + config.ai_log + "\"") +
         (config.ai_brain.empty() ? std::string{} : ", ai_brain=\"" + config.ai_brain + "\"") +
+        (config.ai_book.empty() ? std::string{} : ", ai_book=\"" + config.ai_book + "\"") +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
         (config.connect_address.empty() ? std::string{} : ", connect_address=\"" + config.connect_address +
             "\", connect_port=" + std::to_string(config.network_port)) + "}\n" + sources;
@@ -1638,6 +1651,7 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "--ai-log [all|INDICES] (developer): the AI of the shown fight writes its decisions as log lines\n"
                          "        (\"ai t=TICK i=ITEM ev=...\"), for all fighters or for item indices such as 11,12.\n"
                          "--ai-brain NAME (developer): the brain of the computer fighters of local fights, e.g. idle (docs/ai-plan.md).\n"
+                         "--ai-book [all|ID] (developer): prints the AI's move book of every fighter (or of one fighter id) as log lines.\n"
                          "--default-controller (off by default; always on for consoles): until controls are saved, player 1 uses the\n"
                          "        first controller instead of the keyboard.\n"
                          "JIT is enabled by default on desktop and Android builds; --no-jit uses the interpreter.\n"

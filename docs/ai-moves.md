@@ -19,23 +19,23 @@ Walk 5, run 8.5, jump 9 x -16.299999, dash 16 x -10.
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, defend | blast (235) | 75 mp | 12 | 3 | 62 | 15 dmg, 2 hit boxes, sharp; spawns deep_ball (dvx 15, dmg 55); then A: 240 |
-| DvA | stand, walk, defend | jump_sword (260) | 75 mp | 18 | 3 | 63 | 54 dmg, 4 hit boxes, knocks down, breaks defense, sharp; then J: 266, D^J: 266, A: 277 |
+| DvA | stand, walk, defend | jump_sword (260) | 75 mp | 18 | 3 | 64 | 54 dmg, 4 hit boxes, knocks down, breaks defense, sharp; then J: 266, D^J: 266, A: 277 |
 | D^J | stand, walk, rowing, defend, jump_sword | jump_sword (266) | 0 mp | 13 | - | - | then A: 268 |
-| D>J | stand, walk, rowing, defend | dash_sword (290) | 150 mp | 41 | 3 | 77 | 54 dmg, 9 hit boxes, knocks down, breaks defense, sharp; hits balls; sword dash |
+| D>J | stand, walk, rowing, defend | dash_sword (290) | 150 mp | 41 | 5 | 85 | 54 dmg, 9 hit boxes, knocks down, breaks defense, sharp; hits balls; sword dash |
 | D>J | catching | dash_sword (310) | 75 mp | 25 | 5 | 85 | 48 dmg, 5 hit boxes, knocks down, breaks defense, sharp; hits balls; sword dash |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 28 | 35 dmg, 2 hit boxes, sharp; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 47 | 35 dmg, 2 hit boxes, sharp; pick weapon |
-| A on a dizzy enemy | super punch: super_punch (70) | 14 | 6 | 62 | 60 dmg, 2 hit boxes, breaks defense, sharp |
+| A | punch: punch (60) | 8 | 5 | 54 | 35 dmg, 2 hit boxes, sharp; pick weapon |
+| A | punch 2: punch (65) | 8 | 5 | 52 | 35 dmg, 2 hit boxes, sharp; pick weapon |
+| A on a dizzy enemy | super punch: super_punch (70) | 14 | 6 | 63 | 60 dmg, 2 hit boxes, breaks defense, sharp |
 | A in a jump | jump attack: jump_attack (80) | 16 | 3 | 56 | 60 dmg, knocks down, breaks defense, sharp |
-| A while running | run attack: run_attack (85) | 16 | 6 | 58 | 60 dmg, 2 hit boxes, breaks defense, sharp |
+| A while running | run attack: run_attack (85) | 16 | 6 | 69 | 60 dmg, 2 hit boxes, breaks defense, sharp |
 | A in a dash | dash attack: dash_attack (90) | 6 | 3 | 65 | 70 dmg, knocks down, breaks defense, sharp |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, DvA: 260, D>J: 290, D^J: 266 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick; then D>J: 290, D^J: 266 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick; then D>J: 290, D^J: 266 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D>J: 310 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -55,21 +55,21 @@ Walk 5, run 11.2, jump 10 x -16.299999, dash 18 x -10.
 | D>A | stand, walk, defend | DA_action (235) | 75 mp | 14 | - | - | spawns john_ball (dvx 18, dmg 55) |
 | DvJ | stand, walk, defend | heal_self (250) | 350 mp | 21 | - | - | spawns john_ball (dvx 0, dmg 0); heal self |
 | D^J | stand, walk, defend | heal_other (260) | 350 mp | 21 | - | - | spawns john_ball (dvx 0, dmg 100) |
-| D>J | stand, walk, defend | force_field (270) | 100 mp | 18 | 5 | 39 | 20 dmg, 4 hit boxes; spawns john_ball (dvx 0, dmg 0) |
+| D>J | stand, walk, defend | force_field (270) | 100 mp | 18 | 5 | 57 | 20 dmg, 4 hit boxes; spawns john_ball (dvx 0, dmg 0) |
 | D^A | stand, walk, defend | biscuit (300) | 250 mp | 24 | - | - | spawns john_biscuit (dvx 0, dmg 50) |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 57 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 48 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 57 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 48 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 15 | 8 | 65 | 50 dmg, knocks down, breaks defense; then J: 290 |
-| A in a jump | jump attack: jump_attack (80) | 17 | 6 | 34 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
+| A in a jump | jump attack: jump_attack (80) | 17 | 6 | 38 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 12 | 6 | 61 | 50 dmg, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 11 | 5 | 49 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D^A: 300, D>J: 270, D^J: 260, DvJ: 250 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -88,7 +88,7 @@ Walk 5, run 11, jump 10 x -16.299999, dash 18 x -11.
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, defend | blastpush (235) | 150 mp | 19 | - | - | spawns henry_wind (dvx -5, dmg 0), henry_wind (dvx 55, dmg 80) |
 | D>A | throw_lying_man | blastpush (245) | 150 mp | 18 | - | - | spawns henry_wind (dvx -5, dmg 0), henry_wind (dvx 55, dmg 80) |
-| D^J | stand, walk, defend | flute (250) | 350 mp | 109 | 10 | 72 | 1 dmg, 20 hit boxes; sonata |
+| D^J | stand, walk, defend | flute (250) | 350 mp | 109 | 10 | 218 | 1 dmg, 20 hit boxes; sonata |
 | D>J | stand, walk, defend | super_arrow (270) | 200 mp | 16 | - | - | spawns henry_arrow2 (dvx 22, dmg 50) |
 | DJA | stand, walk, defend | 5_arrow (280) | 150 mp | 19 | - | - | spawns henry_arrow1 (dvx 22, dmg 25); then A: 281 |
 
@@ -96,14 +96,14 @@ Walk 5, run 11, jump 10 x -16.299999, dash 18 x -11.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 12 | 1 | - | pick weapon; spawns henry_arrow1 (dvx 22, dmg 40) |
-| A | punch 2: punch (65) | 12 | 1 | - | pick weapon; spawns henry_arrow1 (dvx 22, dmg 40) |
-| A on a dizzy enemy | super punch: super_punch (70) | 11 | 4 | 60 | 35 dmg, 2 hit boxes, knocks down |
+| A | punch: punch (60) | 12 | - | - | pick weapon; spawns henry_arrow1 (dvx 22, dmg 40) |
+| A | punch 2: punch (65) | 12 | - | - | pick weapon; spawns henry_arrow1 (dvx 22, dmg 40) |
+| A on a dizzy enemy | super punch: super_punch (70) | 11 | 4 | 65 | 35 dmg, 2 hit boxes, knocks down |
 | A in a jump | jump attack: jump_attack (80) | 20 | - | - | spawns henry_arrow1 (dvx 12, dmg 40) |
 | A while running | run attack: run_attack (85) | 11 | 3 | 92 | 35 dmg, 2 hit boxes, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 6 | 3 | 62 | 45 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D>J: 270, D^J: 250, DJA: 280 |
-| D in the air after a hit | rowing: rowing (102) | 21 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 21 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -132,9 +132,9 @@ Walk 6, run 13, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 14 | 1 | - | pick weapon; spawns rudolf_weapon (dvx 19, dmg 25); then A: 64 |
-| A | punch 2: punch (65) | 14 | 1 | - | pick weapon; spawns rudolf_weapon (dvx 19, dmg 25); then A: 64 |
-| A on a dizzy enemy | super punch: super_punch (70) | 26 | 3 | 46 | 65 dmg, 4 hit boxes, knocks down, breaks defense, sharp |
+| A | punch: punch (60) | 14 | - | - | pick weapon; spawns rudolf_weapon (dvx 19, dmg 25); then A: 64 |
+| A | punch 2: punch (65) | 14 | - | - | pick weapon; spawns rudolf_weapon (dvx 19, dmg 25); then A: 64 |
+| A on a dizzy enemy | super punch: super_punch (70) | 26 | 3 | 54 | 65 dmg, 4 hit boxes, knocks down, breaks defense, sharp |
 | A in a jump | jump attack: jump_attack (80) | 25 | 3 | 62 | 35 dmg, 4 hit boxes, breaks defense, sharp |
 | A while running | run attack: run_attack (85) | 22 | 3 | 94 | 45 dmg, 3 hit boxes, sharp |
 | A in a dash | dash attack: dash_attack (90) | 15 | 5 | 67 | 75 dmg, 2 hit boxes, knocks down, breaks defense, sharp |
@@ -143,7 +143,7 @@ Walk 6, run 13, jump 10 x -16.299999, dash 18 x -10.
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then DJA: 235 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
-| A while running with a light weapon | run weapon attack: run_weapon_atck (35) | 11 | - | - |  |
+| A while running with a light weapon | run weapon attack: run_weapon_atck (35) | 4 | - | - |  |
 | A in a dash with a light weapon | dash weapon attack: dash_weapon_atck (40) | 15 | - | - |  |
 | throw a light weapon | light weapon throw: light_weapon_thw (45) | 16 | - | - |  |
 | throw a heavy weapon | heavy weapon throw: heavy_weapon_thw (50) | 13 | - | - |  |
@@ -158,21 +158,21 @@ Walk 5, run 9, jump 10 x -18.699999, dash 17.5 x -13.8.
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, defend | blastpush (235) | 150 mp | 25 | - | - | spawns henry_wind (dvx 0, dmg 60) x2 |
 | D>J | stand, walk, defend | 1000foot (247) | 50 mp | 38 | 7 | 52 | 30 dmg, 5 hit boxes, knocks down, breaks defense |
-| D^J | stand, walk, defend | r-catch (275) | 100 mp | 14 | 5 | - | catch; catching |
+| D^J | stand, walk, defend | r-catch (275) | 100 mp | 14 | - | - | catch; catching |
 | DJA | stand, walk, defend | transform (300) | 0 mp | 72 | - | - | spawns henry_wind (dvx 0, dmg 60) x2; transform to Louis EX |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 38 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 36 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 8 | 6 | 38 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 8 | 6 | 36 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 14 | 7 | 53 | 55 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 14 | 7 | 54 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 20 | 6 | 44 | 65 dmg, 2 hit boxes, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 102 | 9 | 54 | 80 dmg, knocks down, breaks defense; dash attack state |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D>J: 247, D^J: 275, DJA: 300 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then J: 260 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -198,14 +198,14 @@ Walk 5, run 9.6, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 39 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 41 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 39 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 41 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 18 | 4 | 59 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 13 | 4 | 39 | 35 dmg, 2 hit boxes, knocks down |
 | A while running | run attack: run_attack (85) | 12 | 5 | 48 | 50 dmg, 2 hit boxes, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 13 | 5 | 49 | 70 dmg, 2 hit boxes, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D>J: 255, D^J: 285, DvJ: 267 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -231,14 +231,14 @@ Walk 5, run 9.3, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 6 | 1 | 44 | 20 dmg, sharp; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 49 | 20 dmg, sharp; pick weapon |
+| A | punch: punch (60) | 6 | 4 | 44 | 20 dmg, sharp; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 49 | 20 dmg, sharp; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 12 | 5 | 67 | 65 dmg, knocks down, breaks defense, sharp |
 | A in a jump | jump attack: jump_attack (80) | 12 | 5 | 42 | 35 dmg, 2 hit boxes, knocks down |
 | A while running | run attack: run_attack (85) | 13 | 5 | 61 | 50 dmg, 2 hit boxes, knocks down, sharp |
 | A in a dash | dash attack: dash_attack (90) | 14 | 4 | 59 | 70 dmg, knocks down, breaks defense, sharp |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D>J: 245, D^J: 260, DvJ: 270 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -256,22 +256,22 @@ Walk 5, run 10.5, jump 10 x -16.299999, dash 18 x -10.
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, defend | ball1 (235) | 40 mp | 15 | - | - | spawns dennis_ball (dvx 15, dmg 30); then A: 242 |
-| DvA | stand, walk, super_punch, run_attack, defend, catching | many_foot (265) | 75 mp | 24 | 3 | 54 | 27 dmg, 4 hit boxes; hits balls |
-| D>J | stand, walk, super_punch, run_attack, defend, catching | c_foot (280) | 75 mp | 16 | 5 | 54 | 35 dmg, 3 hit boxes; hits balls; holds for 17 mp a frame; then J: 288, D: 288; loops |
+| DvA | stand, walk, super_punch, run_attack, defend, catching | many_foot (265) | 75 mp | 24 | 3 | 58 | 27 dmg, 4 hit boxes; hits balls |
+| D>J | stand, walk, super_punch, run_attack, defend, catching | c_foot (280) | 75 mp | 16 | 5 | 59 | 35 dmg, 3 hit boxes; hits balls; holds for 17 mp a frame; then J: 288, D: 288; loops |
 | D^A | stand, walk, super_punch, run_attack, defend, catching | chase_ball (295) | 100 mp | 22 | - | - | spawns dennis_chase (dvx 3, dmg 65) |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 9 | 1 | 48 | 30 dmg; pick weapon |
-| A | punch 2: punch (65) | 9 | 1 | 49 | 30 dmg; pick weapon |
+| A | punch: punch (60) | 9 | 4 | 48 | 30 dmg; pick weapon |
+| A | punch 2: punch (65) | 9 | 4 | 49 | 30 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 16 | 8 | 64 | 70 dmg, knocks down, breaks defense; then D^A: 295, DvA: 265, D>J: 280 |
 | A in a jump | jump attack: jump_attack (80) | 13 | 4 | 41 | 35 dmg, knocks down |
 | A while running | run attack: run_attack (85) | 10 | 5 | 50 | 50 dmg, 2 hit boxes, knocks down; then D^A: 295, DvA: 265, D>J: 280, A: 70 |
 | A in a dash | dash attack: dash_attack (90) | 18 | 4 | 59 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D^A: 295, DvA: 265, D>J: 280 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D^A: 295, DvA: 265, D>J: 280 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -290,8 +290,8 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 |---|---|---|---|---|---|---|---|
 | D^A | stand, walk, defend, cleg, teleport | super_punch (70) | 0 mp | 15 | 5 | 67 | 70 dmg, knocks down, breaks defense; then D>J: 252 |
 | D>A | stand, walk, defend | ball1 (235) | 125 mp | 22 | - | - | spawns woody_ball (dvx 17, dmg 45) x2 |
-| D>J | stand, walk, defend | fly_crash (250) | 200 mp | 19 | 9 | 31 | 85 dmg, 4 hit boxes, knocks down, breaks defense; spawns henry_wind (dvx -2, dmg 0) |
-| D>J | crouch, crouch2, cleg, teleport | fly_crash (252) | 200 mp | 15 | 5 | 31 | 85 dmg, 4 hit boxes, knocks down, breaks defense; spawns henry_wind (dvx -2, dmg 0) |
+| D>J | stand, walk, defend | fly_crash (250) | 200 mp | 19 | 9 | 34 | 85 dmg, 4 hit boxes, knocks down, breaks defense; spawns henry_wind (dvx -2, dmg 0) |
+| D>J | crouch, crouch2, cleg, teleport | fly_crash (252) | 200 mp | 15 | 5 | 34 | 85 dmg, 4 hit boxes, knocks down, breaks defense; spawns henry_wind (dvx -2, dmg 0) |
 | DvA | stand, walk, rowing, defend | cleg (260) | 50 mp | 29 | 6 | 43 | 20 dmg, 6 hit boxes; hits balls; then D^A: 70, D>J: 252 |
 | D^J | stand, jump | teleport (275) | 50 mp | 29 | - | - | teleport to enemy; then D^A: 70, D>J: 252 |
 | DvJ | stand, jump | teleport (290) | 50 mp | 29 | - | - | teleport to ally; then D^A: 70, D>J: 252 |
@@ -300,14 +300,14 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 47 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 42 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 8 | 3 | 47 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 8 | 3 | 42 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 15 | 5 | 67 | 70 dmg, knocks down, breaks defense; then D>J: 252 |
-| A in a jump | jump attack: jump_attack (80) | 21 | 4 | 30 | 35 dmg, 2 hit boxes, knocks down |
+| A in a jump | jump attack: jump_attack (80) | 21 | 4 | 33 | 35 dmg, 2 hit boxes, knocks down |
 | A while running | run attack: run_attack (85) | 13 | 5 | 57 | 35 dmg; then A: 89 |
 | A in a dash | dash attack: dash_attack (90) | 18 | 4 | 59 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D^A: 70, DvA: 260, D>J: 250 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick; then DvA: 260, D>J: 252 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick; then DvA: 260, D>J: 252 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -325,8 +325,8 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, run, defend | ball1 (240) | 40 mp | 15 | - | - | spawns davis_ball (dvx 4, dmg 30); then A: 247 |
-| DvA | stand, walk, run, defend | many_punch (270) | 75 mp | 29 | 3 | 45 | 25 dmg, 4 hit boxes; hits balls; then D^A: 300, J: 290 |
-| DvA | catching | many_punch (274) | 75 mp | 21 | 1 | 58 | 25 dmg, 2 hit boxes; hits balls; then D^A: 300, J: 290 |
+| DvA | stand, walk, run, defend | many_punch (270) | 75 mp | 29 | 3 | 60 | 25 dmg, 4 hit boxes; hits balls; then D^A: 300, J: 290 |
+| DvA | catching | many_punch (274) | 75 mp | 21 | 5 | 60 | 25 dmg, 2 hit boxes; hits balls; then D^A: 300, J: 290 |
 | D^J | stand, walk, run, rowing, defend | jumphit (290) | 25 mp | 21 | - | - | then A: 293 |
 | D^A | stand, walk, run, rowing, defend, catching, many_punch | singlong (300) | 225 mp | 21 | 3 | 54 | 85 dmg, 4 hit boxes, knocks down, breaks defense |
 
@@ -334,14 +334,14 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 41 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 40 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 8 | 3 | 41 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 8 | 3 | 40 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 21 | 6 | 47 | 40 dmg, 2 hit boxes, knocks down, breaks defense; then J: 290 |
 | A in a jump | jump attack: jump_attack (80) | 16 | 7 | 44 | 60 dmg, 2 hit boxes, knocks down |
-| A while running | run attack: run_attack (85) | 19 | 6 | 45 | 55 dmg, 2 hit boxes, knocks down, breaks defense; then A: 89 |
+| A while running | run attack: run_attack (85) | 19 | 6 | 51 | 55 dmg, 2 hit boxes, knocks down, breaks defense; then A: 89 |
 | A in a dash | dash attack: dash_attack (90) | 20 | 7 | 44 | 80 dmg, 2 hit boxes, knocks down, breaks defense; loops |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 240, D^A: 300, DvA: 270, D^J: 290 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick; then D^A: 300, D^J: 290 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick; then D^A: 300, D^J: 290 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D^A: 300, DvA: 274 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -364,14 +364,14 @@ Walk 4, run 8, jump 8 x -16.299999, dash 15 x -11.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 40 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 39 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 40 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 39 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 13 | 7 | 49 | 50 dmg, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 10 | 4 | 34 | 35 dmg |
 | A while running | run attack: run_attack (85) | 12 | 6 | 61 | 50 dmg, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 25 | 5 | 49 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 7 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -394,14 +394,14 @@ Walk 4.2, run 8.4, jump 8 x -16.299999, dash 15 x -11.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 15 | 1 | - | pick weapon; spawns henry_arrow1 (dvx 16, dmg 40) |
-| A | punch 2: punch (65) | 15 | 1 | - | pick weapon; spawns henry_arrow1 (dvx 16, dmg 40) |
-| A on a dizzy enemy | super punch: super_punch (70) | 12 | 5 | 59 | 35 dmg, 2 hit boxes, knocks down |
+| A | punch: punch (60) | 15 | - | - | pick weapon; spawns henry_arrow1 (dvx 16, dmg 40) |
+| A | punch 2: punch (65) | 15 | - | - | pick weapon; spawns henry_arrow1 (dvx 16, dmg 40) |
+| A on a dizzy enemy | super punch: super_punch (70) | 12 | 5 | 72 | 35 dmg, 2 hit boxes, knocks down |
 | A in a jump | jump attack: jump_attack (80) | 21 | - | - | spawns henry_arrow1 (dvx 12, dmg 40) |
-| A while running | run attack: run_attack (85) | 12 | 3 | 58 | 35 dmg, 2 hit boxes, knocks down |
+| A while running | run attack: run_attack (85) | 12 | 3 | 70 | 35 dmg, 2 hit boxes, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 6 | 3 | 62 | 45 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -419,20 +419,20 @@ Walk 4.4, run 9, jump 7 x -13.299999, dash 13 x -10.
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
 | D>A | stand, walk, defend | run_attack (85) | 0 mp | 15 | 5 | 65 | 45 dmg, 2 hit boxes, knocks down, breaks defense; then A: 71 |
-| D>J | stand, walk, defend | run (240) | 50 mp | 17 | 6 | 21 | 80 dmg, 4 hit boxes, knocks down, breaks defense; holds for 27 mp a frame; then J: 245, D: 245; loops |
+| D>J | stand, walk, defend | run (240) | 50 mp | 17 | 6 | 24 | 80 dmg, 4 hit boxes, knocks down, breaks defense; holds for 27 mp a frame; then J: 245, D: 245; loops |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 47 | 35 dmg; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 47 | 35 dmg; pick weapon |
+| A | punch: punch (60) | 8 | 5 | 47 | 35 dmg; pick weapon |
+| A | punch 2: punch (65) | 8 | 5 | 47 | 35 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 17 | 7 | 65 | 45 dmg, 2 hit boxes, knocks down, breaks defense; then A: 71 |
-| A in a jump | jump attack: jump_attack (80) | 21 | 3 | 34 | 50 dmg, 2 hit boxes, knocks down, breaks defense |
+| A in a jump | jump attack: jump_attack (80) | 21 | 3 | 49 | 50 dmg, 2 hit boxes, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 15 | 5 | 65 | 45 dmg, 2 hit boxes, knocks down, breaks defense; then A: 71 |
 | A in a dash | dash attack: dash_attack (90) | 23 | 3 | 56 | 80 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 85, D>J: 240 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 7 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -457,14 +457,14 @@ Walk 5, run 9.9, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 45 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 41 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 45 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 41 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 17 | 9 | 38 | 65 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 15 | 6 | 29 | 50 dmg, knocks down |
 | A while running | run attack: run_attack (85) | 17 | 9 | 38 | 65 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a dash | dash attack: jump_attack (90) | 15 | 6 | 29 | 60 dmg, knocks down |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 240, D^A: 300 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick; then D^A: 300 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick; then D^A: 300 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D^A: 300 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -490,14 +490,14 @@ Walk 4.8, run 11.1, jump 9.8 x -16.1, dash 17.7 x -9.8.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 49 | 15 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 47 | 15 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 49 | 15 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 47 | 15 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 17 | 7 | 44 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
-| A in a jump | jump attack: jump_attack (80) | 14 | 5 | 34 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
+| A in a jump | jump attack: jump_attack (80) | 14 | 5 | 38 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 17 | 7 | 44 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
-| A in a dash | dash attack: dash_attack (90) | 14 | 5 | 34 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
+| A in a dash | dash attack: dash_attack (90) | 14 | 5 | 38 | 45 dmg, 2 hit boxes, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 235, D>J: 270, D^J: 260, DvJ: 250 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -521,14 +521,14 @@ Walk 4, run 8, jump 8 x -16.299999, dash 15 x -11.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 45 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 45 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 45 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 45 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 17 | 8 | 42 | 70 dmg, 2 hit boxes, knocks down, breaks defense; defending |
 | A in a jump | jump attack: jump_attack (80) | 10 | 4 | 40 | 35 dmg |
 | A while running | run attack: run_attack (85) | 17 | 8 | 42 | 70 dmg, 2 hit boxes, knocks down, breaks defense; defending |
 | A in a dash | dash attack: dash_attack (90) | 25 | 5 | 52 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 240 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 7 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -552,14 +552,14 @@ Walk 5.2, run 11.9, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 8 | 1 | 37 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 8 | 1 | 35 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 8 | 4 | 37 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 8 | 4 | 35 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 12 | 7 | 72 | 50 dmg, knocks down |
-| A in a jump | jump attack: jump_attack (80) | 17 | 1 | 38 | 45 dmg, 2 hit boxes, knocks down, breaks defense; pick weapon |
+| A in a jump | jump attack: jump_attack (80) | 17 | 5 | 38 | 45 dmg, 2 hit boxes, knocks down, breaks defense; pick weapon |
 | A while running | run attack: run_attack (85) | 12 | 7 | 72 | 50 dmg, knocks down |
 | A in a dash | dash attack: dash_attack (90) | 16 | 4 | 52 | 70 dmg, knocks down, breaks defense |
-| D | defend: defend (110) | 13 | 1 | - | hits balls; defending; then D^A: 260, D^J: 240 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D | defend: defend (110) | 13 | - | - | hits balls; defending; then D^A: 260, D^J: 240 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 9 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 11 | - | - |  |
@@ -582,14 +582,14 @@ Walk 6, run 8.5, jump 10 x -13.5, dash 16 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 17 | 1 | 73 | 45 dmg, sharp; pick weapon; then A: 246 |
-| A | punch 2: punch (65) | 17 | 1 | 73 | 45 dmg, sharp; pick weapon; then A: 246 |
+| A | punch: punch (60) | 17 | 10 | 73 | 45 dmg, sharp; pick weapon; then A: 246 |
+| A | punch 2: punch (65) | 17 | 10 | 73 | 45 dmg, sharp; pick weapon; then A: 246 |
 | A on a dizzy enemy | super punch: super (70) | 20 | 11 | 72 | 60 dmg, knocks down, breaks defense, sharp |
 | A in a jump | jump attack: jump_attack (80) | 13 | 6 | 64 | 60 dmg, knocks down, breaks defense, sharp |
 | A while running | run attack: run_attack (85) | 20 | 11 | 72 | 60 dmg, knocks down, breaks defense, sharp |
 | A in a dash | dash attack: dash_attack (90) | 18 | 5 | 47 | 60 dmg, 2 hit boxes, knocks down, breaks defense |
-| D | defend: defend (110) | 13 | 1 | - | hits balls; defending; then D>A: 240 |
-| D in the air after a hit | rowing: rowing (102) | 13 | 1 | - | hits balls; defending; then D>A: 240 |
+| D | defend: defend (110) | 13 | - | - | hits balls; defending; then D>A: 240 |
+| D in the air after a hit | rowing: rowing (102) | 13 | - | - | hits balls; defending; then D>A: 240 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 8 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 9 | - | - |  |
@@ -615,14 +615,14 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 42 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 47 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 42 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 47 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 13 | 5 | 40 | 70 dmg, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 10 | 4 | 44 | 50 dmg, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 13 | 5 | 40 | 70 dmg, knocks down, breaks defense |
 | A in a dash | dash attack: dash_attack (90) | 13 | 4 | 39 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 240, D>J: 270, D^J: 260 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick; then D>J: 270 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick; then D>J: 270 |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D^A: 300, DvA: 274 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 7 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 7 | - | - |  |
@@ -639,7 +639,7 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
-| DvA | stand, walk, run, defend | punch (240) | 75 mp | 20 | 10 | 35 | 55 dmg, 4 hit boxes, knocks down; then A: 260, DvA: 260 |
+| DvA | stand, walk, run, defend | punch (240) | 75 mp | 20 | 10 | 44 | 55 dmg, 4 hit boxes, knocks down; then A: 260, DvA: 260 |
 | D>A | stand, walk, run, defend | ball (250) | 75 mp | 16 | - | - | spawns justin_ball (dvx 15, dmg 40) |
 | DvA | punch | punch2 (260) | 75 mp | 16 | 4 | 44 | 30 dmg, 2 hit boxes, knocks down |
 
@@ -647,14 +647,14 @@ Walk 5, run 10, jump 10 x -16.299999, dash 18 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 7 | 1 | 37 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 7 | 1 | 34 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 7 | 4 | 37 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 7 | 4 | 34 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 17 | 7 | 45 | 70 dmg, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 15 | 6 | 42 | 50 dmg, knocks down, breaks defense |
 | A while running | run attack: run_attack (85) | 17 | 7 | 45 | 70 dmg, knocks down, breaks defense |
 | A in a dash | dash attack: dash_attack (90) | 17 | 6 | 45 | 70 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 250, DvA: 240 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching; then D^A: 300, DvA: 274 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 7 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 7 | - | - |  |
@@ -671,21 +671,21 @@ Walk 6.2, run 14, jump 14 x -18.699999, dash 20 x -13.8.
 
 | Input | From | Move (frame) | Cost | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|---|---|
-| DvA | stand, walk, defend | up_spear (240) | 0 mp | 42 | 1 | 87 | 70 dmg, 10 hit boxes, knocks down, breaks defense, sharp; hits balls; catching |
+| DvA | stand, walk, defend | up_spear (240) | 0 mp | 42 | 5 | 87 | 70 dmg, 10 hit boxes, knocks down, breaks defense, sharp; hits balls; catching |
 | D>A | stand, walk, defend | air_push (260) | 100 mp | 17 | - | - | spawns henry_wind (dvx -5, dmg 0), henry_wind (dvx 55, dmg 80); catching |
 
 <details><summary>Basic moves</summary>
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 6 | 1 | 84 | 35 dmg, sharp; pick weapon |
-| A | punch 2: punch (65) | 6 | 1 | 84 | 35 dmg, sharp; pick weapon |
+| A | punch: punch (60) | 6 | 3 | 84 | 35 dmg, sharp; pick weapon |
+| A | punch 2: punch (65) | 6 | 3 | 84 | 35 dmg, sharp; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 15 | 4 | 87 | 70 dmg, 3 hit boxes, knocks down, breaks defense, sharp; catching |
 | A in a jump | jump attack: up_spear (80) | 16 | 1 | 94 | 70 dmg, 3 hit boxes, knocks down, breaks defense, sharp; catching |
 | A while running | run attack: run_attack (85) | 17 | 6 | 52 | 80 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a dash | dash attack: dash_attack (90) | 99 | 6 | 66 | 85 dmg, knocks down, breaks defense; dash attack state |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 260, DvA: 240 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 3 | - | - | catching; then J: 260 |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 6 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 9 | - | - |  |
@@ -710,14 +710,14 @@ Walk 6, run 13, jump 13 x -17, dash 22 x -10.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 5 | 1 | 37 | 20 dmg; pick weapon |
-| A | punch 2: punch (65) | 5 | 1 | 39 | 20 dmg; pick weapon |
+| A | punch: punch (60) | 5 | 3 | 37 | 20 dmg; pick weapon |
+| A | punch 2: punch (65) | 5 | 3 | 39 | 20 dmg; pick weapon |
 | A on a dizzy enemy | super punch: super_punch (70) | 15 | 7 | 43 | 80 dmg, knocks down, breaks defense |
-| A in a jump | jump attack: jump_attack (80) | 15 | 5 | 42 | 50 dmg, 2 hit boxes, knocks down |
+| A in a jump | jump attack: jump_attack (80) | 15 | 5 | 44 | 50 dmg, 2 hit boxes, knocks down |
 | A while running | run attack: run_attack (85) | 15 | 7 | 43 | 80 dmg, knocks down, breaks defense |
 | A in a dash | dash attack: dash_attack (90) | 21 | 5 | 47 | 90 dmg, 2 hit boxes, knocks down, breaks defense |
-| D | defend: defend (110) | 13 | 1 | - | hits balls; defending; then D^A: 240, D>J: 265, D^J: 249 |
-| D in the air after a hit | rowing: rowing (102) | 15 | 1 | - | roll pick |
+| D | defend: defend (110) | 13 | - | - | hits balls; defending; then D^A: 240, D>J: 265, D^J: 249 |
+| D in the air after a hit | rowing: rowing (102) | 15 | - | - | roll pick |
 | walk into a dizzy enemy | catch: catching (120) | 4 | - | - | catching |
 | A with a light weapon | weapon attack: normal_weapon_atck (20) | 6 | - | - |  |
 | A in a jump with a light weapon | jump weapon attack: jump_weapon_atck (30) | 9 | - | - |  |
@@ -745,11 +745,11 @@ Walk 5.8, run 12, jump 11 x -17.299999, dash 19 x -11.
 
 | Input | Move (frame) | Ticks | hit@ | Reach | Effect |
 |---|---|---|---|---|---|
-| A | punch: punch (60) | 5 | 1 | 47 | 35 dmg; pick weapon |
-| A | punch 2: punch (65) | 5 | 1 | 53 | 35 dmg; pick weapon |
-| A on a dizzy enemy | super punch: super (70) | 18 | 9 | 53 | 60 dmg, 2 hit boxes, knocks down, breaks defense |
+| A | punch: punch (60) | 5 | 4 | 47 | 35 dmg; pick weapon |
+| A | punch 2: punch (65) | 5 | 4 | 53 | 35 dmg; pick weapon |
+| A on a dizzy enemy | super punch: super (70) | 18 | 9 | 55 | 60 dmg, 2 hit boxes, knocks down, breaks defense |
 | A in a jump | jump attack: jump_attack (80) | 25 | 5 | 57 | 60 dmg, knocks down, breaks defense |
-| A while running | run attack: run_attack (85) | 19 | 6 | 79 | 90 dmg, 6 hit boxes, knocks down, breaks defense |
+| A while running | run attack: run_attack (85) | 19 | 6 | 82 | 90 dmg, 6 hit boxes, knocks down, breaks defense |
 | A in a dash | dash attack: dash_attack (90) | 25 | 5 | 57 | 60 dmg, knocks down, breaks defense |
 | D | defend: defend (110) | 13 | - | - | defending; then D>A: 260, D^A: 235, D>J: 280, D^J: 310, DJA: 106 |
 | D in the air after a hit | rowing: rowing (102) | 22 | - | - | spawns object 52; then J: 106, D>A: 260 |

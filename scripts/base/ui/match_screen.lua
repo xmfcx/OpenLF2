@@ -23,6 +23,7 @@ local netsim = require("base/game/netsim")
 local online = require("base/game/online")
 local brains = require("base/ai/brains")
 local ai_trace = require("base/ai/trace")
+local move_book = require("base/ai/move_book")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
@@ -58,6 +59,13 @@ function screen.create(options, connection)
     end
     local state = {match = match.create(options), effects = fight_effects.create()}
     ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)
+    -- A brain other than `classic` reads the move books: build them now, not on the first tick of the fight.
+    if state.match.ai_brain then
+        for index = 0, constants.item_slots - 1 do
+            local value = state.match.items[index]
+            if value and value.record.kind == record_kinds.character then move_book.get(value.record) end
+        end
+    end
     state.match.capture = make_capture()
     if connection then
         online.begin_match(connection, state.match)

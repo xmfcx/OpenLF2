@@ -8,6 +8,8 @@ encoded originals or decoded text. The output is a Markdown table for each fight
 --json. The AI plan (docs/ai-plan.md) uses the same facts: the game builds them at run time from the frames.
 
     tools/lf2_moves.py ~/games/LF2 > docs/ai-moves.md
+    openlf2 --headless --installer LF2_v2.0a.exe --ai-book --input-trace ",," > book.log
+    tools/lf2_moves.py ~/games/LF2 --check book.log
 """
 import argparse
 import json
@@ -105,20 +107,31 @@ def load(root, path):
     return None
 
 
+# A move ends when its chain reaches a frame of these states (standing, walking, running, jumping): the same rule as
+# scripts/base/ai/move_book.lua, so that --check compares the same chains.
+FREE_STATES = {0, 1, 2, 4}
+DAMAGE_KINDS = {0, 4, 5, 6, 10, 11, 15, 16}
+
+
 def chain(frames, start, limit=60, character=True):
-    """Follows `next` from a start frame until the move ends (999, standing, a jump frame or a loop)."""
+    """Follows `next` from a start frame until the move ends (999, 1000, a free frame, a hold or a loop)."""
     seen, order, current = set(), [], start
-    while current not in seen and len(order) < limit:
+    while len(order) < limit:
+        if current in seen:
+            return order, True
         frame = frames.get(current)
         if not frame:
             break
         seen.add(current)
         order.append(frame)
         following = abs(frame.get("next", 0))
-        if following in (0, 999, 1000) or character and following < 20 and following != start:
+        if following in (0, 999, 1000):
+            return order, False
+        after = frames.get(following)
+        if character and after and after.get("state", 0) in FREE_STATES and following != start:
             return order, False
         current = following
-    return order, current in seen
+    return order, False
 
 
 def summarize_move(frames, objects, start):
@@ -135,7 +148,7 @@ def summarize_move(frames, objects, start):
         if state in STATES and STATES[state] not in states:
             states.append(STATES[state])
         for itr in frame["itr"]:
-            if first_hit is None:
+            if first_hit is None and itr.get("kind", 0) in DAMAGE_KINDS and itr.get("effect", 0) != OBJECTS_ONLY:
                 first_hit = ticks + 1
             reach = itr.get("x", 0) + itr.get("w", 0) - frame.get("centerx", 0)
             hits.append((itr.get("kind", 0), itr.get("injury", 0), itr.get("fall", 0), itr.get("bdefend", 0),
@@ -147,7 +160,7 @@ def summarize_move(frames, objects, start):
             if target and target not in (0, 999) and target not in [f["id"] for f in order[:1]]:
                 follow.setdefault(label, target)
         ticks += frame.get("wait", 0) + 1
-    damage = [h for h in hits if h[0] in (0, 4, 5, 6, 10, 11, 15, 16) and h[4] != OBJECTS_ONLY]
+    damage = [h for h in hits if h[0] in DAMAGE_KINDS and h[4] != OBJECTS_ONLY]
     objects_only = any(h[4] == OBJECTS_ONLY for h in hits)
     best = max(damage, key=lambda h: h[1]) if damage else None
     heal = [h[1] for h in hits if h[0] == 8]
@@ -174,7 +187,7 @@ def summarize_move(frames, objects, start):
     return {"start": start, "name": order[0]["name"], "mp": cost % 1000 if cost >= 1000 else cost, "hp": hp_cost,
             "hold_mp": -hold_cost, "ticks": ticks, "loops": loops, "first_hit": first_hit,
             "damage": best[1] if best else 0, "fall": best[2] if best else 0, "bdefend": best[3] if best else 0,
-            "effect": EFFECTS.get(best[4], "") if best else "", "reach": best[5] if best else 0,
+            "effect": EFFECTS.get(best[4], "") if best else "", "reach": max([h[5] for h in damage] + [0]),
             "hits": len(damage), "kinds": sorted({ITR_KINDS.get(h[0], str(h[0])) for h in hits} - {"hit"}),
             "heal": max(heal) if heal else 0, "objects_only": objects_only, "spawns": counted, "follow": follow, "states": states,
             "frames": [f["id"] for f in order]}
@@ -290,10 +303,50 @@ def markdown(fighters):
     return "\n".join(lines)
 
 
+def check(fighters, log_path):
+    """Compares the move book lines of the game (openlf2 --ai-book, "book id=... start=...") with this tool's moves."""
+    game = {}
+    for line in open(log_path, encoding="latin-1"):
+        match = re.search(r"book id=(\d+) kind=(\w+) start=(\d+) .*", line)
+        if not match:
+            continue
+        fields = dict(re.findall(r"(\w+)=(\S+)", match.group(0)))
+        game[(int(fields["id"]), int(fields["start"]))] = fields
+    problems, compared = [], 0
+    for fighter in fighters:
+        ours = {}
+        for move in fighter["moves"]:
+            entry = ours.setdefault(move["start"], {"move": move, "inputs": set(), "kind": "special"})
+            entry["inputs"].add(move["input"])
+        for move in fighter["basics"]:
+            ours.setdefault(move["start"], {"move": move, "inputs": {move["input"].replace(" ", "_")}, "kind": "basic"})
+        for start, entry in sorted(ours.items()):
+            move, key = entry["move"], (fighter["id"], start)
+            theirs = game.pop(key, None)
+            if theirs is None:
+                problems.append(f"{fighter['name']} {start}: missing in the game's book")
+                continue
+            compared += 1
+            expected = {"kind": entry["kind"], "mp": move["mp"], "hp": move["hp"], "ticks": move["ticks"],
+                        "hit": move["first_hit"] or -1, "dmg": move["damage"], "reach": move["reach"]}
+            for name, value in expected.items():
+                if str(value) != theirs.get(name):
+                    problems.append(f"{fighter['name']} {start} {move['name']}: {name} is {theirs.get(name)} in the game, {value} here")
+            if entry["kind"] == "special" and set(theirs["inputs"].split(",")) != entry["inputs"]:
+                problems.append(f"{fighter['name']} {start}: inputs {theirs['inputs']} in the game, {sorted(entry['inputs'])} here")
+    for key in sorted(game):
+        problems.append(f"fighter {key[0]} {key[1]}: only in the game's book")
+    for problem in problems:
+        print(problem)
+    print(f"{compared} moves compared, {len(problems)} differences")
+    return 1 if problems else 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("root", help="folder with data/data.txt and the .dat files")
     parser.add_argument("--json", action="store_true", help="print JSON instead of Markdown")
+    parser.add_argument("--check", metavar="LOG", help="compare with the book lines of `openlf2 --ai-book` in LOG")
     arguments = parser.parse_args()
     entries = catalog(arguments.root)
     objects = {}
@@ -313,6 +366,8 @@ def main():
             continue
         moves, basics = fighter_moves(info, objects)
         fighters.append({"id": object_id, "name": info["name"], "movement": info["movement"], "moves": moves, "basics": basics})
+    if arguments.check:
+        sys.exit(check(fighters, arguments.check))
     if arguments.json:
         json.dump(fighters, sys.stdout, indent=1)
     else:
