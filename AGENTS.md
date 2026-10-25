@@ -58,6 +58,8 @@ Do not use port 12345 for tests when a real game hosts on this machine.
 
 ## Architecture
 
+docs/architecture.md shows the parts, one frame, the network game and the game versions in diagrams.
+
 - src/app/application.cpp parses the arguments, opens the window, loads the installer and runs the frame loop. src/app/versions.cpp installs and switches game versions.
 - src/adapters/ holds the libraries behind small interfaces: SDL3 (window, input, sound, and Dear ImGui for the network menus), LuaJIT (script runtime), curl (downloads), FFmpeg (music), the TCP transport and ENet (UDP messages).
 - scripts/runtime/bootstrap.lua is trusted. It loads the game modules into a sandbox (no files, no OS and no native code, only the `engine` table) and passes frame commands to the engine.

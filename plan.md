@@ -6,6 +6,7 @@ This plan collects the requested features for network play with friends and the 
 - docs/netcode.md: the fight over UDP with prediction and rollback, bad connections, rooms, spectators and chat, with measurements.
 - docs/pregame-ui-redesign.md: one match setup screen in Dear ImGui, local music, no locks, the game speed as a setting, and one settings menu. docs/pregame-ui-current.md describes the menus of today and their problems.
 - docs/network.md: the old two-computer network code.
+- docs/architecture.md: the parts of the game, one frame, the network game and the game versions, with diagrams.
 
 ## Where the game is now
 
