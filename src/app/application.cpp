@@ -131,6 +131,10 @@ struct Configuration {
     bool preview_backgrounds = false;
     bool rollback_check = false;
     std::string net_sim; // --net-sim, e.g. "delay=80,jitter=20,loss=5"
+    // --ai-log [all|INDICES]: the AI log of the shown fight as log lines ("all", or item indices such as "11,12").
+    std::string ai_log;
+    // --ai-brain NAME: the brain of the computer fighters of local fights (docs/ai-plan.md), e.g. "idle".
+    std::string ai_brain;
     bool preview_ending = false;
     // Lets a held mouse button stand in for touch when testing the on-screen gamepad.
     bool mouse_touch = false;
@@ -467,6 +471,24 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
             config.net_sim = arguments[index];
             if (config.net_sim.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789=,.") != std::string::npos) {
                 return fail(ErrorCode::format, "--net-sim takes name=number pairs, such as delay=80,jitter=20,loss=5");
+            }
+        }
+        else if (argument == "--ai-log") {
+            config.ai_log = "all";
+            if (index + 1 < arguments.size()) {
+                const auto& value = arguments[index + 1];
+                if (value == "all" || (!value.empty() && value.find_first_not_of("0123456789,") == std::string::npos)) {
+                    config.ai_log = value;
+                    ++index;
+                }
+            }
+        }
+        else if (argument == "--ai-brain") {
+            if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a brain name");
+            config.ai_brain = arguments[index];
+            if (config.ai_brain.empty() || config.ai_brain.size() > 32
+                || config.ai_brain.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string::npos) {
+                return fail(ErrorCode::format, "--ai-brain takes a name of lower-case letters and underscores, such as idle");
             }
         }
         else if (argument == "--mouse-touch") {
@@ -1072,6 +1094,8 @@ Result<void> run(const Configuration& config) {
         (config.classic_menus ? ", classic_menus=true" : "") +
         (config.game_speed_tenths < 10 ? ", game_speed_tenths=" + std::to_string(config.game_speed_tenths) : std::string{}) +
         (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
+        (config.ai_log.empty() ? std::string{} : ", ai_log=\"" + config.ai_log + "\"") +
+        (config.ai_brain.empty() ? std::string{} : ", ai_brain=\"" + config.ai_brain + "\"") +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
         (config.connect_address.empty() ? std::string{} : ", connect_address=\"" + config.connect_address +
             "\", connect_port=" + std::to_string(config.network_port)) + "}\n" + sources;
@@ -1611,6 +1635,9 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "        with two rollback clients and a server in this program; player 1 is one client, the others the other.\n"
                          "--rollback-check (developer): fights save their state, run ahead, go back and run again, and the\n"
                          "        headless description reports whether the state came out the same.\n"
+                         "--ai-log [all|INDICES] (developer): the AI of the shown fight writes its decisions as log lines\n"
+                         "        (\"ai t=TICK i=ITEM ev=...\"), for all fighters or for item indices such as 11,12.\n"
+                         "--ai-brain NAME (developer): the brain of the computer fighters of local fights, e.g. idle (docs/ai-plan.md).\n"
                          "--default-controller (off by default; always on for consoles): until controls are saved, player 1 uses the\n"
                          "        first controller instead of the keyboard.\n"
                          "JIT is enabled by default on desktop and Android builds; --no-jit uses the interpreter.\n"

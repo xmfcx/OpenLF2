@@ -21,6 +21,8 @@ local rollback_client = require("base/game/rollback_client")
 local rollback = require("base/game/rollback")
 local netsim = require("base/game/netsim")
 local online = require("base/game/online")
+local brains = require("base/ai/brains")
+local ai_trace = require("base/ai/trace")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
@@ -47,7 +49,15 @@ function screen.create(options, connection)
         options.record = nil
         start_random = {engine.random_position()}
     end
+    -- --ai-brain (developer, base/ai/brains): the brain of the computer fighters of a local fight. A network session
+    -- takes the match options of the server only, the demo and the replays need the original's AI, and a recording
+    -- cannot hold another brain (its records only have the players' keys).
+    if brains.default and brains.default ~= "classic" and not connection and not options.demo and not options.replay then
+        options.ai_brain = brains.default
+        options.record = nil
+    end
     local state = {match = match.create(options), effects = fight_effects.create()}
+    ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)
     state.match.capture = make_capture()
     if connection then
         online.begin_match(connection, state.match)
@@ -555,6 +565,8 @@ function screen.describe(state)
             local held = value.weapon ~= constants.weapon_holder_codes.none and string.format(" weapon=%d link=%d", value.weapon,
                 value.weapon > 0 and value.held_item or value.holder) or ""
             if value.ai_control then held = held .. " computer=1" end
+            local brain = brains.describe(value)
+            if brain then held = held .. " ai=" .. brain end
             parts[#parts + 1] = string.format("item%d{id=%d frame=%d x=%.3f y=%.3f z=%.3f vx=%.3f vy=%.3f vz=%.3f hp=%d mp=%d facing=%d%s}",
                 index, value.record.id, value.frame, value.x, value.y, value.z, value.vx, value.vy, value.vz,
                 value.hp, value.mp, value.facing, held)

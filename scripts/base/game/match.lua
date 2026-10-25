@@ -30,6 +30,8 @@ local animation = require("base/game/animation")
 local camera = require("base/game/camera")
 local combat = require("base/game/combat")
 local ai = require("base/game/ai")
+local brains = require("base/ai/brains")
+local ai_trace = require("base/ai/trace")
 local objects = require("base/game/objects")
 local grab = require("base/game/grab")
 local weapons = require("base/game/weapons")
@@ -63,7 +65,8 @@ local function stage_description(catalog_backgrounds, row)
 end
 
 -- options: mode, difficulty, background row (100 = random), fighters (catalog list),
--- backgrounds (catalog list), slots[0..7] = {kind = "human"|"computer"|nil, fighter, team}.
+-- backgrounds (catalog list), slots[0..7] = {kind = "human"|"computer"|nil, fighter, team}, ai_brain (the brain of the
+-- computer fighters, base/ai/brains; nil for the original's).
 function match.create(options)
     -- free_transform: the rule of the original's `lf2.net` word, Firen and Freeze merge and Louis turns into Louis EX
     -- at any hp (OpenLF2 keeps every fighter selectable, and this rule is a match option, docs/pregame-ui-redesign.md
@@ -71,7 +74,7 @@ function match.create(options)
     local state = {mode = options.mode, difficulty = options.difficulty, running = true, free_transform = options.free_transform == true,
         items = {}, counter_12 = 0, counter_3 = 0, shake = 0,
         camera = 0, camera_step = 0, frame_number = 0, input_phase = 0,
-        random_game = options.demo ~= nil, ai_skill = 0,
+        random_game = options.demo ~= nil, ai_skill = 0, ai_brain = options.ai_brain,
         round_counter = 0, winner = -1, elapsed = 0, finished = false,
         paused = false, pause_request = false, pause_next = false, cheat_lock = 0,
         heal_all = false, weapon_command = 0, function_counts = {[6] = 0, [7] = 0, [8] = 0, [9] = 0}}
@@ -391,12 +394,13 @@ local function read_input(state, held)
         end
     end
     local scan
+    if ai_trace.on then ai_trace.begin_tick(state) end
     if computer_humans then
         for index = 0, 7 do
             local value = state.items[index]
             if value and value.human and value.ai_control then
                 if not scan and ai.prepare then scan = ai.prepare(state) end
-                ai.control(state, index, state.mode, scan)
+                brains.control(state, index, scan)
             end
         end
     end
@@ -405,7 +409,7 @@ local function read_input(state, held)
         if value then
             if value.record.kind == record_kinds.character then
                 if not scan and ai.prepare then scan = ai.prepare(state) end
-                ai.control(state, index, state.mode, scan)
+                brains.control(state, index, scan)
             elseif value.record.frame(value.frame).hits.Fa > 0 then
                 objects.update(state, index)
                 scan = nil

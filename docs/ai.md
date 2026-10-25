@@ -25,13 +25,14 @@ flowchart TB
     end
     read_input -->|"human slots 0-7"| humans["keys from the input<br/>(only on every second tick, input_phase 0)"]
     read_input -->|"human slot with ai_control<br/>(letter A, plan.md AI control)"| aicall
-    read_input -->|"computer slots 10-399<br/>(characters)"| aicall["ai.control(state, index, mode, scan)"]
+    read_input -->|"computer slots 10-399<br/>(characters)"| aicall["brains.control(state, index, scan)<br/>(base/ai/brains: classic calls ai.control)"]
     read_input -->|"balls with hit_Fa > 0"| balls["objects.update<br/>(the steering of chasing balls)"]
     prepare["ai.prepare(state)<br/>one scan of the items, shared<br/>by all computers of the tick"] --> aicall
     aicall --> out["value.keys, value.previous_keys,<br/>value.sequences"]
     out --> control
 ```
 
+- `read_input` calls the brain registry (base/ai/brains). A fighter without a brain name uses the brain `classic`, which calls `ai.control` without a change (docs/ai-plan.md phase 1).
 - `ai.prepare` lists the used slots and the living characters once. `ai.control` adds the target lists to this scan the first time that it needs them (`target_lists`). A ball that steers (`objects.update`) clears the scan, so the next computer scans again.
 - Human keys change only on every second tick (`input_phase` 0). The AI writes keys on every tick.
 - A human fighter goes to the AI when the letter `A` is in its keys (`read_control` in match.lua). The letter `P`, or a fresh key press after 30 ticks, gives it back.
@@ -148,9 +149,11 @@ A headless run of 3000 fight ticks with 5 computer fighters took 3.9 s with the 
 | The input timeline panel (V) | the keys of this computer's first player over 5 seconds |
 | The damage chart and the fight HUD | the damage share and the hp of each fighter |
 | Recordings and replays | a fight again, with the same AI decisions |
+| `--ai-log [all\|INDICES]` | the AI log: a line for each new target and each special move, and a summary every 30 ticks (docs/ai-plan.md "Logs for agents") |
+| `--ai-brain NAME` | another brain for the computer fighters of local fights, for example `idle` |
 | tools/lf2_moves.py | the move list of every fighter from the data files (docs/ai-moves.md) |
 
-The game has no view of the AI's decisions, no AI log, and no way to run many AI fights and count the results. docs/ai-plan.md adds them.
+The game has no view of the AI's decisions yet, and no way to run many AI fights and count the results. docs/ai-plan.md adds them.
 
 ## How to change the current AI
 

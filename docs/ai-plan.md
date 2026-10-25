@@ -120,7 +120,7 @@ Each answer is a short loop over the ticks of one move timeline. The brain asks 
 The memory of a brain is the table `value.ai` on its fighter, in the match table. It holds numbers and short arrays only:
 
 - The brain and the persona (two short names), and the version of the persona.
-- The random stream of the AI (one integer, a Park-Miller generator, so that the numbers stay exact in a double). The AI does not use `engine.random`, so a change to the AI never changes the random items, the drops or the stage of a fight.
+- The random stream of the AI (one integer, a Park-Miller generator, so that the numbers stay exact in a double). The start of a brain takes one value from `engine.random` for the seed. After that, the brain does not use `engine.random`, so a change to its decisions never changes the random items, the drops or the stage of a fight.
 - The current intent, the tick when it started, the active node of the tactic, and the planned move or combo.
 - The key program of the actuator (the keys of the next ticks).
 - The tracked enemies (frame and tick of the last move start).
@@ -194,20 +194,26 @@ A first list of personas (the arena tunes the numbers later):
 
 ## Brain interface
 
-A brain is a module in scripts/base/ai/brains/. The registry (scripts/base/ai/init.lua) knows the brains by name, and a mod can add a brain with an extension (`--mod`).
+A brain is a module in scripts/base/ai/brains/. The registry (scripts/base/ai/brains.lua) knows the brains by name, and a mod can add a brain with `brains.register`.
 
 ```lua
-local brain = {name = "tactician", version = 1}
+local brain = {name = "idle", version = 1}
 
--- Called once when the fighter enters the fight. Returns the memory (numbers and short arrays only).
-function brain.start(fighter, persona, seed) end
+-- Called on the first tick of the fighter. Returns the memory (numbers, short strings and short arrays only). The
+-- registry stores it in `value.ai` and adds `memory.brain`. `seed` starts the AI random stream (base/ai/random).
+function brain.start(state, index, seed) end
 
--- Called on every tick. `view` is the snapshot through this brain's senses, `book` the move book of its record,
--- `act` the actuator, `trace` the debug side channel (a function that does nothing when the view and the log are off).
-function brain.tick(view, memory, book, persona, act, trace) end
+-- Called on every tick. It writes the keys of `state.items[index]`. `scan` is the scan of the tick (ai.prepare), and
+-- `log` is nil, or a function(state, index, text) that writes an event to the debug trace.
+function brain.tick(state, index, memory, scan, log) end
+
+-- Optional: a short text without spaces or braces for the fight description.
+function brain.describe(memory) end
 
 return brain
 ```
+
+Phase 1 built this interface. The later phases add the snapshot through the senses, the move book, the persona and the actuator as more arguments of `tick`.
 
 The existing AI becomes the brain `classic`, a thin wrapper around `ai.control` that does not change it. The match calls the brain of each computer fighter in `read_input`, where `ai.control` runs today. A slot without a brain name uses `classic`, so the existing modes, recordings and the demo do not change.
 
@@ -260,19 +266,20 @@ The view has these parts:
 
 The AI log gives an agent (and a developer) the same facts as text. An agent runs a headless fight, reads the log and finds the tick where a behavior went wrong.
 
-- Switch: `--ai-log` (all AI fighters) or `--ai-log SLOTS`. Each line is a `log ai ...` action of the scripts, so the engine prints it on its output (the path of the server's log lines).
+- Switch: `--ai-log` or `--ai-log all` (all AI fighters), or `--ai-log 11,12` (item indices). Each line is a `log ai ...` action of the scripts, so the engine prints it on its output (the path of the server's log lines). A headless run prints it as `frame N: action log ai ...`, so `grep -o 'ai t=.*'` gives the lines.
+- Fields: `t` is the tick of the fight (`frame_number`), `i` the item index, `ev` the kind of event.
 - Content: one line for each change, not one line for each tick. For example:
 
 ```text
-ai t=812 s=11 f=davis p=brawler ev=intent from=engage to=punish why=open:12,dist:64 score=730/510
-ai t=812 s=11 ev=move m=many_punch/270 hit=72 value=410 risk=90
-ai t=815 s=11 ev=reflex kind=defend threat=firen_ball/s=0 impact=4
-ai t=829 s=11 ev=result m=many_punch/270 dealt=45 blocked=0
-ai t=840 s=11 ev=sum intent=pressure target=0 hp=310 mp=125 dist=140
+ai t=812 i=11 f=davis p=brawler ev=intent from=engage to=punish why=open:12,dist:64 score=730/510
+ai t=812 i=11 ev=move m=many_punch/270 hit=72 value=410 risk=90
+ai t=815 i=11 ev=reflex kind=defend threat=firen_ball/s=0 impact=4
+ai t=829 i=11 ev=result m=many_punch/270 dealt=45 blocked=0
+ai t=840 i=11 ev=sum intent=pressure target=0 hp=310 mp=125 dist=140
 ```
 
-- Only final ticks: in a local fight every tick is final. In a network fight, the log writes a tick when the client confirms it, from the debug trace, so a rollback does not write a tick twice.
-- The fight description (`describe`) gets a short `ai{...}` part for each AI fighter: brain, persona, intent, target, planned move.
+- Only final ticks: in a local fight every tick is final. A tick that runs again after a rollback replaces its entries in the debug trace, and a fight that can roll back (a network fight, `--net-sim`, `--rollback-check`) writes a tick only 32 ticks later, when no rollback can reach it. So the last 32 ticks of such a fight are missing when the program stops before the fight ends.
+- The fight description (`describe`) gets a short `ai=BRAIN/DETAIL` part for each fighter with a brain other than `classic`, for example `ai=idle/target:12,wait:8`. Later brains add the persona, the intent, the target and the planned move. Classic fighters get nothing, so the old descriptions stay the same.
 - A summary at the end of a fight: `ai-result` lines with the winner, the damage, the moves used with their hit rates, and the AI time per tick.
 
 ## Arena
@@ -311,7 +318,7 @@ Across matches (later):
 
 The framework needs few changes to the engine. Each one is small:
 
-1. Flags for the scripts: `--ai-view`, `--ai-log`, `--fight SPEC`.
+1. Flags for the scripts: `--ai-log` and `--ai-brain` (built in phase 1), `--ai-view`, `--fight SPEC`.
 2. Menu elements for the inspector: a tree node, a table and a line plot (new UiKind values). Until they exist, the view uses text, bars and selectables.
 3. A timer for the arena and the view (`engine.clock`), which the rules forbid in decisions.
 4. Later: the bridge for an outside trainer (`--ai-bridge`).
@@ -325,9 +332,11 @@ Each phase ends with tests that pass. A phase changes the classic AI in no way, 
 ### Phase 1: the frame of the framework
 
 - The brain registry, the brain `classic` (a wrapper), the call in `read_input`, `value.ai` in the match table, the AI random stream.
-- The debug trace, `--ai-log`, the `ai{...}` part of the description.
+- The debug trace, `--ai-log`, the `ai=` part of the description, and `--ai-brain NAME` (the brain of the computer fighters of local fights, for tests).
 - A brain `idle` for tests (it only walks to the target).
 - Tests: the existing traces give the same description as before. A fight with the brain `idle` passes `--rollback-check` with `rollback.interval` 9 and `--net-sim`.
+- Status: built. The VS traces of AGENTS.md give the same description as before, also with `--rollback-check`. A fight of three `idle` computers passes 156 rollback checks with `rollback.interval` 9 (0 failures, no tick twice in the log) and `--net-sim delay=80,jitter=30,loss=5,seed=1` (hashes 47/0). tools/test-online.sh (87 checks) and tools/test-online-ui.sh (36 checks) pass.
+- What the classic brain logs with `--ai-log`: `ev=target` (a new target), `ev=move` (a sequence that the AI marked, with the frame of the move, or `frame=none from=FRAME` when the current frame has no move for the input), and `ev=sum` every 30 ticks (frame, hp, mp, target, distance, held keys).
 
 ### Phase 2: the move book
 

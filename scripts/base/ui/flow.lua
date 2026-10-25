@@ -28,6 +28,7 @@ local fight_menu = require("base/ui/fight_menu")
 local panels = require("base/ui/panels")
 local fight_hud = require("base/ui/fight_hud")
 local camera_view = require("base/ui/camera_view")
+local ai_trace = require("base/ai/trace")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -97,6 +98,12 @@ function flow.create(options)
     require("base/game/rollback").check = options.rollback_check == true
     if options.game_speed_tenths then speed.tenths = options.game_speed_tenths end
     require("base/game/netsim").params = require("base/game/netsim").parse(options.net_sim)
+    -- --ai-log and --ai-brain (developer, docs/ai-plan.md): the AI log and the brain of local computer fighters.
+    require("base/ai/trace").configure(options.ai_log)
+    if options.ai_brain then
+        assert(require("base/ai/brains").known(options.ai_brain), "unknown brain: " .. tostring(options.ai_brain))
+        require("base/ai/brains").default = options.ai_brain
+    end
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
     user_options.start()
@@ -1253,6 +1260,8 @@ update_frame = function(state, raw, context)
         state.probe_frames = (state.probe_frames or 0) + 1
         if state.probe_frames % 15 == 0 then context.action("log " .. flow.probe(state)) end
     end
+    -- The AI log, here for the same reason as the taunts.
+    ai_trace.flush(context, state.active ~= "match" or state.match.match.finished)
     recording.tick_status(state.active == "match" and state.match.match.paused)
     context.speed(speed.fast)
     -- Show FPS (OpenLF2 extension): measured FPS, nil for a trace unless given; drawn in flow.draw.
