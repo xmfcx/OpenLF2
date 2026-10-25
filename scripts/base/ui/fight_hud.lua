@@ -174,8 +174,10 @@ function hud.draw_cards(context, current, layout)
         -- Healing (milk, regeneration): the bar flashes every other tick of the 12-tick counter, as the original's.
         local healing = (math.floor(value.regen_timer / constants.healing.timer_base) == 1 or value.heal_timer > 0)
             and current.counter_12 % 2 == 0
-        imgui.bar(context, hp / full, healing and heal_color or hp_color, math.max(value.dark_hp, 0) / full, dark_color,
-            back_color, tostring(hp), 0, 9)
+        -- A fighter that is out shows no hp; its dark hp stays as a faint grey mark: about what a revival in the next
+        -- stage gives back.
+        imgui.bar(context, hp / full, healing and heal_color or hp_color, math.max(value.dark_hp, 0) / full,
+            value.hp > 0 and dark_color or 0x2e3348, back_color, tostring(hp), 0, 9)
         imgui.bar(context, math.max(value.mp, 0) / full, mp_color, 0, 0, back_color, tostring(math.max(value.mp, 0)), 0, 7)
         imgui.end_group(context)
         imgui.end_window(context)
