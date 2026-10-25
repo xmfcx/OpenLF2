@@ -60,7 +60,7 @@ Do not use port 12345 for tests when a real game hosts on this machine.
 
 ## Architecture
 
-docs/architecture.md shows the parts, one frame, the network game and the game versions in diagrams.
+docs/architecture.md shows the parts, one frame, the network game and the game versions in diagrams. docs/ai.md describes the current AI (game/ai.lua, a port of the original that must stay exact for the replays), and docs/ai-plan.md the new AI framework. docs/ai-moves.md lists the moves of every fighter: regenerate it with `tools/lf2_moves.py FOLDER`, where FOLDER holds data/data.txt and the .dat files (~/games/LF2 on this machine).
 
 - src/app/application.cpp parses the arguments, opens the window, loads the installer and runs the frame loop. src/app/versions.cpp installs and switches game versions.
 - src/adapters/ holds the libraries behind small interfaces: SDL3 (window, input, sound, and Dear ImGui for the menus), LuaJIT (script runtime), curl (downloads), FFmpeg (music), the TCP transport, ENet (UDP messages) and miniupnpc (UPnP).

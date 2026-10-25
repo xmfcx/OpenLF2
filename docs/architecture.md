@@ -8,6 +8,7 @@ OpenLF2 reimplements Little Fighter 2 v2.0a. A C++23 engine opens the window, re
 - docs/fight-screen.md: the new fight screen of each computer (cards, panels, the camera, the player colors).
 - docs/camera.md: the design of the fight camera.
 - docs/network.md: the old two-computer TCP game.
+- docs/ai.md: the current AI of the computer fighters. docs/ai-plan.md: the plan for the new AI framework. docs/ai-moves.md: the moves of every fighter.
 
 ## The parts
 

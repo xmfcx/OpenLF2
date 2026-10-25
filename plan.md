@@ -9,6 +9,7 @@ This plan collects the requested features for network play with friends and the 
 - docs/camera.md: the camera design, with the versions that are built and the steps that stay open.
 - docs/network.md: the old two-computer network code.
 - docs/architecture.md: the parts of the game, one frame, the network game and the game versions, with diagrams.
+- docs/ai.md: the current AI of the computer fighters, with diagrams. docs/ai-plan.md: the new AI framework (personas, the development view, the AI log, the arena) and its phases. docs/ai-moves.md: the moves of every fighter (tools/lf2_moves.py).
 
 ## Where the game is now
 
