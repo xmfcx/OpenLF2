@@ -5,7 +5,8 @@ OpenLF2 reimplements Little Fighter 2 v2.0a. A C++23 engine opens the window, re
 - docs/netcode.md: the network game (prediction and rollback, the server, drops, rooms, spectators).
 - docs/ui-network-architecture.md: how the menus and the network game share one model.
 - docs/pregame-ui-redesign.md: the match setup screen and the settings menu.
-- docs/camera.md: the fight camera of each computer (classic, wide and dynamic).
+- docs/fight-screen.md: the new fight screen of each computer (cards, panels, the camera, the player colors).
+- docs/camera.md: the design of the fight camera.
 - docs/network.md: the old two-computer TCP game.
 
 ## The parts
@@ -64,7 +65,7 @@ sequenceDiagram
 - Headless runs (`--headless --input-trace`) run the same scripts without a window. The tests use them.
 - A frame of a network game can wait for the server. The engine then runs the scripts again with the same input, so code before the network exchange must not count frames.
 - A client that catches up (a return, a resume or a spectator) runs up to 40 menu ticks in one frame through flow.update, and up to 32 fight ticks in the rollback client.
-- The dynamic camera (base/ui/camera_view.lua) draws the world into a scaled render area: the engine draws it 1:1 into a texture and scales it once into the window. The HUD and the overlays draw over it at the window's scale.
+- The camera of the new fight screen (base/ui/camera_view.lua) draws the world into a scaled render area: the engine draws it 1:1 into a texture and scales it once into the window. The HUD and the overlays draw over it at the window's scale.
 
 ## Determinism
 
@@ -132,5 +133,5 @@ flowchart LR
 | include/openlf2/ports | The interfaces of the adapters. |
 | scripts/runtime | bootstrap.lua, the trusted part of the scripts. |
 | scripts/base/game | The fight (match, objects, combat, AI), the rollback, the network (server, online client, authority, ticks), the setup model, music and options. |
-| scripts/base/ui | The flow and the screens: launch, title, setup screen, classic menus, settings menu, lobby, chat, overlays, the dynamic camera. |
+| scripts/base/ui | The flow and the screens: launch, title, setup screen, classic menus, settings menu, lobby, chat, the fight screen's HUD, panels and camera. |
 | tools | The online tests (test-online.sh, test-online-ui.sh) and helper scripts. |

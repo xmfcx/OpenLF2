@@ -5,7 +5,8 @@ This plan collects the requested features for network play with friends and the 
 - docs/ui-network-architecture.md: a shared session model that changes only through commands, a local UI on each computer, and a server program that is always the authority of a network game.
 - docs/netcode.md: the fight over UDP with prediction and rollback, bad connections, rooms, spectators and chat, with measurements.
 - docs/pregame-ui-redesign.md: one match setup screen in Dear ImGui, local music, no locks, the game speed as a setting, and one settings menu. It marks the steps that are built. docs/pregame-ui-current.md describes the menus before the redesign and their problems.
-- docs/camera.md: a camera of each computer for wide screens (classic, wide and dynamic), with the first version that is built and the steps that stay open.
+- docs/fight-screen.md: the new fight screen of each computer: a card for each fighter, panels anywhere in the window, a camera with a saved zoom up to the whole stage, Stage mode's enemies and bosses, and the player colors of Age of Empires II.
+- docs/camera.md: the camera design, with the versions that are built and the steps that stay open.
 - docs/network.md: the old two-computer network code.
 - docs/architecture.md: the parts of the game, one frame, the network game and the game versions, with diagrams.
 
@@ -16,15 +17,15 @@ This plan collects the requested features for network play with friends and the 
 - No player has more rights than the others. Any player starts a session from the lobby, resumes a stopped session, starts the fight on the setup screen and chooses for a dropped player.
 - A session runs the whole game on the server's final ticks. It opens the match setup screen in place of the title menu (or the classic title menu and screens with `--server --classic-menus`). The menus and the results run in lockstep, and the fights run with rollback. Clicks on the setup screen go through the server as commands in the ticks. The server makes each tick final at its deadline and never waits for a player. The clients send a hash of their fight state every 30 ticks, and the server compares them. The round trip on one machine is about 7 to 21 ms.
 - The server keeps the values of the last match (mode, difficulty, arena, stage group, game speed) in its config.json (`last_setup`). The next session on this server starts with them.
-- During a session, Enter (or T) opens a chat window, and Escape opens the settings menu. In a fight, the menu pauses the fight for everybody (F1), and the fight resumes when the menu closes. In the menus, the game goes on. Any player sets the game speed. A line shows the ping, and in a fight also the input delay, the rollbacks and the waits. The settings menu sets the input delay of this computer: automatic, or 0, 1 or 2 ticks.
+- During a session, Enter (or T) opens a chat window, and Escape opens the settings menu. In a fight, the open menu holds the fight for everybody (the letter `M` in the keys), and the fight goes on when every menu is closed. In the menus, the game goes on. Any player sets the game speed. A line shows the ping, and in a fight also the input delay, the rollbacks and the waits. The settings menu sets the input delay of this computer: automatic, or 0, 1 or 2 ticks.
 - A player who drops holds the game (each final tick carries `hold`). The game waits for the player without a time limit. Any player can also let the computer play, give the fighter to another player, or stop and resume later. The server saves a stopped session in its config.json as hex text.
 - A returning player, a spectator and a resumed session run the session's final ticks again to catch up (up to 40 menu ticks a frame). The game waits meanwhile, and every player sees a progress bar. A spectator then watches 30 ticks (one second) behind.
 - Local games: "game start" opens the match setup screen in place of the title menu (portraits, arenas, difficulty, speed, start with a countdown, Results buttons after the fight). Its buttons open Championship, Teams (the team championship), Demo and Replay, and Exit goes back to the launch menu. "Classic menus" keeps the title menu and the original screens. Escape opens the settings menu in a fight, where the computer can play a player's fighter. The game starts unlocked.
 - Sound: the music is local to each computer, with a Music switch, the VS track, the music volume and the sound effects volume. F11 and F12 change the music volume by 10 per press.
-- The fight camera is local too: Classic, Wide or Dynamic zoom, on the Display page of the settings menu. The dynamic camera frames the fighters of this computer and zooms out up to the widest view of the player (100 to 300 percent of the window). Page Up, Page Down and Home zoom in a fight.
+- The fight screen is local too: Classic, or the new screen (the default) on the Display page of the settings menu. The new screen has a card for each fighter, panels anywhere in the window (damage share, input timeline, stage panel, minimap), boss bars and the player colors. Its camera frames the fighters of this computer, or holds the player's zoom (mouse wheel, Page Up, Page Down; Home: automatic), up to the whole stage. Page Up, Page Down and Home zoom in a fight.
 - The old two-computer TCP game stays for `--host` and `--join` only.
 - Game versions: players install complete builds and switch between them on the Versions screen. `publish-version.sh` uploads each version to the Nextcloud versions folder, and the game reads `versions.json` through the public link of that folder (docs/upload-to-nextcloud.md). The latest version is 2026.10.25-37 (29fdd48).
-- Tests: tools/test-online.sh has 73 checks (headless: versus with a second fight, stage mode, Quit back to the lobby, the game speed, a player who leaves, a drop with the computer taking over, "give the fighter", a return, stop and resume, a spectator, two rooms, the setup screen in a session with the values of the last match). tools/test-online-ui.sh has 34 checks (two windows on Xvfb: host and join, the session at the setup screen, the chat, taunts, the settings menu that pauses the fight for both players, the computer control on both computers, the leave question, the server stopping with a crashed host).
+- Tests: tools/test-online.sh has 73 checks (headless: versus with a second fight, stage mode, Quit back to the lobby, the game speed, a player who leaves, a drop with the computer taking over, "give the fighter", a return, stop and resume, a spectator, two rooms, the setup screen in a session with the values of the last match). tools/test-online-ui.sh has 43 checks (two windows on Xvfb: host and join, the session at the setup screen, the chat, taunts, the settings menu that holds the fight for both players (also after a fast Escape, Escape, and until both menus close), the computer control on both computers, the leave question, the server stopping with a crashed host).
 
 ## The requests
 
@@ -101,6 +102,7 @@ Later decisions of 2026-10-25 (723d449, 60216e1):
   - Sound: the Music switch on the launch options page and in the settings menu, and F11 and F12 by 10 per press.
   - The engine draws progress bars and colored buttons.
   - The camera design (docs/camera.md) and its first version: the dynamic camera (base/ui/camera_view.lua) through a scaled render area of the engine.
+  - The new fight screen (docs/fight-screen.md): cards, panels with anchors, boss bars, the stage panel, the minimap, the saved zoom and the mouse wheel, the player colors. The settings menu holds a network fight by a state, so a fast Escape, Escape cannot lose the pause. The damage chart follows the fight time.
 
 ## Remaining work
 
@@ -134,16 +136,19 @@ Later decisions of 2026-10-25 (723d449, 60216e1):
 
 ### 6. Camera
 
-The first version of the dynamic camera is built (docs/camera.md, "What is built"). These steps of docs/camera.md stay open:
+The new fight screen is built (docs/fight-screen.md, docs/camera.md "The new fight screen"). These steps stay open:
+
+- The damage chart and the input timeline draw with the bitmap font, so their text is soft at 4K. They can move to Dear ImGui like the cards.
+- A Battle mode panel (the troops of each side), like the stage panel.
 
 - The test tools: `frame_hash=`, `--window WxH`, `view=` in the match description and `--camera-check`.
 - The engine's `world_view` block, the sky above row 128, `scale_y` and the `sharp` filter.
-- The mouse wheel and the middle drag, the Tab cycle and the follow choices, the edge indicators, and the camera of spectators and replays.
+- The middle drag, the Tab cycle and the follow choices, the edge indicators, and the camera of spectators and replays.
 - The sound listener of the view, for the dynamic mode only.
-- The HUD layouts (`hud_layout`, `hud_scale`) and the clamps of the names, the markers and the overlays.
+- A HUD scale (`hud_scale`) and the clamps of the names and the markers to the view.
 - The item culling and a separate world budget, measured in Battle mode on Linux and in Wine.
 - A case in tools/test-online.sh where the two clients use different camera configurations.
-- Split screen and the room limit (both optional), and the choice of the default camera after feedback from players.
+- Split screen and the room limit (both optional).
 
 ### 7. Leftovers
 

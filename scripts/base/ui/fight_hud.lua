@@ -141,7 +141,7 @@ end
 function hud.classic_layout()
     local width, height = constants.screen.width, constants.screen.height
     return {left = 0, top = 0, right = width, bottom = height, width = width, height = height, cards_bottom = 108,
-        cards = {}, bosses = {}}
+        region_top = 108, cards = {}, bosses = {}}
 end
 
 local function name_of(card)

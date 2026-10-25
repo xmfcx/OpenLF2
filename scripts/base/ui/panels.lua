@@ -9,15 +9,15 @@
 local panels = {}
 
 local handle_size = 9
--- anchor: two letters, the vertical edge (t: under the cards, b: the window's bottom) and the horizontal one (l, c,
+-- anchor: two letters, the vertical edge (t: under the cards and boss bars, b: the window's bottom) and the horizontal one (l, c,
 -- r); dx and dy: the distance from them; resize: the limits of the size, or nil for a panel of a fixed size.
 local defaults = {
-    chart = {anchor = "tr", dx = 6, dy = 26, width = 220, height = 100, shown = true,
+    chart = {anchor = "tr", dx = 6, dy = 20, width = 220, height = 100, shown = true,
         resize = {width = {120, 600}, height = {64, 400}}},
     timeline = {anchor = "bl", dx = 6, dy = 22, width = 330, height = 82, shown = true},
-    stage = {anchor = "tl", dx = 6, dy = 26, width = 210, height = 74, shown = true,
+    stage = {anchor = "tl", dx = 6, dy = 20, width = 210, height = 74, shown = true,
         resize = {width = {120, 500}, height = {40, 300}}},
-    minimap = {anchor = "tc", dx = 0, dy = 4, width = 360, height = 28, shown = true,
+    minimap = {anchor = "tc", dx = 0, dy = 0, width = 360, height = 28, shown = true,
         resize = {width = {160, 1600}, height = {18, 80}}},
 }
 panels.ids = {"chart", "timeline", "stage", "minimap"}
@@ -74,7 +74,8 @@ function panels.set_shown(state, id, shown)
     save(state)
 end
 
--- The rectangle of panel `id` in the layout (base/ui/fight_hud layout: the window and the bottom of the cards):
+-- The rectangle of panel `id` in the layout (base/ui/fight_hud layout: the window, and `region_top` under the cards
+-- and the boss bars):
 -- x, y, width, height, kept inside the window.
 function panels.rect(state, id, layout)
     local place = state.places[id]
@@ -84,7 +85,7 @@ function panels.rect(state, id, layout)
     if horizontal == "l" then x = layout.left + place.dx
     elseif horizontal == "r" then x = layout.right - place.dx - width
     else x = math.floor((layout.left + layout.right - width) / 2) + place.dx end
-    local y = vertical == "t" and layout.cards_bottom + place.dy or layout.bottom - place.dy - height
+    local y = vertical == "t" and layout.region_top + place.dy or layout.bottom - place.dy - height
     x = clamp(x, layout.left, layout.right - width)
     y = clamp(y, layout.top, layout.bottom - height)
     return x, y, width, height
@@ -100,7 +101,7 @@ local function anchor(place, layout, x, y)
     if horizontal == "l" then place.dx = x - layout.left
     elseif horizontal == "r" then place.dx = layout.right - x - place.width
     else place.dx = x - math.floor((layout.left + layout.right - place.width) / 2) end
-    place.dy = vertical == "t" and y - layout.cards_bottom or layout.bottom - y - place.height
+    place.dy = vertical == "t" and y - layout.region_top or layout.bottom - y - place.height
 end
 
 -- The local mouse (before a network game exchanges input): a press on a shown panel starts a move, or a resize on

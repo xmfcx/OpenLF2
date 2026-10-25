@@ -1,6 +1,6 @@
 # The fight screen
 
-This document describes the new fight screen: the HUD, the panels, the camera and the colors. It replaces the classic HUD only as an option. The classic screen stays. The design is local to each computer and only reads the fight, so it cannot change a network game or a recording.
+This document describes the new fight screen: the HUD, the panels, the camera and the colors. It is built, and it is the default. The classic screen stays as an option. The classic screen stays. The design is local to each computer and only reads the fight, so it cannot change a network game or a recording.
 
 ## What the screenshots show
 
@@ -119,6 +119,18 @@ The chart takes its samples by fight time (`elapsed`), which stops during a paus
 - The world sits in the middle.
 - A minimap panel.
 - The new screen is the default. Configs with the old Wide or dynamic layouts change to it, and a config with the classic layout keeps it.
+
+## What is built
+
+All steps of the list that follows are built (base/ui/fight_hud.lua, base/ui/panels.lua, base/ui/player_colors.lua, base/ui/camera_view.lua). Some details differ from the plan:
+
+- The cards and the boss bars are Dear ImGui windows with two new engine elements, `bar` (a bar with a lighter part behind it and a label) and `group`, and two flags, `compact` (small spaces in a window) and `small` (a small text).
+- The stage panel counts the enemies on the field and the ones that still wait to come in the current phase. A random entry of the stage data shows the face of the random portrait.
+- Panels anchored at the top sit under the boss bars, so they move down while a boss is on the field.
+- The minimap starts at the top center, under the cards.
+- The player colors apply on the new screen. The classic screen keeps the team fonts of the original for the names.
+- The engine passes the mouse wheel to the scripts as ` z` and the steps.
+- The damage chart and the input timeline still draw with the bitmap font of the original, so their text is soft at 4K.
 
 ## Steps
 

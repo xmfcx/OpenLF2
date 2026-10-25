@@ -1,6 +1,6 @@
 # Camera design
 
-This document designs a modern camera for the fights. Each player sets it for their own screen: how much of the stage it shows, how close it zooms in, and whom it follows. The camera only draws. It never changes the fight state, so it cannot cause a desync (a difference in the fight state between two computers) in a network game. The original camera stays as the classic mode, and it matches the original exactly. A first version of the dynamic camera is built (see "What is built (first version)" under "Implementation steps"). The rest of the design stays open. The study of the current camera describes the code before the first version.
+This document designs a modern camera for the fights. Each player sets it for their own screen: how much of the stage it shows, how close it zooms in, and whom it follows. The camera only draws. It never changes the fight state, so it cannot cause a desync (a difference in the fight state between two computers) in a network game. The original camera stays as the classic mode, and it matches the original exactly. A first version of the dynamic camera is built (see "What is built (first version)" under "Implementation steps"), and the new fight screen (docs/fight-screen.md) replaced its layout. The rest of the design stays open. The study of the current camera describes the code before the first version.
 
 ## Goals
 
@@ -323,7 +323,17 @@ A first version takes a shorter way than steps 3 and 4. It reuses the render are
 - An engine without `context.render_scale` (an older engine that gets these scripts) keeps the picture of the classic or the wide layout.
 - The probe line of a window (`OPENLF2_PROBE=1`) shows `camera=CENTER,WIDTH,zoom=Z`. The test tools of step 1 (`frame_hash=`, `--window WxH`, `view=`) and `--camera-check` are not built.
 
-The steps below stay the plan for the rest: the sky above row 128, the `sharp` filter, the mouse wheel and middle drag, the follow choices and edge indicators, the sound listener, the HUD layouts, culling and split screen.
+### The new fight screen (second version)
+
+docs/fight-screen.md changed the first version:
+
+- The layouts are `classic` and `modern`. `expand` (Wide) and `dynamic` are gone, and older configs that have them get `modern`, the default.
+- The world sits in the middle of the rows under the cards, and the art band ends at row 528 (or 30 rows under the far edge of the stage). The closest view fills the height of these rows, so it can be closer than the classic scale.
+- The automatic camera zooms out up to `camera_widest` (100 to 600 percent of the window). The mouse wheel, Page Up and Page Down set the player's own zoom (`camera_zoom`, saved one second after the last step), and Home goes back to the automatic camera.
+- The widest view is the whole stage, also in Stage mode. The view stays inside the open section when it fits, and a wider view shows the closed part darker.
+- The damage chart and the input timeline are panels of the whole window (step 7 of the list below).
+
+The steps below stay the plan for the rest: the sky above row 128, the `sharp` filter, the middle drag, the follow choices and edge indicators, the sound listener, the HUD layouts, culling and split screen.
 
 1. Test tools. Add `frame_hash=` to the headless summary (src/app/application.cpp:1203), `--window WxH`, and `view=` in `screen.describe` (match_screen.lua:497). Record the baseline hashes. Players see no change.
 2. Refactor the drawing. Move the choice of the camera in `screen.draw` (match_screen.lua:625-690) and `follow_step` into base/ui/camera_view.lua, with one result: a view record. The draw functions (`draw_item`, background.paint, fight_effects.draw) take this record. Add the offset context for the HUD. Move the advance of the background counters out of `visible` into a function that runs once per frame. The frame hashes must not change.
