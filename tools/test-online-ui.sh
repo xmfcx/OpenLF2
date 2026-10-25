@@ -22,8 +22,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# Progress: each line shows its number of all the checks of this script and the time so far.
+CHECKS_TOTAL=$(grep -E '^[^#]*\b(expect|expect_not|check) "' "$0" | grep -vc 'check "$1"')
+CHECKS_DONE=0
+BEGAN=$(date +%s)
 check() { # name, result (0 = pass), details
-    if [ "$2" -eq 0 ]; then echo "PASS $1"; else echo "FAIL $1: $3"; FAILED=1; fi
+    CHECKS_DONE=$((CHECKS_DONE + 1))
+    local seconds=$(( $(date +%s) - BEGAN )) where
+    where=$(printf '[%d/%d %d:%02d]' "$CHECKS_DONE" "$CHECKS_TOTAL" $((seconds / 60)) $((seconds % 60)))
+    if [ "$2" -eq 0 ]; then echo "PASS $where $1"; else echo "FAIL $where $1: $3"; FAILED=1; fi
 }
 probe() { grep "^probe" "$WORK/$1.log" | tail -1; }
 expect() { # name, window, pattern: waits a moment for the next probe lines, then checks the newest
