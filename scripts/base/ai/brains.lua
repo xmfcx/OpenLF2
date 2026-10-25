@@ -160,7 +160,7 @@ control = function(state, index, scan)
         end
     end
     if brain.interface == 2 then
-        local row = difficulty.of(state)
+        local row = difficulty.of(state, index)
         local world = perception.world(state, scan)
         context.state, context.index, context.self, context.memory, context.scan = state, index, value, memory, scan
         context.world, context.me, context.book, context.row = world, world.entries[index], move_book.get(value.record), row

@@ -62,6 +62,7 @@ module=ai/brains/drill|ai/brains/drill.lua
 module=ai/brains/guard|ai/brains/guard.lua
 module=ai/brains/tactician|ai/brains/tactician.lua
 module=ai/tree|ai/tree.lua
+module=ai/kits|ai/kits.lua
 module=ai/reflex|ai/reflex.lua
 module=ai/actuator|ai/actuator.lua
 module=ai/difficulty|ai/difficulty.lua

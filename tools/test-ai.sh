@@ -130,6 +130,26 @@ easy_answers=$(echo "$easy" | grep -oE "^all: [0-9]+ of [0-9]+" | grep -oE "[0-9
 [ "${answers:-0}" -gt 0 ] && [ $((worked * 100)) -ge $((answers * 80)) ] && [ "${easy_answers:-0}" -lt "$answers" ]
 check "reflexes: $crazy (Crazy), ${easy_answers:-0} answers on Easy" $? "crazy: $crazy easy: $easy"
 
+# Personas and levels (docs/ai-plan.md phase 11): Davis's personas use clearly different moves (a total variation
+# distance of at least 0.25 between two of them), and Easy loses clearly to Crazy.
+python3 -I tools/ai-arena.py "davis/tactician/brawler|davis/tactician" "davis/tactician/shoto|davis/tactician" \
+    "davis/tactician@easy|davis/tactician@crazy" --fights 30 --json > "$WORK/personas.json" 2>/dev/null
+result=$(python3 -I - "$WORK/personas.json" <<'PYTHON'
+import json, sys
+reports = json.load(open(sys.argv[1]))
+def histogram(report):
+    moves = report["moves"].get("1") or report["moves"].get(1) or {}
+    total = sum(moves.values()) or 1
+    return {key: value / total for key, value in moves.items()}
+a, b = histogram(reports[0]), histogram(reports[1])
+distance = 0.5 * sum(abs(a.get(key, 0) - b.get(key, 0)) for key in set(a) | set(b))
+print(f"{distance:.2f} {reports[2]['score']:.2f}")
+PYTHON
+)
+distance=${result% *}; easy=${result#* }
+python3 -c "import sys; sys.exit(0 if float('$distance') >= 0.25 and float('$easy') <= 0.2 else 1)" 2>/dev/null
+check "personas: brawler and shoto differ by $distance (0.25 needed), Easy scores $easy against Crazy (0.2 at most)" $? "$result"
+
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then
     result=$(python3 -I tools/lf2_moves.py "$DATA" --check "$WORK/book.out" | tail -1)

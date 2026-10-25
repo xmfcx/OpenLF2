@@ -23,18 +23,33 @@ local reflex = require("base/ai/reflex")
 local predict = require("base/ai/predict")
 local perception = require("base/ai/perception")
 local tree = require("base/ai/tree")
+local kits = require("base/ai/kits")
 local constants = require("base/game/constants")
 local bits = actuator.bits
 local tactician = {name = "tactician", version = 1, interface = 2}
 
 -- The generic persona: whole numbers from 0 to 100, and distances in pixels.
 local generic = {aggression = 85, risk = 40, mp_thrift = 30, combo_greed = 60, defense = 60, range = 0, depth_offset = 0,
-    spacing = 38, mobility = 30}
+    spacing = 38, mobility = 30, teamwork = 50}
 tactician.generic = generic
+
+-- A kit's persona with the generic numbers for the ones that it does not set. Fixed data, cached by persona.
+local merged = {}
+local function full_persona(entry)
+    if not entry then return generic end
+    local result = merged[entry]
+    if result then return result end
+    result = {}
+    for key, value in pairs(generic) do result[key] = value end
+    for key, value in pairs(entry) do result[key] = value end
+    result.prefer = entry.prefer or {}
+    merged[entry] = result
+    return result
+end
 
 function tactician.start(state, index, seed)
     local memory = {version = tactician.version, rng = seed, target = -1, intent = 0, path = {}, plan = 0, plan_tick = -1,
-        reflex_until = -1, combo = -1, moves = 0, thinks = 0, hp = state.items[index].hp, class = ""}
+        reflex_until = -1, combo = -1, moves = 0, thinks = 0, hp = state.items[index].hp, class = "", persona = 0}
     actuator.start(memory)
     return memory
 end
@@ -114,12 +129,20 @@ local function score(context, board, candidate)
     -- A miss is punished only sometimes: the enemy must see it and choose to answer.
     value = value - math.floor((100 - chance) * risk * (100 - persona.risk) / 400)
     value = value - move.mp * persona.mp_thrift
+    -- The persona's taste for this move: a share of its value and a flat bonus, so that a persona picks its moves
+    -- when they hit, even against a move of a little more value.
+    local taste = persona.prefer and persona.prefer[move.start]
+    if taste then
+        if value > 0 then value = math.floor(value * (100 + taste) / 100) end
+        value = value + taste * 20
+    end
     return value, ticks + lead, sure
 end
 
 local function best_attack(context, board)
     local best, best_value, best_ticks, best_sure
     for _, candidate in ipairs(candidates_of(context.book)) do
+        if candidate.move.tags.ranged and context.self.mp >= candidate.move.mp then board.candidate_ranged = true end
         local value, ticks, sure = score(context, board, candidate)
         if value and board.scores then
             board.scores[#board.scores + 1] = {name = candidate.move.name, start = candidate.move.start, value = value,
@@ -179,18 +202,39 @@ local function start_move(context, board, candidate, reason)
     end
 end
 
--- The nearest enemy in the view, kept while it stays near.
-local function choose_target(context)
-    local me, memory, view = context.me, context.memory, context.view
+-- The team table (docs/ai-plan.md "Teams and Stage mode"): in the match, the target of each AI fighter and the tick
+-- when it chose it, and an order for each member (kept for orders of human players, unused yet). A brain reads only
+-- entries of earlier ticks, so the order of the brains in a tick does not change a result.
+local function team_table(state)
+    local team = state.ai_team
+    if not team then
+        team = {targets = {}, ticks = {}, orders = {}}
+        state.ai_team = team
+    end
+    return team
+end
+
+-- The nearest enemy in the view, kept while it stays near, and nearer by `teamwork` when allies attack it too.
+local function choose_target(context, persona)
+    local me, memory, view, state = context.me, context.memory, context.view, context.state
+    local team = team_table(state)
+    local now = state.frame_number
     local best, best_distance
     for _, other in ipairs(view.list) do
-        if other.character and other.hp > 0 and perception.enemy(context.state, me, other) then
+        if other.character and other.hp > 0 and perception.enemy(state, me, other) then
             local distance = math.abs(other.x - me.x) + 2 * math.abs(other.z - me.z)
             if other.index == memory.target then distance = distance - 150 end
+            for _, ally in ipairs(view.list) do
+                if ally.character and ally.index ~= me.index and ally.team == me.team and team.targets[ally.index] == other.index
+                   and (team.ticks[ally.index] or now) < now then
+                    distance = distance - persona.teamwork * 2
+                end
+            end
             if not best_distance or distance < best_distance then best, best_distance = other, distance end
         end
     end
     memory.target = best and best.index or -1
+    team.targets[context.index], team.ticks[context.index] = memory.target, now
     return best
 end
 
@@ -199,7 +243,7 @@ local function walk_to(context, x, z, run)
     local mask = 0
     if x > me.x + 6 then mask = mask + bits.right elseif x < me.x - 6 then mask = mask + bits.left end
     if z > me.z + 2 then mask = mask + bits.down elseif z < me.z - 2 then mask = mask + bits.up end
-    if run and me.class == "free" and math.abs(x - me.x) > 220 and not actuator.busy(memory) then
+    if run and me.class == "free" and math.abs(x - me.x) > 60 and not actuator.busy(memory) then
         actuator.run(memory, x > me.x)
     elseif me.class ~= "moving" or mask % 16 < 4 then
         actuator.hold(memory, mask)
@@ -219,6 +263,20 @@ local root = tree.selector(1, "root", {
         end),
     }),
     tree.condition(5, "keys running", function(context) return actuator.busy(context.memory) end),
+    tree.sequence(28, "heal", {
+        tree.condition(29, "low and safe", function(context, board)
+            local kit, self, me = board.kit, context.self, context.me
+            local move = kit and kit.heal and context.book.by_start[kit.heal]
+            if not move or me.class ~= "free" or self.mp < move.mp or self.hp * 100 >= self.max_hp * 45 then return false end
+            if math.abs(board.tx - me.x) < 160 and math.abs(board.tz - me.z) < 40 then return false end
+            for _, entry in ipairs(move.inputs) do board.heal = {move = move, input = entry.input} end
+            return board.heal ~= nil
+        end),
+        tree.action(30, "heal itself", function(context, board)
+            start_move(context, board, board.heal, "heal")
+            return "success"
+        end),
+    }),
     tree.sequence(6, "combo", {
         tree.condition(7, "follow-up ready", function(context, board)
             local me = context.me
@@ -349,34 +407,62 @@ local root = tree.selector(1, "root", {
         local far = (context.state.stage.zboundary or {})[2] or 0
         if z > far - 5 or z < near + 5 then z = tz + ((me.z >= tz) and -offset or offset) end
         local distance
+        local zoning = persona.range > 0 and board.candidate_ranged
         if target.class == "lying" then distance = 80
+        elseif zoning and (target.class == "free" or target.class == "moving") and math.abs(tx - me.x) > 90 then
+            -- A zoner stands at its range in the target's depth lane, where its balls fly.
+            distance, z = persona.range, tz
         elseif target.class ~= "free" and target.class ~= "moving" then distance = 35
         elseif math.abs(tz - me.z) >= offset - 2 then distance = 38 -- out of its depth line: close in
         else distance = persona.spacing end -- in its line: keep away until the offset is taken
-        walk_to(context, tx + side * distance, z, math.abs(tx - me.x) > 250)
+        -- Run when far, or when the target walks away (a chase at walking speed never closes).
+        local away = (tx > me.x and target.vx > 0.5) or (tx < me.x and target.vx < -0.5)
+        walk_to(context, tx + side * distance, z, math.abs(tx - me.x) > 250 or (away and math.abs(tx - me.x) > 70))
         return "running"
     end),
 })
 tactician.tree = root
 tactician.names = tree.names(root)
 
+-- The persona of this fighter: the match option (a number, or a name from the arena), else a random one of its kit,
+-- chosen once with the brain's random stream (memory.persona keeps its number; 0 before the first tick).
+local function persona_of(context)
+    local memory, state = context.memory, context.state
+    local kit = kits.of(context.self.record.id)
+    if memory.persona == 0 then
+        local choice = state.ai_personas and state.ai_personas[context.index]
+        local entry = kits.persona(kit, choice)
+        local number = -1
+        if entry then
+            for position, candidate in ipairs(kit.personas) do if candidate == entry then number = position end end
+        elseif kit then
+            number = context.random(#kit.personas) + 1
+        end
+        memory.persona = number
+    end
+    if state.ai_persona_values and state.ai_persona_values[context.index] then return state.ai_persona_values[context.index], kit end
+    return full_persona(kit and kit.personas[memory.persona]), kit
+end
+
 local board = {}
 function tactician.tick(context)
     local memory, state = context.memory, context.state
     local now = state.frame_number
     for key in pairs(board) do board[key] = nil end
-    -- The persona: the match's copy (live edits in the development view), or the generic one.
-    board.persona = (state.ai_persona_values and state.ai_persona_values[context.index]) or generic
+    -- The persona: the match's copy (live edits in the development view), the kit's, or the generic one.
+    board.persona, board.kit = persona_of(context)
     -- The hits that it takes, with its class and intent on the tick before.
     if context.self.hp < memory.hp and context.log then
         context.log(state, context.index, string.format("ev=hurt hit=%d dmg=%d class=%s intent=%s", now - 1,
             memory.hp - context.self.hp, memory.class, (tactician.names[memory.intent] or "-"):gsub(" ", "_")))
     end
     memory.hp, memory.class = context.self.hp, context.me and context.me.class or ""
-    local target = choose_target(context)
-    -- The reflexes run on every tick, the tree on a think.
-    -- In a jump, a dash or a run the moment of the attack matters: it thinks on every tick there.
-    local think = (now + context.index) % context.row.think == 0 or (context.me and in_motion(context.me) ~= nil)
+    local target = choose_target(context, board.persona)
+    -- The reflexes run on every tick, the tree on a think. In a jump, a dash or a run the moment of the attack matters:
+    -- it thinks on every tick there. Level of detail: far from its target it thinks three times less.
+    local interval = context.row.think
+    if target and math.abs(target.x - context.me.x) > 450 then interval = interval * 3 end
+    local think = (now + context.index) % interval == 0 or (context.me and in_motion(context.me) ~= nil)
     if target and (think or (memory.reflex_until or -1) >= now) then
         board.target = target
         -- Where the target is now: the view is `delay` ticks old, so its position moves on by its speed. Whole pixels.
@@ -416,7 +502,7 @@ function tactician.tick(context)
 end
 
 function tactician.describe(memory)
-    return string.format("intent:%s,target:%d,moves:%d", (tactician.names[memory.intent] or "-"):gsub(" ", "_"), memory.target,
-        memory.moves)
+    return string.format("intent:%s,target:%d,moves:%d,persona:%d", (tactician.names[memory.intent] or "-"):gsub(" ", "_"),
+        memory.target, memory.moves, memory.persona)
 end
 return tactician

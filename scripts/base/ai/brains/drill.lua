@@ -65,7 +65,7 @@ end
 
 function drill.tick(state, index, memory, scan, log, book)
     local self = state.items[index]
-    local row = difficulty.of(state)
+    local row = difficulty.of(state, index)
     local world = perception.world(state, scan)
     local me = world.entries[index]
     local tests = tests_of(book)

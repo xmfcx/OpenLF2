@@ -5,7 +5,7 @@
 -- computer fighters, one whole fight in each frame, without drawing. Each fight writes an `ai-result` log line (and
 -- `ai-moves` lines), and the run asks to quit after the last one. tools/ai-arena.py runs many of them.
 --
--- SPEC: the sides separated by `|`, the fighters of a side separated by `,`, a fighter as NAME[/BRAIN[/PERSONA]]
+-- SPEC: the sides separated by `|`, the fighters of a side separated by `,`, a fighter as NAME[/BRAIN[/PERSONA]][@LEVEL]
 -- (the data name such as davis or louisex, or the id), then `;key=value` options:
 --   time=TICKS (3600: at the limit the side with more hp wins, equal hp is a draw), difficulty=easy|normal|difficult|
 --   crazy|superhuman (crazy), background=ROW (1), seed=N (1), mirror=0|1 (1: every seed plays twice, the second time
@@ -45,13 +45,16 @@ function arena.parse(text)
     for side_text in (parts[1] .. "|"):gmatch("([^|]*)|") do
         local side = {}
         for token in side_text:gmatch("[^,]+") do
+            local level = token:match("@([%a]+)$")
+            token = token:gsub("@[%a]+$", "")
+            assert(not level or difficulties[level], "arena: unknown level " .. tostring(level))
             local name, brain, persona = token:match("^([^/]+)/?([^/]*)/?([^/]*)$")
             assert(name, "arena: a fighter is NAME[/BRAIN[/PERSONA]]: " .. token)
             local position, fighter = find_fighter(fighters, name)
             brain = brain ~= "" and brain or "classic"
             assert(brains.known(brain), "arena: unknown brain " .. brain)
             side[#side + 1] = {position = position, id = fighter.id, name = fighter.name:lower(), brain = brain,
-                persona = persona ~= "" and persona or nil}
+                persona = persona ~= "" and (tonumber(persona) or persona) or nil, level = level}
         end
         assert(#side > 0, "arena: a side needs a fighter")
         spec.sides[#spec.sides + 1] = side
@@ -97,7 +100,7 @@ local function options_of(spec, number)
     local mirrored = spec.mirror and (number - 1) % 2 == 1
     local seed = spec.mirror and spec.seed + math.floor((number - 1) / 2) or spec.seed + number - 1
     local order = mirrored and {2, 1} or {1, 2}
-    local slots, brain_names, personas, members = {}, {}, {}, {}
+    local slots, brain_names, personas, members, levels = {}, {}, {}, {}, {}
     local slot = 0
     for _, side_number in ipairs(order) do
         for _, fighter in ipairs(spec.sides[side_number]) do
@@ -105,13 +108,15 @@ local function options_of(spec, number)
             slots[slot] = {kind = "computer", fighter = fighter.position, team = constants.teams.player_one + side_number - 1}
             if fighter.brain ~= "classic" then brain_names[slot + 10] = fighter.brain end
             personas[slot + 10] = fighter.persona
+            levels[slot + 10] = fighter.level
             members[#members + 1] = {index = slot + 10, side = side_number, fighter = fighter}
             slot = slot + 1
         end
     end
     local options = {mode = constants.modes.versus, difficulty = spec.difficulty, background = spec.background,
         fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = slots,
-        ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level, start_mp = spec.mp}
+        ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level, start_mp = spec.mp,
+        ai_levels = next(levels) and levels or nil}
     return options, seed, mirrored, members
 end
 
@@ -140,6 +145,7 @@ local function side_text(spec, side)
     local names = {}
     for _, fighter in ipairs(spec.sides[side]) do
         names[#names + 1] = fighter.name .. "/" .. fighter.brain .. (fighter.persona and ("/" .. fighter.persona) or "")
+            .. (fighter.level and ("@" .. fighter.level) or "")
     end
     return table.concat(names, ",")
 end

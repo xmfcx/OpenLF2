@@ -516,8 +516,8 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
             if (++index == arguments.size()) return fail(ErrorCode::format, "--fight needs a fight, such as davis|firen;time=3600");
             config.fight = arguments[index];
             if (config.fight.empty() || config.fight.size() > 400
-                || config.fight.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_/,|;=.:-") != std::string::npos) {
-                return fail(ErrorCode::format, "--fight takes lower-case names, numbers and the signs / , | ; = . : -");
+                || config.fight.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789_/,|;=.:-@") != std::string::npos) {
+                return fail(ErrorCode::format, "--fight takes lower-case names, numbers and the signs / , | ; = . : - @");
             }
             config.headless = true;
         }

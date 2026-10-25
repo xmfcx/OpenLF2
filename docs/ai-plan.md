@@ -149,7 +149,7 @@ Brains do not write keys. They choose actions, and the actuator turns an action 
 
 - A persona is a data table: integers from 0 to 100 for `aggression`, `patience`, `risk`, `mp_thrift`, `combo_greed`, `defense`, `mobility`, `items`, `teamwork` and `adapt`, a preferred `range` in pixels, a category `focus` (nearest, weakest, strongest, last attacker), and move preferences by tag.
 - The difficulty is a separate table: reaction ticks, attention, distance noise, timing errors, input rate, actions per minute, and whether the planner sees the full move book. It has five rows: Easy, Normal, Difficult and Crazy (the classic names, with human limits from weak to strong), and Superhuman (no limits). Superhuman uses the game rules of Crazy. The setup screen lists it after Crazy, and with classic brains it plays like Crazy.
-- A fighter kit (scripts/base/ai/fighters/NAME.lua) adds tags, combos, special rules and the personas of the fighter. A mod (`--mod`) can register a brain and add or replace a kit. A network game shares them through script sharing, so every computer runs the same brain. Players change personas through a mod, not through separate data files.
+- A fighter kit (in scripts/base/ai/kits.lua) adds tags, combos, special rules and the personas of the fighter. A mod (`--mod`) can register a brain and add or replace a kit. A network game shares them through script sharing, so every computer runs the same brain. Players change personas through a mod, not through separate data files.
 
 A first list of personas, which the arena tunes later:
 
@@ -316,6 +316,13 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 
 - A kit for every fighter with the personas of the table, the difficulty rows, the team table, level of detail for Stage and Battle.
 - Tests: the arena shows different move use for the personas of a fighter. Easy loses clearly to Crazy. A full Stage run with tactician enemies keeps to the budget.
+- Status: built.
+    - base/ai/kits holds the kits of all 23 fighters in one module (not one file for each fighter): a self heal for John and the Sorcerer, and two or three personas each, with the numbers of the generic persona that they change and move tastes by start frame (`prefer`). A mod replaces or extends the module.
+    - The tactician picks the persona of the match option (a number from the setup, a name from the arena), or a random one of the kit with its own random stream. A taste raises a move's value by a share and by a flat bonus. A zoner stands at its range in the target's depth lane, and fights once the enemy comes within 90 pixels. A chaser runs when its target walks away. A new branch heals the fighter when its hp is below 45% and no enemy is near.
+    - The team table in the match (`state.ai_team`): the target of each AI fighter and the tick when it chose it, and an `order` entry for later. A brain counts only entries of earlier ticks, and `teamwork` makes allies attack the same target.
+    - Level of detail: a fighter whose target is more than 450 pixels away thinks three times less.
+    - Levels for each fighter: the match option `ai_levels` and the arena's `NAME/BRAIN/PERSONA@LEVEL`.
+    - Results: Davis's personas differ by a total variation distance of 0.27 (brawler and shoto), 0.28 (brawler and wild) and 0.33 (shoto and wild) in their move use. A tactician on Easy scores 0.00 against one on Crazy over 30 fights. A Stage run of 4000 ticks with tactician enemies takes 7.7 s against 6.1 s with classic ones (debug build, with drawing), about 0.4 ms more per tick for all the stage's fighters.
 
 ### Phase 12: learning during and across fights
 

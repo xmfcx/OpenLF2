@@ -28,8 +28,10 @@ difficulty.rows = {
 local by_difficulty = {[constants.difficulties.easy] = "easy", [constants.difficulties.normal] = "normal",
     [constants.difficulties.difficult] = "difficult", [constants.difficulties.crazy] = "crazy"}
 
--- The row of a fight: its AI level (match option ai_level), or the row of its game difficulty.
-function difficulty.of(state)
-    return difficulty.rows[state.ai_level or ""] or difficulty.rows[by_difficulty[state.difficulty] or "crazy"]
+-- The row of a fighter: its own level (match option ai_levels, the arena's NAME@LEVEL), the fight's AI level (match option
+-- ai_level), or the row of its game difficulty.
+function difficulty.of(state, index)
+    local own = index and state.ai_levels and state.ai_levels[index]
+    return difficulty.rows[own or ""] or difficulty.rows[state.ai_level or ""] or difficulty.rows[by_difficulty[state.difficulty] or "crazy"]
 end
 return difficulty
