@@ -5,7 +5,8 @@
 # Usage: tools/test-online.sh [build directory, default build/debug]
 # Needs the LF2 installer in ~/.local/share/OpenLF2/LF2_v2.0a.exe (or $LF2_INSTALLER).
 # The scenarios run at the same time, each with its own ports and server configuration, and a progress line shows how
-# many are done. JOBS=N runs at most N at once, SERIAL=1 one after another, KEEP=1 keeps the outputs.
+# many are done. JOBS=N runs at most N at once, SERIAL=1 one after another, ONLY="NAME ..." only these scenarios, KEEP=1
+# keeps the outputs.
 set -u
 BUILD=${1:-build/debug}
 GAME="$BUILD/openlf2"
@@ -158,6 +159,27 @@ scenario_return() {
     grep -c "hashes agree (1 checks" "$WORK/return.server" | grep -q "^2$"; check "return: the hashes agree with the returning player" $? "$(grep 'hashes agree' "$WORK/return.server")"
 }
 
+# 7b. A player who returns and leaves again while catching up (the hang of 2026-10-25): the game waited for the catch-up
+#     at its last percent, and the next return became a spectator. Now the player drops again, and the next return
+#     takes the slot back and catches up.
+scenario_again() {
+    start_server 23614 again; sleep 2
+    client 23614 "$START$TITLE$PICK$MENU$FIGHT$LONG$LONG$LONG" "$WORK/again.one" &
+    one=$!
+    client 23614 "$START$(wait_frames 31)$PICK$(wait_frames 136)$(printf 'r,,%.0s' $(seq 1 30))" "$WORK/again.two"
+    sleep 2
+    client 23614 ",,," "$WORK/again.three"
+    sleep 2
+    client 23614 "$(wait_frames 30)$LONG" "$WORK/again.four"
+    wait "$one"; kill "$SERVER" 2>/dev/null; wait "$SERVER" 2>/dev/null
+    grep -c "is back and catches up" "$WORK/again.server" | grep -q "^2$"; check "again: the player came back twice" $? "$(grep -E 'back|dropped|watching|left' "$WORK/again.server")"
+    ! grep -q "watching: " "$WORK/again.server"; check "again: the second return takes the slot, not a seat as a spectator" $? "$(grep watching "$WORK/again.server")"
+    grep -q "caught up" "$WORK/again.server"; check "again: the second return catches up" $? "$(tail -4 "$WORK/again.server")"
+    client_checks again four "screen=match"
+    client_checks again one "screen=match"
+    ! grep -qE "desync|difference" "$WORK/again.server"; check "again: no state difference" $? "$(grep -E "desync|difference" "$WORK/again.server")"
+}
+
 # 8. Stop and resume later: both players leave during a fight, the server saves the session, two clients with the
 #    same names come back, the room role resumes, both run the saved ticks to catch up, and the fight goes on.
 scenario_resume() {
@@ -231,7 +253,7 @@ scenario_clicks() {
 }
 
 # The scenarios run in the background, each writes its results to $WORK/NAME.result, and the results print in order.
-SCENARIOS="versus stage quit speed leave drop give return resume watch rooms setup clicks"
+SCENARIOS=${ONLY:-"versus stage quit speed leave drop give return again resume watch rooms setup clicks"}
 limit=${JOBS:-0}
 [ "${SERIAL:-}" = 1 ] && limit=1
 total=$(wc -w <<< "$SCENARIOS")

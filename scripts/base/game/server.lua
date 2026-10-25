@@ -316,7 +316,12 @@ end
 -- player decides.
 drop_player = function(state, slot, now)
     local session = state.session
-    if not session or not slot or session.drops[slot] then return end
+    if not session or not slot then return end
+    -- A returning player who leaves while catching up drops again: the game no longer waits for the catch-up (it
+    -- stood at its last percent for everybody), and the slot is free for the next return (the old connection stayed
+    -- in the slot, so the next hello made a spectator).
+    local before = session.drops[slot]
+    if before and not before.catching then return end
     local entry = session.slots[slot]
     session.drops[slot] = {slot = slot, name = entry and entry.name or tostring(slot + 1), since = now}
     if entry then entry.peer = nil end
@@ -710,7 +715,9 @@ local function room_update(state, now)
     for peer, player in pairs(state.players) do
         local client = state.authority.clients[peer]
         local plays = session.slots[player.slot] and session.slots[player.slot].peer == peer
-        if plays and client and client.heard ~= 0 and now - state.start_at - client.heard > drop_ms then
+        -- A computer that catches up can be busy and quiet for a while; its leaving comes as a disconnection (remove).
+        local caught = not (session.drops[player.slot] and session.drops[player.slot].catching)
+        if plays and caught and client and client.heard ~= 0 and now - state.start_at - client.heard > drop_ms then
             drop_player(state, player.slot, now)
         elseif client and client.heard ~= 0 and session.drops[player.slot] and not session.drops[player.slot].decided
            and not session.drops[player.slot].catching then
