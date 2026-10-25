@@ -57,6 +57,7 @@ local function can_drop_replay(state)
 end
 function flow.create(options)
     require("base/game/rollback").check = options.rollback_check == true
+    require("base/game/netsim").params = require("base/game/netsim").parse(options.net_sim)
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
     user_options.start()
@@ -633,7 +634,8 @@ function flow.update(state, raw, context)
             played = unlock.apply_recorded(bits)
         else bits, played = unlock.take_marks() end
         for _, sound in ipairs(played) do context.sound(sound.resource, sound.volume, sound.pan) end
-        if current then current.unlock_bits = bits end
+        -- A fight through the simulated network (base/game/netsim) changes only in its ticks; it records nothing.
+        if current and not state.match.netsim then current.unlock_bits = bits end
     end
     local escape_pressed = false
     for _, code in ipairs(input.presses or {}) do

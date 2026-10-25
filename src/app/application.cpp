@@ -116,6 +116,7 @@ struct Configuration {
     bool help = false;
     bool preview_backgrounds = false;
     bool rollback_check = false;
+    std::string net_sim; // --net-sim, e.g. "delay=80,jitter=20,loss=5"
     bool preview_ending = false;
     // Lets a held mouse button stand in for touch when testing the on-screen gamepad.
     bool mouse_touch = false;
@@ -410,6 +411,13 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
         else if (argument == "--rollback-check") config.rollback_check = true;
+        else if (argument == "--net-sim") {
+            if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a value");
+            config.net_sim = arguments[index];
+            if (config.net_sim.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789=,.") != std::string::npos) {
+                return fail(ErrorCode::format, "--net-sim takes name=number pairs, such as delay=80,jitter=20,loss=5");
+            }
+        }
         else if (argument == "--mouse-touch") {
             config.mouse_touch = true;
             config.lasting_arguments.push_back(argument);
@@ -1002,7 +1010,8 @@ Result<void> run(const Configuration& config) {
         (config.preview_ending ? ", start_screen=\"ending\"" : "") +
         (config.replay ? ", start_screen=\"replay\"" : "") +
         (config.mouse_touch ? ", mouse_touch=true" : "") +
-        (config.rollback_check ? ", rollback_check=true" : "") + "}\n" + sources;
+        (config.rollback_check ? ", rollback_check=true" : "") +
+        (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") + "}\n" + sources;
     Simulation simulation(std::move(*runtime), !config.headless);
     auto loaded = simulation.load(bundle);
     if (!loaded) return std::unexpected(loaded.error());
@@ -1399,6 +1408,8 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "        [FILE.lfr]\n"
                          "--mouse-touch (off by default): a held mouse button stands in for one finger on the\n"
                          "        on-screen gamepad, to try it without a touch screen.\n"
+                         "--net-sim delay=MS,jitter=MS,loss=PERCENT,seed=N (developer): fights run through a simulated network\n"
+                         "        with two rollback clients and a server in this program; player 1 is one client, the others the other.\n"
                          "--rollback-check (developer): fights save their state, run ahead, go back and run again, and the\n"
                          "        headless description reports whether the state came out the same.\n"
                          "--default-controller (off by default; always on for consoles): until controls are saved, player 1 uses the\n"

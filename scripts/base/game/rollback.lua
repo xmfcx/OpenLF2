@@ -106,6 +106,14 @@ function rollback.hash(match)
     return string.format("%08x%08x", sums[1], sums[2])
 end
 
+-- The same hash for a saved state (rollback.save), without restoring it.
+function rollback.hash_saved(saved)
+    local sums = {0, 0}
+    hash_value(sums, saved.match, {count = 0})
+    feed(sums, string.format("random%d,%d,%d", saved.random[1], saved.random[2], saved.random[3]))
+    return string.format("%08x%08x", sums[1], sums[2])
+end
+
 -- For finding state that a rollback misses: a hash of each field of the match, and of each field of each item.
 function rollback.field_hashes(match)
     local result = {}

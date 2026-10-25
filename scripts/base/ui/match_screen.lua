@@ -14,18 +14,33 @@ local controls = require("base/ui/controls")
 local options = require("base/game/options")
 local fight_effects = require("base/ui/fight_effects")
 local rollback = require("base/game/rollback")
+local netsim = require("base/game/netsim")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
--- options: see base/game/match create().
-function screen.create(options)
-    local state = {match = match.create(options), effects = fight_effects.create()}
+-- The function that a fight calls at the end of each tick to keep what it draws (match.step). It also advances the
+-- hit sparks, so every copy of a fight needs one (base/game/netsim).
+local function make_capture()
     local snapshots, next_snapshot = {{items = {}}, {items = {}}}, 1
-    state.match.capture = function(current)
+    return function(current)
         local snapshot = screen.snapshot(current, snapshots[next_snapshot])
         next_snapshot = 3 - next_snapshot
         return snapshot
     end
+end
+
+-- options: see base/game/match create().
+function screen.create(options)
+    -- --net-sim (developer, base/game/netsim): the fight runs through a simulated network; recording is off, because
+    -- the screen's fight runs predicted ticks.
+    local start_random
+    if netsim.params then
+        options.record = nil
+        start_random = {engine.random_position()}
+    end
+    local state = {match = match.create(options), effects = fight_effects.create()}
+    state.match.capture = make_capture()
+    if netsim.params then state.netsim = netsim.create(state.match, options, start_random, make_capture) end
     return state
 end
 
@@ -148,7 +163,21 @@ local function rollback_compare(state)
     check.saved, check.inputs = nil, nil
 end
 
+-- A frame of the simulated network: its sounds play here, and a result counts once its tick is final.
+local function netsim_update(state, held, context)
+    local played, results, stepped = netsim.frame(state.netsim, held)
+    for _, sound in ipairs(played) do context.sound(sound.resource, sound.volume, sound.pan) end
+    fight_effects.observe(state.effects, state.match)
+    for _ = 1, stepped do follow_step(state, state.match) end
+    state.view = state.match.last_snapshot
+    for _, result in ipairs(results) do
+        if result == "finished" then context.action("round_over") return end
+        if result == "leave" then context.action("title") return end
+    end
+end
+
 function screen.update(state, held, context)
+    if state.netsim then return netsim_update(state, held, context) end
     if rollback.check then rollback_check(state, held) end
     local result = match.step(state.match, held)
     if rollback.check and result == nil then rollback_compare(state) end
@@ -461,6 +490,7 @@ function screen.describe(state)
         parts[#parts + 1] = string.format("stage=%d phase=%d go=%d shutter=%d result=%d bound=%d width=%d", run.id,
             run.phase, run.go, run.shutter, run.result, current.stage_bound, current.stage.width or constants.screen.width)
     end
+    if state.netsim then parts[#parts + 1] = netsim.describe(state.netsim) end
     local check = state.rollback_check
     if check then
         -- Times are averages per check, in milliseconds; `differ` names the fields of the first failed check.

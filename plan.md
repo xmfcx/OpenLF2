@@ -95,6 +95,8 @@ Step 1 of docs/netcode.md. Done, except the championship check and a faster hash
 
 Step 2 of docs/netcode.md: two simulated clients in one program, with a network simulator between them (delay, jitter, loss). The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here, without a real network.
 
+Built: the rollback client, the server logic, the simulated links and `--net-sim`. Every hash check matches at round trips up to 390 ms with 15 % loss (results in docs/netcode.md). Open: the overlays on confirmed ticks, a rollback window that follows the round trip, and tuning by play.
+
 ## Phase 5: the server program
 
 Steps 3 and 4 of docs/netcode.md, with the session model of docs/ui-network-architecture.md:

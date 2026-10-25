@@ -45,6 +45,7 @@ build/debug/openlf2 --headless --installer $I --scripts scripts --seed 1234 --in
 - Game speed 0.4 first: `L=$(printf '#37,,%.0s' $(seq 1 6))`, then prefix `",,#77,,#70,,#68,,$L#13,,,"`.
 - Network: start one program with `--host 127.0.0.1 --port N` and one with `--join 127.0.0.1 --port N`, each with a headless trace of the same length. Both must print the same state. In a network trace, a frame that waits for the other computer runs its trace frame again, so held keys repeat.
 - Rollback: `--rollback-check` makes each fight save its state every 45 ticks, run 8 ticks, go back and run them again. The headless description of the match then shows `rollback=checks:N,failures:F,...`. F must be 0. `differ=` names the fields of the first failure.
+- Simulated network: `--net-sim delay=80,jitter=30,loss=5,seed=1` runs each fight through two rollback clients and a server in one program (base/game/netsim). Player 1 is client A (shown), the other players are client B (`c/r` in a trace gives player 2 the keys after the slash). The match description shows `netsim=a:...,hashes=CHECKS/FAILURES;b:...;server:...`. FAILURES must be 0.
 - Windows builds run in Wine: `WINEPREFIX=<scratch prefix> wine build/windows/openlf2.exe ...`. Pass Windows paths, for example `Z:\home\...`.
 - For screenshots, run the game under `Xvfb :97` with `SDL_VIDEODRIVER=x11` and `--renderer software`, drive it with xdotool (focus the window first) and capture with `import`.
 

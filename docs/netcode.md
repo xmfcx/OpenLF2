@@ -158,6 +158,21 @@ Costs in the release build, per operation:
 
 A save on every tick fits in the 33 ms frame, also in battle mode. A rollback of 8 ticks in battle mode costs about 5 ms. The hash of battle mode is too slow to run often: it must get faster (a fixed field order instead of sorting, numbers without text) or cover fewer fields, before the hash checks of step 4.
 
+### The simulated network
+
+With `--net-sim`, two clients and the server run in one program over simulated links. In a two-player versus fight of 765 ticks, with keys that change every few ticks, every hash check of both clients matched the server:
+
+| Link (each way) | Round trip | Input delay | Rollbacks of client A (count, ticks, longest) | Waits |
+| --- | --- | --- | --- | --- |
+| 0 ms | 33 ms | 0 | 300, 600, 2 | 0 |
+| 40 ms, jitter 10 ms | 132 ms | 2 | 300, 900, 3 | 0 |
+| 80 ms, jitter 30 ms, loss 5 % | 223 ms | 2 | 266, 1810, 9 | 0 |
+| 150 ms, jitter 60 ms, loss 15 % | 390 ms | 2 | 229, 2666, 12 | 320 |
+
+The round trip includes one frame of 33 ms on each side, because the simulation passes messages once per frame. At a round trip of 390 ms, the clients wait at the rollback window of 12 ticks. The window must grow with the round trip.
+
+Two causes of differences showed up and are fixed: the flow wrote the unlock bits into the shown fight outside its ticks, and only the shown fight had the function that advances the hit sparks at the end of a tick.
+
 ## Many clients, rooms and chat
 
 ### Rooms
@@ -193,7 +208,7 @@ A save on every tick fits in the 33 ms frame, also in battle mode. A rollback of
 ## Steps
 
 1. Foundation: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode. Done except the championship check and a faster hash (see Measurements).
-2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here.
+2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here. Built: base/game/rollback_client.lua, base/game/authority.lua, base/game/net_link.lua and base/game/netsim.lua (`--net-sim`). Open: the overlays on confirmed ticks, a rollback window that follows the round trip, and tuning by play.
 3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines.
 4. The rollback client against the server, with the hash checks and the snapshots.
 5. Drops and returns: the 500 ms rule, pause or AI, the session token, the return with a snapshot.
