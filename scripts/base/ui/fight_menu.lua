@@ -86,6 +86,11 @@ function menu.update(state, input, env)
     if clicked.fullscreen then values.fullscreen, changed = not values.fullscreen, true end
     if clicked.show_fps then values.show_fps, changed = not values.show_fps, true end
     if clicked.classic_menus then values.classic_menus, changed = not values.classic_menus, true end
+    for _, layout in ipairs({"classic", "expand", "dynamic"}) do
+        if clicked["camera_" .. layout] then values.battlefield_layout, changed = layout, true end
+    end
+    local widest = imgui.slider_value(events, "camera_widest", values.camera_widest, 100, 300)
+    if widest and widest ~= values.camera_widest then values.camera_widest, changed = widest, true end
     if clicked.show_connection then values.show_connection, changed = not values.show_connection, true end
     for delay = -1, 2 do
         if clicked["input_delay_" .. (delay + 1)] then values.input_delay, changed = delay, true end
@@ -153,6 +158,18 @@ end
 local function display_page(context)
     local values = user_options.current()
     imgui.text(context, i18n.tr("[only on this computer]"))
+    -- The camera of the fight (docs/camera.md): the original's picture, more stage at its scale, or a camera that
+    -- frames the fighters and zooms out (Page Up, Page Down, Home in the fight).
+    imgui.text(context, i18n.tr("Camera"))
+    local names = {classic = i18n.tr("Classic"), expand = i18n.tr("Wide"), dynamic = i18n.tr("Dynamic zoom")}
+    for position, layout in ipairs({"classic", "expand", "dynamic"}) do
+        if position > 1 then imgui.same_line(context) end
+        imgui.selectable(context, "camera_" .. layout, names[layout], values.battlefield_layout == layout, 110, 0)
+    end
+    if values.battlefield_layout == "dynamic" then
+        imgui.text(context, i18n.tr("Widest view: %d %% of the window", values.camera_widest))
+        imgui.slider(context, "camera_widest", "", values.camera_widest, 100, 300, -1)
+    end
     imgui.selectable(context, "fullscreen", i18n.tr("Fullscreen"), values.fullscreen, 0, 0)
     imgui.selectable(context, "show_fps", i18n.tr("Show FPS"), values.show_fps, 0, 0)
     imgui.selectable(context, "show_connection", i18n.tr("Show the connection in network games"), values.show_connection, 0, 0)

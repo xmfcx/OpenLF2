@@ -3,6 +3,7 @@
 
 local constants = require("base/game/constants")
 local record_kinds = constants.record_kinds
+local camera_view = require("base/ui/camera_view")
 local match = require("base/game/match")
 local background = require("base/game/background")
 local object_data = require("base/game/object_data")
@@ -622,7 +623,8 @@ follow_step = function(state, current)
     state.follow_camera, state.follow_motion = camera, step
 end
 
-function screen.draw(state, context, window_bounds)
+-- camera: the camera of this computer ({mode = "dynamic", widest = N}) or nil (classic or wide by window_bounds).
+function screen.draw(state, context, window_bounds, camera)
     context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0)
     local view = state.view
     local current = state.match
@@ -633,7 +635,29 @@ function screen.draw(state, context, window_bounds)
             stage = view.stage}
     end
     local bounds, passable_bounds, wide
-    if window_bounds and (window_bounds.left < 0 or window_bounds.top < 0
+    local dynamic = camera and camera.mode == "dynamic" and context.render_scale
+    if dynamic then
+        -- Without a window (headless runs) the camera uses the classic picture.
+        window_bounds = window_bounds or {left = 0, top = 0, right = constants.screen.width, bottom = constants.screen.height}
+        -- The dynamic camera (base/ui/camera_view): the world draws 1:1 into a texture `width` units across and the
+        -- art's height, and the engine scales it into the window's width; the HUD draws over it at its own size.
+        state.camera_view = state.camera_view or camera_view.create()
+        local window_width = window_bounds.right - window_bounds.left
+        local left, width = camera_view.step(state.camera_view, view, current, state.follow, window_width, camera.widest)
+        local scale = window_width / width
+        local band = camera_view.bottom - camera_view.top
+        local height = math.floor(band * scale + 0.5)
+        local stage_width = current.stage.width or constants.screen.width
+        wide = {left = 0, right = width, camera = left}
+        view = {camera = left, items = view.items, paused = view.paused, shake = view.shake, stage = view.stage}
+        bounds = {left = math.max(0, -left), right = math.min(width, stage_width - left)}
+        passable_bounds = {left = bounds.left, right = bounds.right}
+        if current.stage_bound > 0 then passable_bounds.right = math.min(bounds.right, current.stage_bound - left) end
+        -- The band ends at the bottom of the classic picture; the HUD keeps the rows above it.
+        context.render_area(window_bounds.left, camera_view.bottom - height, window_width, height, 0, camera_view.top,
+            math.floor(scale * 1000 + 0.5))
+        context.clip(passable_bounds.left, camera_view.top, passable_bounds.right - passable_bounds.left, band)
+    elseif window_bounds and (window_bounds.left < 0 or window_bounds.top < 0
             or window_bounds.right > constants.screen.width or window_bounds.bottom > constants.screen.height) then
         -- The stage's edges are the screen's edges: a window of the full screen width scrolls across the stage
         -- (slower than the game's camera, which follows the fighters on a 794 wide view) and always contains
@@ -694,6 +718,9 @@ function screen.draw(state, context, window_bounds)
     context.clip()
     -- Ghosts and combo counters (OpenLF2 extension).
     fight_effects.draw(state.effects, context, view)
+    -- The dynamic camera: everything after the world (the HUD, the texts, the flow's overlays) draws at the
+    -- window's scale over the picture.
+    if dynamic then context.overlay(true) end
     if spectated then
         local name = spectated < 8 and controls.name(spectated) or "Com"
         font.gdi(context, "Following " .. name .. "  (Tab: next)", math.floor(constants.screen.width / 2), 132,

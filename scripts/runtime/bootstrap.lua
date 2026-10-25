@@ -224,7 +224,12 @@ local function render(input)
     end
     function context.fill(x, y, w, h, r, g, b, alpha) command(FrameOpcode.fill, x, y, w, h, r, g, b, alpha or 255) end
     function context.overlay(active) command(FrameOpcode.overlay, active) end
-    function context.render_area(x, y, w, h) command(FrameOpcode.render_area, x, y, w, h) end
+    -- ax, ay: the drawing coordinates of the area's top-left corner (default x, y); scale: per mille (default 1000).
+    function context.render_area(x, y, w, h, ax, ay, scale)
+        command(FrameOpcode.render_area, x, y, w, h, ax or x, ay or y, scale or 1000)
+    end
+    -- This engine scales a render area (the camera's zoom).
+    context.render_scale = true
     function context.clip(x, y, w, h) command(FrameOpcode.clip, x ~= nil, x or 0, y or 0, w or 0, h or 0) end
     function context.sound(resource, volume, pan) command(FrameOpcode.sound, resource, volume, pan) end
     function context.rumble(kind, index, strength)

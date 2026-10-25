@@ -538,6 +538,10 @@ function flow.probe(state)
         end
         if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
         if fight.paused then parts[#parts + 1] = "paused" end
+        local view = state.match.camera_view
+        if view and view.width then
+            parts[#parts + 1] = string.format("camera=%d,%d,zoom=%.2f", math.floor(view.center), math.floor(view.width), view.zoom)
+        end
     end
     return table.concat(parts, " ")
 end
@@ -565,8 +569,9 @@ function flow.draw(state, context)
     -- Fullscreen (OpenLF2 extension): no-op without a real window; reasserted every frame
     -- like the filter above.
     context.fullscreen(shown_options.fullscreen)
-    if state.active == "match" and shown_options.battlefield_layout == "expand" then
-        screen_module(state.active).draw(screen_state(state), context, state.window_bounds)
+    if state.active == "match" and shown_options.battlefield_layout ~= "classic" then
+        screen_module(state.active).draw(screen_state(state), context, state.window_bounds,
+            {mode = shown_options.battlefield_layout, widest = shown_options.camera_widest / 100})
     else
         screen_module(state.active).draw(screen_state(state), context)
     end
@@ -782,7 +787,7 @@ update_frame = function(state, raw, context)
     end
     local shown_options = user_options.current()
     -- Local presentation data stays outside network and replay inputs.
-    if shown_options.battlefield_layout == "expand" then
+    if shown_options.battlefield_layout ~= "classic" then
         state.window_bounds = input.screen or state.window_bounds
     else
         state.window_bounds = nil
@@ -840,6 +845,14 @@ update_frame = function(state, raw, context)
         if touched:find(letter, 1, true) and not input[0]:find(letter, 1, true) then input[0] = input[0] .. letter end
     end
     local local_keys = input.keys
+    -- The dynamic camera's own keys (this computer only): Page Up and Page Down zoom, Home resets.
+    if state.active == "match" and shown_options.battlefield_layout == "dynamic" then
+        local held = state.camera_keys or {}
+        local function fresh(code) return local_keys[code] and not held[code] end
+        state.match.camera_view = state.match.camera_view or require("base/ui/camera_view").create()
+        require("base/ui/camera_view").keys(state.match.camera_view, fresh(0x21), fresh(0x22), fresh(0x24))
+        state.camera_keys = {[0x21] = local_keys[0x21], [0x22] = local_keys[0x22], [0x24] = local_keys[0x24]}
+    end
     -- This computer's mouse, for drawing the pointer (see flow.draw).
     if input.pointer_x and input.pointer_x >= 0 and input.pointer_y and input.pointer_y >= 0 then
         if input.pointer_x ~= state.local_pointer_x or input.pointer_y ~= state.local_pointer_y then

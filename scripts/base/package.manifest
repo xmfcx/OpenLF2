@@ -21,6 +21,7 @@ module=ui/online_lobby|ui/online_lobby.lua
 module=ui/chat|ui/chat.lua
 module=ui/imgui|ui/imgui.lua
 module=ui/fight_menu|ui/fight_menu.lua
+module=ui/camera_view|ui/camera_view.lua
 module=ui/online_menu|ui/online_menu.lua
 module=game/server_list|game/server_list.lua
 module=ui/font|ui/font.lua

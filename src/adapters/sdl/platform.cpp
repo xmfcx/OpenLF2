@@ -763,7 +763,14 @@ public:
         };
         const auto area = viewport.render_area.value_or(
             Rectangle{0, 0, viewport.width, viewport.height});
-        if (auto prepared = sprite_effects_.prepare(*renderer_, resources_, commands, area); !prepared) return prepared;
+        // The commands' rectangle: the area itself, or at another scale and origin (the camera's zoom).
+        const double area_scale = viewport.render_area ? std::clamp(viewport.area_scale, 100, 4000) / 1000.0 : 1.0;
+        const Rectangle drawn_area = viewport.render_area
+            ? Rectangle{viewport.area_x, viewport.area_y,
+                        std::max(1, static_cast<int>(std::lround(area.width / area_scale))),
+                        std::max(1, static_cast<int>(std::lround(area.height / area_scale)))}
+            : area;
+        if (auto prepared = sprite_effects_.prepare(*renderer_, resources_, commands, drawn_area); !prepared) return prepared;
         SDL_FRect destination{};
         if (viewport.render_area) {
             SDL_FRect picture{};
@@ -780,13 +787,14 @@ public:
             // The frame is drawn 1:1 into a texture, which is then scaled to the window by the shader or,
             // for linear, by the renderer. Scaling the sprites themselves would sample the pixels around
             // each sprite's rectangle in its sheet and show them as a frame around the sprite.
-            auto* frame = frame_target(area.width, area.height);
+            const bool zoomed = viewport.render_area && viewport.area_scale != 1000;
+            auto* frame = frame_target(drawn_area.width, drawn_area.height, zoomed);
             if (frame == nullptr || !SDL_SetRenderTarget(renderer_.get(), frame) || !clear()) return error();
             if (viewport.render_area
                 && !SDL_SetRenderLogicalPresentation(renderer_.get(), 0, 0,
                                                  SDL_LOGICAL_PRESENTATION_DISABLED)) return error();
-            auto drawn = draw_commands(commands, false, static_cast<float>(-area.x),
-                                       static_cast<float>(-area.y));
+            auto drawn = draw_commands(commands, false, static_cast<float>(-drawn_area.x),
+                                       static_cast<float>(-drawn_area.y));
             if (!drawn) {
                 SDL_SetRenderTarget(renderer_.get(), nullptr);
                 return drawn;
@@ -796,7 +804,13 @@ public:
                 && !SDL_SetRenderLogicalPresentation(renderer_.get(), 0, 0,
                                                  SDL_LOGICAL_PRESENTATION_DISABLED)) return error();
             const auto* target = viewport.render_area ? &destination : nullptr;
-            if (xbrz) {
+            // A zoomed frame uses a part of a larger texture and scales smoothly (xBRZ needs whole pixels).
+            const SDL_FRect used{0.0f, 0.0f, static_cast<float>(drawn_area.width), static_cast<float>(drawn_area.height)};
+            if (zoomed) {
+                if (!SDL_SetTextureScaleMode(frame, render_filter_ == RenderFilter::nearest ? SDL_SCALEMODE_NEAREST
+                                                                                        : SDL_SCALEMODE_LINEAR)
+                    || !SDL_RenderTexture(renderer_.get(), frame, &used, target)) return error();
+            } else if (xbrz) {
                 if (!SDL_SetTextureScaleMode(frame, SDL_SCALEMODE_NEAREST)
                     || !upscaler_->draw(*renderer_, *frame, target)) return error();
             } else if (!SDL_SetTextureScaleMode(frame, render_filter_ == RenderFilter::linear
@@ -1353,7 +1367,15 @@ private:
         if (!SDL_RenderTexture(renderer_.get(), *texture, nullptr, &area)) return error();
         return {};
     }
-    SDL_Texture* frame_target(int width, int height) {
+    // `spare`: the texture may be larger than asked (rounded up to 128 pixels), so that a zoom that changes the size
+    // on every frame does not make a new texture each time; the caller copies only the used part.
+    SDL_Texture* frame_target(int width, int height, bool spare = false) {
+        if (spare) {
+            width = (width + 127) / 128 * 128;
+            height = (height + 127) / 128 * 128;
+            if (frame_target_ && frame_target_->w >= width && frame_target_->h >= height
+                && frame_target_->w <= width + 256 && frame_target_->h <= height + 256) return frame_target_.get();
+        }
         if (!frame_target_ || frame_target_->w != width || frame_target_->h != height) {
             // RGBA32 (bytes R, G, B, A): the shader reads the texture's own channels, and SDL's OpenGL ES
             // renderer keeps ARGB8888 textures with red and blue swapped.

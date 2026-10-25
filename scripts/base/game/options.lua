@@ -6,7 +6,9 @@
 local i18n = require("base/i18n/i18n")
 local options = {}
 
-options.battlefield_layouts = {"classic", "expand"}
+-- classic: the original's 794 wide picture; expand: more stage at the classic scale; dynamic: the camera of this
+-- computer frames the fighters and zooms out up to `camera_widest` percent of the window (base/ui/camera_view).
+options.battlefield_layouts = {"classic", "expand", "dynamic"}
 
 -- Every valid value, in the dropdown's order. "xbrz" is a shader: the host offers it only on
 -- renderers that can run it (see options.available_filters), but a saved choice stays valid.
@@ -89,7 +91,9 @@ local function whole(value, default, low, high)
     return math.max(low, math.min(high, math.floor(value)))
 end
 local function copy(values)
-    return {battlefield_layout = values.battlefield_layout == "expand" and "expand" or defaults.battlefield_layout,
+    local layout = values.battlefield_layout
+    return {battlefield_layout = (layout == "expand" or layout == "dynamic") and layout or defaults.battlefield_layout,
+        camera_widest = whole(values.camera_widest, 200, 100, 300),
         gamepad = copy_gamepad(values.gamepad),
         upscaling_filter = valid_filter(values.upscaling_filter) and values.upscaling_filter or defaults.upscaling_filter,
         fullscreen = values.fullscreen, digipad = values.digipad, show_fps = values.show_fps, rumble = values.rumble,
@@ -156,7 +160,9 @@ function options.load()
         values.input_delay = whole(saved.input_delay, defaults.input_delay, -1, 2)
         values.show_connection = saved.show_connection ~= false
     end
-    if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand") then
+    if type(saved) == "table" then values.camera_widest = whole(saved.camera_widest, 200, 100, 300) end
+    if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand"
+       or saved.battlefield_layout == "dynamic") then
         values.battlefield_layout = saved.battlefield_layout
     end
     current = values

@@ -356,6 +356,9 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
             case FrameOpcode::render_area:
                 if (frame.viewport.render_area) throw std::runtime_error("duplicate render area");
                 frame.viewport.render_area = reader.rectangle(true);
+                frame.viewport.area_x = reader.integer();
+                frame.viewport.area_y = reader.integer();
+                frame.viewport.area_scale = reader.integer(100, 4000);
                 break;
             case FrameOpcode::clip: {
                 const bool enabled = reader.flag();

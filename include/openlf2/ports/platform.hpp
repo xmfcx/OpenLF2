@@ -32,6 +32,12 @@ struct Viewport {
     int blue = 0;
     // Optional drawing area in viewport coordinates; presentation keeps the original scale.
     std::optional<Rectangle> render_area = std::nullopt;
+    // With a render area: the commands' coordinates of its top-left corner (`area_x`, `area_y`), and the scale from
+    // command units to viewport units in per mille. A scale below 1000 draws a larger part of the world into the
+    // same area (the camera zooms out); the frame texture holds the commands 1:1 and is scaled once.
+    int area_x = 0;
+    int area_y = 0;
+    int area_scale = 1000;
 };
 // How the frame is scaled to the window. `xbrz` is an edge-directed pixel-art scaler that runs as
 // a shader, so only some renderers offer it (Platform::supports).
