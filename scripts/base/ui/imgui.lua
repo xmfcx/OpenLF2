@@ -13,6 +13,8 @@ imgui.no_title, imgui.wrap, imgui.large, imgui.focus, imgui.border, imgui.disabl
 imgui.glass, imgui.passive = 64, 128
 -- Image flags: the image is a button, the image is dim.
 imgui.clickable, imgui.dim = 256, 512
+-- A window with small spaces (the fight screen's cards), and a small text (older engines ignore both).
+imgui.compact, imgui.small = 1024, 2048
 
 -- Whether this engine draws menus (older runtimes have no context.ui).
 function imgui.available(context) return context.ui ~= nil end
@@ -66,6 +68,20 @@ function imgui.progress(context, fraction, label, width)
     end
     context.ui("progress", "", label or "", "", permille, 0, width or 0, 0, -1, 0)
 end
+-- A plain bar (the fight screen's HP and MP): filled to `value` (0 to 1) in `color`, to `behind` (0 to 1) in
+-- `behind_color` under it, the rest in `back`; `label` at its right end. Older engines draw a progress bar.
+function imgui.bar(context, value, color, behind, behind_color, back, label, width, height)
+    local function mille(fraction) return math.max(0, math.min(1000, math.floor((fraction or 0) * 1000 + 0.5))) end
+    if not (context.ui_kinds and context.ui_kinds.bar) then
+        imgui.progress(context, value, label or "", width)
+        return
+    end
+    context.ui("bar", "", label or "", string.format("%06x,%06x", behind_color or 0, back or 0x101420), mille(value),
+        mille(behind), width or 0, height or 0, color, 0)
+end
+-- The elements between group and end_group act as one, for example on the line after an image.
+function imgui.group(context) if context.ui_kinds and context.ui_kinds.group then context.ui("group") end end
+function imgui.end_group(context) if context.ui_kinds and context.ui_kinds.group then context.ui("end_group") end end
 -- An integer from `low` to `high`; a moved knob comes back as changed[id] = the value as text.
 function imgui.slider(context, id, label, value, low, high, width, disabled)
     if not (context.ui_kinds and context.ui_kinds.slider) then

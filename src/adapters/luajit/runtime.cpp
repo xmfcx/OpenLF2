@@ -370,7 +370,7 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
                 // A menu element (ports/platform.hpp UiCommand): kind, id, label, value, x, y, width, height,
                 // color, flags.
                 UiCommand element;
-                element.kind = static_cast<UiCommand::Kind>(reader.integer(0, static_cast<int>(UiCommand::Kind::progress)));
+                element.kind = static_cast<UiCommand::Kind>(reader.integer(0, static_cast<int>(UiCommand::Kind::end_group)));
                 const auto id = reader.text();
                 if (id.size() > 64 || id.find_first_not_of(
                         "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_") != std::string_view::npos) {

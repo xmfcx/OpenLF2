@@ -25,6 +25,9 @@ local chat = require("base/ui/chat")
 local online = require("base/game/online")
 local imgui = require("base/ui/imgui")
 local fight_menu = require("base/ui/fight_menu")
+local panels = require("base/ui/panels")
+local fight_hud = require("base/ui/fight_hud")
+local camera_view = require("base/ui/camera_view")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -104,7 +107,7 @@ function flow.create(options)
         touch_gamepad = touch_gamepad.create(user_options.current().gamepad, user_options.current().digipad), mouse_touch = false,
         -- Optional mouse input can stand in for touch while testing the on-screen gamepad.
         mouse_touch_enabled = options.mouse_touch == true, speed_keys = speed_menu.tracker(),
-        chart = damage_chart.create(), timeline = input_timeline.create()}
+        chart = damage_chart.create(), timeline = input_timeline.create(), panels = panels.create()}
     music.play("bgm/main.wma")
     -- A startup recording is already queued by the host; route consumes it on the first frame.
     if options.start_screen == "replay" then state.active = "title" end
@@ -504,7 +507,7 @@ local function menu_env(state)
     local session = state.session and state.session.online and state.session
     local env = {online = session and true or false, fight = fight and not fight.replay and true or false,
         mode = fight and fight.mode, speed = session and (session.speed or 10) or speed.tenths, speed_shared = session and true or false,
-        cheat_keys = unlock.flags.function_keys == 1, cheats_online = false, fighters = {}}
+        cheat_keys = unlock.flags.function_keys == 1, cheats_online = false, fighters = {}, panels = state.panels}
     if env.fight then
         local slots = session and {session.slot} or {0, 1, 2, 3, 4, 5, 6, 7}
         for _, slot in ipairs(slots) do
@@ -537,13 +540,53 @@ function flow.probe(state)
             if fight.items[slot] and fight.items[slot].ai_control then computer[#computer + 1] = tostring(slot) end
         end
         if #computer > 0 then parts[#parts + 1] = "computer_controls=" .. table.concat(computer, ",") end
-        if fight.paused then parts[#parts + 1] = "paused" end
+        if fight.paused or fight.menu_hold then parts[#parts + 1] = "paused" end
         local view = state.match.camera_view
         if view and view.width then
-            parts[#parts + 1] = string.format("camera=%d,%d,zoom=%.2f", math.floor(view.center), math.floor(view.width), view.zoom)
+            parts[#parts + 1] = string.format("camera=%d,%d,zoom=%s", math.floor(view.center), math.floor(view.width),
+                view.zoom and tostring(view.zoom) or "auto")
         end
     end
     return table.concat(parts, " ")
+end
+-- The layout for the panels (base/ui/panels): the new fight screen's (base/ui/fight_hud, kept by the match screen
+-- when it draws), or the classic picture.
+local function panel_layout(state)
+    if state.active ~= "match" then return nil end
+    if user_options.current().battlefield_layout == "modern" then return state.match.hud_layout end
+    return fight_hud.classic_layout()
+end
+-- The panels on the screen now: the stage panel in Stage mode, the minimap on the new fight screen.
+local function panel_ids(state)
+    local ids = {"chart", "timeline"}
+    local layout = panel_layout(state)
+    if layout and state.match.stage_info then ids[#ids + 1] = "stage" end
+    if layout and layout.view_width then ids[#ids + 1] = "minimap" end
+    return ids
+end
+local function draw_panels(state, context)
+    local layout = panel_layout(state)
+    if not layout then return end
+    local shown = state.panels
+    if state.chart.match and panels.shown(shown, "chart") then
+        damage_chart.draw(state.chart, context, panels.rect(shown, "chart", layout))
+    end
+    if panels.shown(shown, "timeline") then
+        local x, y = panels.rect(shown, "timeline", layout)
+        input_timeline.draw(state.timeline, context, x, y)
+    end
+    local current = state.match.match
+    local info = state.match.stage_info
+    if info and panels.shown(shown, "stage") then
+        local x, y, width, height = panels.rect(shown, "stage", layout)
+        fight_hud.draw_stage_panel(context, info, x, y, width, height)
+        panels.draw_handle(context, x, y, width, height)
+    end
+    if layout.view_width and panels.shown(shown, "minimap") then
+        local x, y, width, height = panels.rect(shown, "minimap", layout)
+        fight_hud.draw_minimap(context, current, info, x, y, width, height, layout.view_left, layout.view_width)
+        panels.draw_handle(context, x, y, width, height)
+    end
 end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
 local imgui_screens = {online_menu = true, online_lobby = true, setup = true}
@@ -571,7 +614,8 @@ function flow.draw(state, context)
     context.fullscreen(shown_options.fullscreen)
     if state.active == "match" and shown_options.battlefield_layout ~= "classic" then
         screen_module(state.active).draw(screen_state(state), context, state.window_bounds,
-            {mode = shown_options.battlefield_layout, widest = shown_options.camera_widest / 100})
+            {mode = shown_options.battlefield_layout, widest = shown_options.camera_widest / 100,
+             zoom = shown_options.camera_zoom})
     else
         screen_module(state.active).draw(screen_state(state), context)
     end
@@ -603,8 +647,7 @@ function flow.draw(state, context)
         if session.spectator then text = text .. "  " .. i18n.tr("watching") end
         font.gdi(context, text, constants.screen.width - font.gdi_width(text) - 4, 0x213 - 14, 0x9fd0ff)
     end
-    if state.active == "match" and state.chart.match then damage_chart.draw(state.chart, context) end
-    if state.active == "match" then input_timeline.draw(state.timeline, context) end
+    if state.active == "match" then draw_panels(state, context) end
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
     if state.fight_menu then fight_menu.draw(state.fight_menu, context, menu_env(state)) end
@@ -845,13 +888,31 @@ update_frame = function(state, raw, context)
         if touched:find(letter, 1, true) and not input[0]:find(letter, 1, true) then input[0] = input[0] .. letter end
     end
     local local_keys = input.keys
-    -- The dynamic camera's own keys (this computer only): Page Up and Page Down zoom, Home resets.
-    if state.active == "match" and shown_options.battlefield_layout == "dynamic" then
+    -- The camera's own keys of the new fight screen (this computer only, base/ui/camera_view): the mouse wheel, Page
+    -- Up and Page Down zoom, Home goes back to the automatic camera. config.json keeps the zoom, written once the
+    -- zoom rests for a second.
+    if state.active == "match" and shown_options.battlefield_layout == "modern" then
         local held = state.camera_keys or {}
         local function fresh(code) return local_keys[code] and not held[code] end
-        state.match.camera_view = state.match.camera_view or require("base/ui/camera_view").create()
-        require("base/ui/camera_view").keys(state.match.camera_view, fresh(0x21), fresh(0x22), fresh(0x24))
+        local view = state.match.camera_view or camera_view.create(shown_options.camera_zoom)
+        state.match.camera_view = view
+        local steps = (input.wheel or 0) * -1 + (fresh(0x21) and 1 or 0) - (fresh(0x22) and 1 or 0)
+        if camera_view.keys(view, steps, fresh(0x24)) then state.zoom_rest = 30
+        elseif not state.zoom_rest then
+            -- A zoom set in the settings menu (its Automatic camera button).
+            local saved = shown_options.camera_zoom > 0 and shown_options.camera_zoom or nil
+            if view.zoom ~= saved then view.zoom = saved end
+        end
         state.camera_keys = {[0x21] = local_keys[0x21], [0x22] = local_keys[0x22], [0x24] = local_keys[0x24]}
+        if state.zoom_rest then
+            state.zoom_rest = state.zoom_rest - 1
+            if state.zoom_rest <= 0 then
+                state.zoom_rest = nil
+                local values = user_options.current()
+                values.camera_zoom = view.zoom or 0
+                user_options.save(values)
+            end
+        end
     end
     -- This computer's mouse, for drawing the pointer (see flow.draw).
     if input.pointer_x and input.pointer_x >= 0 and input.pointer_y and input.pointer_y >= 0 then
@@ -873,10 +934,12 @@ update_frame = function(state, raw, context)
             input.functions, input.function_presses, input.keys, input.presses, input.text = "", "", {}, {}, ""
         end
     end
-    -- The damage share chart follows the local mouse, before a network game exchanges input.
+    -- The panels (base/ui/panels) follow the local mouse, before a network game exchanges input; V shows or hides
+    -- the input timeline.
     if state.active == "match" then
-        damage_chart.pointer(state.chart, input)
-        input_timeline.pointer(state.timeline, input)
+        if input_timeline.toggled(state.timeline, input) then panels.toggle(state.panels, "timeline") end
+        local layout = panel_layout(state)
+        if layout then panels.pointer(state.panels, input, layout, panel_ids(state)) end
     end
     -- In a network game the match screen's camera follows this computer's fighters, and Tab picks whom to follow
     -- once they are all down (base/ui/match_screen, drawing only).
@@ -932,9 +995,10 @@ update_frame = function(state, raw, context)
         local again = state.exchange_waited
         state.exchange_waited = nil
         -- Escape opens the settings menu (base/ui/fight_menu), with this computer's keys held back. Escape closes it
-        -- again, or its question first. In a fight the menu pauses the fight for everybody (F1, as the original's
-        -- pause key) and closing it resumes, so that nobody misses a moment; a fight that was paused stays paused.
-        local was_open = state.fight_menu ~= nil
+        -- again, or its question first. In a fight the open menu holds the fight for everybody, so that nobody misses
+        -- a moment: this computer's keys carry the letter "M" while it is open (base/game/match "menu_hold"), and the
+        -- fight goes on when every player's menu is closed. A state, not a toggle, so a fast Escape, Escape cannot
+        -- lose it. The menu's Pause button (F1) pauses the fight as the original's pause key, also after the menu.
         local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
         if escape and not state.escape_held then
             if not state.fight_menu then state.fight_menu = fight_menu.create()
@@ -952,21 +1016,9 @@ update_frame = function(state, raw, context)
             if answer and answer.speed and not again then online.send(session, {type = "set_speed", tenths = answer.speed}) end
             if answer and answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer and answer.close then state.fight_menu = nil end
-            -- The menu's own Pause button keeps the fight paused after the menu closes.
-            if answer and answer.functions == "1" then state.menu_paused = nil end
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses = "", ""
-        end
-        local fight = state.active == "match" and state.match.online and state.match.match
-        if fight and not again then
-            if state.fight_menu and not was_open and not fight.paused then
-                state.function_hold, state.menu_paused = {keys = "1", frames = 3}, true
-            elseif not state.fight_menu and was_open and state.menu_paused then
-                if fight.paused then state.function_hold = {keys = "1", frames = 3} end
-                state.menu_paused = nil
-            end
-        elseif not fight then
-            state.menu_paused = nil
+            if state.fight_menu and state.active == "match" and state.match.online then input[0] = "M" end
         end
         hold_functions(state, input, again)
         drop_choices(state, imgui.events(input))
@@ -1120,7 +1172,7 @@ update_frame = function(state, raw, context)
             input[slot] = (input[slot] or "") .. request.letter
             -- A paused fight reads no keys: the letter waits until it runs (the settings menu pauses it).
             local current = state.match.match
-            if not (current and current.paused) then request.frames = request.frames - 1 end
+            if not (current and (current.paused or current.menu_hold)) then request.frames = request.frames - 1 end
             if request.frames <= 0 then state.control_request = nil end
         elseif state.active ~= "match" then
             state.control_request = nil

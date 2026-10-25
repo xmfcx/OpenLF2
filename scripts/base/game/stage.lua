@@ -56,6 +56,13 @@ local empty_phase = {bound = -1, music = "", when_clear_goto_phase = -1, entry_c
 local function stage_data(run) return stage_list()[run.id] or {phase_count = -1, phases = {}} end
 local function phase_data(run, index) return stage_data(run).phases[index] or empty_phase end
 
+-- The entries of the current phase and their spawn counters (read only: the fight screen shows the enemies that are
+-- left, docs/fight-screen.md "Stage mode").
+function stage.phase_entries(run)
+    if not run or run.phase < 0 then return {}, {} end
+    return phase_data(run, run.phase).entries, run.runtime and run.runtime[run.phase] or {}
+end
+
 function stage.create(level)
     return {id = level, phase = -1, phase_done = 0, boss_alive = 0, last_phase = 0, go = 70,
         shutter = 0, result = 0, survival = -1, survival_blink = 0, runtime = {}, marked = {},
@@ -414,6 +421,8 @@ function stage.update(state, run)
     return display
 end
 
+-- The status line of the original (row 110); its entries have `status` set, because the new fight screen shows the
+-- same in its own panel and cards (base/ui/fight_hud).
 function stage.status(state, run, display)
     local any_alive = false
     for index = 0, constants.first_spawned_slot - 1 do
@@ -443,17 +452,17 @@ function stage.status(state, run, display)
     end
     if run.id < constants.stage_levels.survival_start then
         display[#display + 1] = {"text", string.format("%s %d-%d", i18n.tr("STAGE"), cdiv(run.id, 10) + 1, run.id % 10 + 1),
-            360, 110, 0xc8c8c8}
+            360, 110, 0xc8c8c8, status = true}
     elseif run.survival >= 0 then
         if run.survival_blink > 0 then run.survival_blink = run.survival_blink + 1 end
         if run.survival_blink > 69 then run.survival_blink = 0 end
         local color = (run.survival_blink ~= 0 and cdiv(run.survival_blink, 10) % 2 ~= 1) and 0xc85a5a or 0xc8c8c8
-        display[#display + 1] = {"text", i18n.tr("Survival Stage:") .. " " .. run.survival, 340, 110, color}
+        display[#display + 1] = {"text", i18n.tr("Survival Stage:") .. " " .. run.survival, 340, 110, color, status = true}
     end
     local left = string.format("%s %3d      %s %4d", i18n.tr("Man:"), men_a, i18n.tr("HP:"), hp_a)
     if reserve ~= 0 then left = left .. string.format("     %s %3d", i18n.tr("Reserve:"), reserve) end
-    display[#display + 1] = {"text", left, 10, 110, 0xff7878}
-    display[#display + 1] = {"text", string.format("%s %3d      %s %4d", i18n.tr("Man:"), men_b, i18n.tr("HP:"), hp_b), 645, 110, 0xff00ff}
+    display[#display + 1] = {"text", left, 10, 110, 0xff7878, status = true}
+    display[#display + 1] = {"text", string.format("%s %3d      %s %4d", i18n.tr("Man:"), men_b, i18n.tr("HP:"), hp_b), 645, 110, 0xff00ff, status = true}
 end
 
 function stage.round_counter(state, run)

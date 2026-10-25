@@ -11,6 +11,7 @@ local constants = require("base/game/constants")
 local music = require("base/game/music")
 local user_options = require("base/game/options")
 local imgui = require("base/ui/imgui")
+local panels = require("base/ui/panels")
 local i18n = require("base/i18n/i18n")
 local menu = {}
 
@@ -86,11 +87,16 @@ function menu.update(state, input, env)
     if clicked.fullscreen then values.fullscreen, changed = not values.fullscreen, true end
     if clicked.show_fps then values.show_fps, changed = not values.show_fps, true end
     if clicked.classic_menus then values.classic_menus, changed = not values.classic_menus, true end
-    for _, layout in ipairs({"classic", "expand", "dynamic"}) do
+    for _, layout in ipairs(user_options.battlefield_layouts) do
         if clicked["camera_" .. layout] then values.battlefield_layout, changed = layout, true end
     end
-    local widest = imgui.slider_value(events, "camera_widest", values.camera_widest, 100, 300)
+    local widest = imgui.slider_value(events, "camera_widest", values.camera_widest, 100, 600)
     if widest and widest ~= values.camera_widest then values.camera_widest, changed = widest, true end
+    if clicked.camera_auto then values.camera_zoom, changed = 0, true end
+    -- The panels of the fight (base/ui/panels) are shown or hidden at once.
+    for _, id in ipairs(panels.ids) do
+        if clicked["panel_" .. id] and env.panels then panels.toggle(env.panels, id) end
+    end
     if clicked.show_connection then values.show_connection, changed = not values.show_connection, true end
     for delay = -1, 2 do
         if clicked["input_delay_" .. (delay + 1)] then values.input_delay, changed = delay, true end
@@ -155,20 +161,32 @@ local function sound_page(context)
     imgui.slider(context, "sound_volume", "", values.sound_volume, 0, 100, -1)
 end
 
-local function display_page(context)
+local function display_page(context, env)
     local values = user_options.current()
     imgui.text(context, i18n.tr("[only on this computer]"))
-    -- The camera of the fight (docs/camera.md): the original's picture, more stage at its scale, or a camera that
-    -- frames the fighters and zooms out (Page Up, Page Down, Home in the fight).
-    imgui.text(context, i18n.tr("Camera"))
-    local names = {classic = i18n.tr("Classic"), expand = i18n.tr("Wide"), dynamic = i18n.tr("Dynamic zoom")}
-    for position, layout in ipairs({"classic", "expand", "dynamic"}) do
+    -- The fight screen (docs/fight-screen.md): the original's picture and status panel, or the new screen with the
+    -- whole window, the cards and a camera that frames the fighters or holds your zoom (the mouse wheel, Page Up,
+    -- Page Down; Home: automatic).
+    imgui.text(context, i18n.tr("Fight screen"))
+    local names = {classic = i18n.tr("Classic"), modern = i18n.tr("New (whole window)")}
+    for position, layout in ipairs(user_options.battlefield_layouts) do
         if position > 1 then imgui.same_line(context) end
-        imgui.selectable(context, "camera_" .. layout, names[layout], values.battlefield_layout == layout, 110, 0)
+        imgui.selectable(context, "camera_" .. layout, names[layout], values.battlefield_layout == layout, 170, 0)
     end
-    if values.battlefield_layout == "dynamic" then
-        imgui.text(context, i18n.tr("Widest view: %d %% of the window", values.camera_widest))
-        imgui.slider(context, "camera_widest", "", values.camera_widest, 100, 300, -1)
+    if values.battlefield_layout == "modern" then
+        imgui.text(context, values.camera_zoom > 0
+            and i18n.tr("Zoom: %d %% of the window (mouse wheel, Page Up, Page Down)", values.camera_zoom)
+            or i18n.tr("Zoom: automatic (mouse wheel, Page Up, Page Down)"), nil, imgui.wrap)
+        imgui.selectable(context, "camera_auto", i18n.tr("Automatic camera (Home)"), values.camera_zoom == 0, 0, 0)
+        imgui.text(context, i18n.tr("The automatic camera shows up to %d %% of the window", values.camera_widest))
+        imgui.slider(context, "camera_widest", "", values.camera_widest, 100, 600, -1)
+        imgui.text(context, i18n.tr("Panels"))
+        local labels = {chart = i18n.tr("Damage share"), timeline = i18n.tr("Input (V)"), stage = i18n.tr("Stage"),
+            minimap = i18n.tr("Minimap")}
+        for position, id in ipairs(panels.ids) do
+            if position > 1 then imgui.same_line(context) end
+            imgui.selectable(context, "panel_" .. id, labels[id], env.panels and panels.shown(env.panels, id), 0, 0)
+        end
     end
     imgui.selectable(context, "fullscreen", i18n.tr("Fullscreen"), values.fullscreen, 0, 0)
     imgui.selectable(context, "show_fps", i18n.tr("Show FPS"), values.show_fps, 0, 0)
@@ -202,7 +220,7 @@ function menu.draw(state, context, env)
     imgui.separator(context)
     if state.page == "game" then game_page(context, env)
     elseif state.page == "sound" then sound_page(context)
-    else display_page(context) end
+    else display_page(context, env) end
     imgui.separator(context)
     local leave = env.online and i18n.tr("Leave the network game") or (env.fight and i18n.tr("End the fight"))
     if leave then imgui.button(context, "leave", leave, -1, 28) end

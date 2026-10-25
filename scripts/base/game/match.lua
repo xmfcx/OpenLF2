@@ -772,7 +772,15 @@ function match.step(state, held)
         state.paused = state.pause_request
         state.pause_request = state.pause_next
     end
-    local locked = state.paused
+    -- The settings menu of a network game holds the fight while it is open (OpenLF2 extension, docs/fight-screen.md
+    -- "Pause"): the letter "M" in a player's keys. It is a state, not a toggle like F1, so a fast Escape, Escape
+    -- cannot lose it, and the fight goes on only when every menu is closed. menu_hold names the slots that hold it.
+    local holders
+    for slot = 0, 7 do
+        if (held[slot] or ""):find("M", 1, true) then holders = (holders or "") .. slot end
+    end
+    state.menu_hold = holders
+    local locked = state.paused or holders ~= nil
     local live = held
     local replay_input
     if state.replay then
@@ -831,6 +839,7 @@ function match.step(state, held)
         if state.capture then
             state.last_snapshot = state.capture(state)
             state.last_snapshot.paused = true
+            state.last_snapshot.held_by = holders
         end
         return "paused"
     end

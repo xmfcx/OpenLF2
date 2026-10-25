@@ -1246,6 +1246,7 @@ Result<void> run(const Configuration& config) {
     // Taps, typed text and controller buttons that came and went between two script frames.
     bool pressed = false;
     bool toggle_fullscreen = false; // Alt+Enter
+    int wheel = 0;                  // mouse wheel steps
     std::string typed;
     GamepadButtons gamepad;
     std::vector<PadState> pads; // the same, per controller
@@ -1275,6 +1276,8 @@ Result<void> run(const Configuration& config) {
         }
         pressed = pressed || input.pressed;
         toggle_fullscreen = toggle_fullscreen || input.toggle_fullscreen;
+        // A turn over a menu belongs to the menu (Dear ImGui scrolls with it).
+        if (!input.ui_mouse) wheel = std::clamp(wheel + input.wheel, -64, 64);
         if (typed.size() + input.text.size() <= 256) typed += input.text;
         gamepad.up = gamepad.up || input.gamepad.up;
         gamepad.down = gamepad.down || input.gamepad.down;
@@ -1336,6 +1339,9 @@ Result<void> run(const Configuration& config) {
         held += " m" + std::to_string(input.pointer_x) + ',' + std::to_string(input.pointer_y) + ','
             + ((input.button || pressed) && !input.ui_mouse ? '1' : '0');
         if (!draining) pressed = false;
+        // Then " z" and the mouse wheel steps since the last script frame.
+        if (wheel != 0) held += " z" + std::to_string(wheel);
+        if (!draining) wheel = 0;
         // Then " p" and the key-down codes since the last script frame, in order.
         if (!key_downs.empty()) {
             held += " p";

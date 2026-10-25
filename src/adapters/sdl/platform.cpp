@@ -466,6 +466,10 @@ public:
             case SDL_EVENT_MOUSE_MOTION:
                 if (event.motion.which != SDL_TOUCH_MOUSEID) pointer_from_touch_ = false;
                 break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                // Smooth wheels and touchpads send parts of a step; they add up to whole steps.
+                wheel_ += event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event.wheel.y : event.wheel.y;
+                break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
                 // Fingers are read from their own events; SDL's copies as a mouse are ignored.
                 if (event.button.which == SDL_TOUCH_MOUSEID) break;
@@ -526,6 +530,8 @@ public:
             input.pointer_y = static_cast<int>(std::floor(y));
         }
         input.button = input.button || touching_;
+        input.wheel = static_cast<int>(wheel_);
+        wheel_ -= static_cast<float>(input.wheel);
         input.gamepad = read_gamepads();
         input.pads = read_pads();
         // A fresh controller press also hands the pointer back from touch (state read by polling,
@@ -948,6 +954,37 @@ private:
         if (!texture || !SDL_SetTextureScaleMode(texture.get(), SDL_SCALEMODE_NEAREST)) return error();
         return texture;
     }
+    // A bar of the fight screen (UiCommand::Kind::bar): the background, the part behind (the dark HP), the value, and
+    // the label at the right end with a shadow.
+    template <typename Size>
+    void draw_ui_bar(const UiCommand& element, const Size& size) {
+        const auto rgb = [](unsigned value, float alpha = 1.0f) {
+            return ImGui::GetColorU32(shade(static_cast<int>((value >> 16) & 0xff), static_cast<int>((value >> 8) & 0xff),
+                                            static_cast<int>(value & 0xff), alpha));
+        };
+        unsigned behind = 0x000000, back = 0x101420;
+        if (const auto comma = element.value.find(','); comma != std::string::npos) {
+            std::from_chars(element.value.data(), element.value.data() + comma, behind, 16);
+            std::from_chars(element.value.data() + comma + 1, element.value.data() + element.value.size(), back, 16);
+        }
+        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const float width = element.width > 0 ? size(element.width) : std::max(1.0f, ImGui::GetContentRegionAvail().x);
+        const float height = element.height > 0 ? size(element.height) : ImGui::GetFrameHeight();
+        auto* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(at, {at.x + width, at.y + height}, rgb(back, 0.85f));
+        const auto part = [&](int mille) { return at.x + width * static_cast<float>(std::clamp(mille, 0, 1000)) / 1000.0f; };
+        if (element.y > 0) draw->AddRectFilled(at, {part(element.y), at.y + height}, rgb(behind));
+        if (element.x > 0) draw->AddRectFilled(at, {part(element.x), at.y + height}, rgb(static_cast<unsigned>(std::max(element.color, 0))));
+        if (!element.label.empty()) {
+            // The label fits the bar's height.
+            const float font = std::min(ImGui::GetFontSize(), height * 1.15f);
+            const ImVec2 text = ImGui::GetFont()->CalcTextSizeA(font, FLT_MAX, 0.0f, element.label.c_str());
+            const ImVec2 place{at.x + width - text.x - size(2), at.y + (height - text.y) / 2.0f};
+            draw->AddText(ImGui::GetFont(), font, {place.x + 1.0f, place.y + 1.0f}, rgb(0x000000, 0.8f), element.label.c_str());
+            draw->AddText(ImGui::GetFont(), font, place, rgb(0xffffff), element.label.c_str());
+        }
+        ImGui::Dummy({width, height});
+    }
     // An image element (UiCommand::Kind::image): a bitmap of the game data, part of it, with frames around it in the
     // colors of the players whose cursors are on it. Menu images keep their own cache, so that a sprite frame that
     // empties the sprite cache never takes a texture that ImGui still draws.
@@ -1053,6 +1090,8 @@ private:
         const auto size = [scale](int value) { return static_cast<float>(value) * scale; };
         int windows = 0;
         int children = 0;
+        int groups = 0;
+        int compact = 0; // style values pushed for the open window
         for (const auto& element : ui_) {
             const auto labelled = element.label + "##" + element.id;
             if (element.kind != UiCommand::Kind::window && windows == 0) continue;
@@ -1077,14 +1116,23 @@ private:
                     flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing
                         | ImGuiWindowFlags_NoBringToFrontOnFocus;
                 }
+                if (element.flags & ui_compact) {
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, {size(4), size(3)});
+                    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {size(4), size(2)});
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, size(5));
+                    ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, {1.0f, 1.0f});
+                    compact = 4;
+                }
                 ImGui::Begin(labelled.c_str(), nullptr, flags);
                 ++windows;
                 break;
             }
             case UiCommand::Kind::end_window:
-                if (children == 0) {
+                if (children == 0 && windows > 0) {
+                    for (; groups > 0; --groups) ImGui::EndGroup();
                     ImGui::End();
                     --windows;
+                    ImGui::PopStyleVar(std::exchange(compact, 0));
                 }
                 break;
             case UiCommand::Kind::text: {
@@ -1092,10 +1140,11 @@ private:
                     ImGui::PushStyleColor(ImGuiCol_Text, shade((element.color >> 16) & 0xff, (element.color >> 8) & 0xff,
                                                                element.color & 0xff));
                 }
-                if (element.flags & ui_large) ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.5f);
+                const bool sized = (element.flags & (ui_large | ui_small)) != 0;
+                if (sized) ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * ((element.flags & ui_large) ? 1.5f : 0.8f));
                 if (element.flags & ui_wrap) ImGui::TextWrapped("%s", element.label.c_str());
                 else ImGui::TextUnformatted(element.label.c_str());
-                if (element.flags & ui_large) ImGui::PopFont();
+                if (sized) ImGui::PopFont();
                 if (element.color >= 0) ImGui::PopStyleColor();
                 break;
             }
@@ -1195,10 +1244,25 @@ private:
                                    {element.width > 0 ? size(element.width) : -1.0f, element.height > 0 ? size(element.height) : 0.0f},
                                    element.label.empty() ? nullptr : element.label.c_str());
                 break;
+            case UiCommand::Kind::bar:
+                draw_ui_bar(element, size);
+                break;
+            case UiCommand::Kind::group:
+                ImGui::BeginGroup();
+                ++groups;
+                break;
+            case UiCommand::Kind::end_group:
+                if (groups > 0) {
+                    ImGui::EndGroup();
+                    --groups;
+                }
+                break;
             }
         }
+        for (; groups > 0; --groups) ImGui::EndGroup();
         for (; children > 0; --children) ImGui::EndChild();
         for (; windows > 0; --windows) ImGui::End();
+        ImGui::PopStyleVar(compact);
         // Inputs that are gone forget their text, and get the focus again when they come back.
         const auto shown = [this](const std::string& id) {
             return std::ranges::any_of(ui_, [&](const UiCommand& element) { return element.id == id; });
@@ -1634,6 +1698,7 @@ private:
     std::set<std::string> focused_;                // inputs that took the keyboard when they appeared
     ImGuiStyle base_style_;
     float ui_scale_ = 0.0f;
+    float wheel_ = 0.0f; // the part of a wheel step that is not passed on yet
     bool imgui_context_ = false;
     bool imgui_backend_ = false;
     bool ui_keyboard_ = false;

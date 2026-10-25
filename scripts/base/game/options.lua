@@ -6,9 +6,16 @@
 local i18n = require("base/i18n/i18n")
 local options = {}
 
--- classic: the original's 794 wide picture; expand: more stage at the classic scale; dynamic: the camera of this
--- computer frames the fighters and zooms out up to `camera_widest` percent of the window (base/ui/camera_view).
-options.battlefield_layouts = {"classic", "expand", "dynamic"}
+-- classic: the original's 794 wide picture and status panel; modern: the new fight screen (docs/fight-screen.md),
+-- with the whole window, a card for each fighter and the camera of this computer (base/ui/camera_view), which frames
+-- the fighters up to `camera_widest` percent of the window, or holds the zoom of the player (`camera_zoom` percent,
+-- 0 for the automatic camera). The layouts "expand" and "dynamic" of older versions become "modern".
+options.battlefield_layouts = {"classic", "modern"}
+local function layout_of(value)
+    if value == "classic" then return "classic" end
+    if value == "modern" or value == "expand" or value == "dynamic" then return "modern" end
+    return nil
+end
 
 -- Every valid value, in the dropdown's order. "xbrz" is a shader: the host offers it only on
 -- renderers that can run it (see options.available_filters), but a saved choice stays valid.
@@ -55,7 +62,7 @@ local gamepad_defaults = {
     dj = {right = 72, bottom = 165, radius = 26},
     daj = {right = 72, bottom = 80, radius = 26},
 }
-local defaults = {battlefield_layout = "classic", gamepad = gamepad_defaults, upscaling_filter = "linear", fullscreen = false, digipad = true, show_fps = false,
+local defaults = {battlefield_layout = "modern", camera_widest = 300, camera_zoom = 0, gamepad = gamepad_defaults, upscaling_filter = "linear", fullscreen = false, digipad = true, show_fps = false,
     rumble = false, show_gamepad = false, language = "default", font_antialiasing = true,
     character_shading = false, projected_shadows = false,
     music = true, music_track = 0, music_volume = 100, sound_volume = 100, classic_menus = false, input_delay = -1, show_connection = true,
@@ -90,10 +97,15 @@ local function whole(value, default, low, high)
     if type(value) ~= "number" or value ~= value then return default end
     return math.max(low, math.min(high, math.floor(value)))
 end
+-- 0 (the automatic camera) or a view from 40 to 2000 percent of the window's width.
+local function zoom(value)
+    if type(value) ~= "number" or value ~= value or value < 40 then return 0 end
+    return math.min(2000, math.floor(value))
+end
 local function copy(values)
-    local layout = values.battlefield_layout
-    return {battlefield_layout = (layout == "expand" or layout == "dynamic") and layout or defaults.battlefield_layout,
-        camera_widest = whole(values.camera_widest, 200, 100, 300),
+    return {battlefield_layout = layout_of(values.battlefield_layout) or defaults.battlefield_layout,
+        camera_widest = whole(values.camera_widest, defaults.camera_widest, 100, 600),
+        camera_zoom = zoom(values.camera_zoom),
         gamepad = copy_gamepad(values.gamepad),
         upscaling_filter = valid_filter(values.upscaling_filter) and values.upscaling_filter or defaults.upscaling_filter,
         fullscreen = values.fullscreen, digipad = values.digipad, show_fps = values.show_fps, rumble = values.rumble,
@@ -160,10 +172,10 @@ function options.load()
         values.input_delay = whole(saved.input_delay, defaults.input_delay, -1, 2)
         values.show_connection = saved.show_connection ~= false
     end
-    if type(saved) == "table" then values.camera_widest = whole(saved.camera_widest, 200, 100, 300) end
-    if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand"
-       or saved.battlefield_layout == "dynamic") then
-        values.battlefield_layout = saved.battlefield_layout
+    if type(saved) == "table" then
+        values.camera_widest = whole(saved.camera_widest, defaults.camera_widest, 100, 600)
+        values.camera_zoom = zoom(saved.camera_zoom)
+        values.battlefield_layout = layout_of(saved.battlefield_layout) or defaults.battlefield_layout
     end
     current = values
     return copy(values)

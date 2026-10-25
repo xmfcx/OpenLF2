@@ -270,6 +270,8 @@ function controls.read(settings, raw)
                 input.touches[#input.touches + 1] = {id = tonumber(id), x = tonumber(tx), y = tonumber(ty)}
             end
         end
+        -- " z": the mouse wheel steps since the last frame (live only; positive away from the player).
+        input.wheel = tonumber(raw:match(" z(%-?%d+)")) or 0
         -- " e": the window's edges in viewport coordinates (live only): left,top,right,bottom.
         local left, top, right, bottom = raw:match(" e(%-?%d+),(%-?%d+),(%-?%d+),(%-?%d+)")
         if left then

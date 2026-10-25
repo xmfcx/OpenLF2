@@ -23,7 +23,10 @@ local screen = {}
 
 local columns = 7
 -- The color of each slot's cursor, its marker on the grid and its card.
-local slot_colors = {[0] = 0xff5050, 0x50a0ff, 0x50e070, 0xffd040, 0xd070ff, 0x40e0e0, 0xff9040, 0xe0e0e0}
+-- The player colors of the fight screen (base/ui/player_colors), so that a player has one color everywhere.
+local player_colors = require("base/ui/player_colors")
+local slot_colors = {}
+for slot = 0, 7 do slot_colors[slot] = player_colors.of(slot) end
 local team_colors = {[0] = 0xa0a0a0, 0xff7070, 0x70a0ff, 0x80e080, 0xffd060}
 local difficulty_names = {[constants.difficulties.easy] = "Easy", [constants.difficulties.normal] = "Normal",
     [constants.difficulties.difficult] = "Difficult", [constants.difficulties.crazy] = "CRAZY!"}

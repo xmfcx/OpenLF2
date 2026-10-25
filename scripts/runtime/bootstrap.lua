@@ -172,7 +172,7 @@ local FrameOpcode = {
 -- Menu elements drawn with Dear ImGui (OpenLF2 extension, base/ui/imgui); the order matches UiCommand::Kind.
 local UiKind = {window = 0, end_window = 1, text = 2, button = 3, input = 4, selectable = 5, same_line = 6,
     separator = 7, spacing = 8, child = 9, end_child = 10, slider = 11, image = 12,
-    progress = 13}
+    progress = 13, bar = 14, group = 15, end_group = 16}
 local RumbleTarget = {gamepad = 0, phone = 1}
 local MusicKind = {play = 0, stop = 1, resume = 2, volume = 3}
 local RenderFilter = {nearest = 0, linear = 1, xbrz = 2}

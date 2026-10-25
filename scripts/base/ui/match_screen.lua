@@ -4,6 +4,8 @@
 local constants = require("base/game/constants")
 local record_kinds = constants.record_kinds
 local camera_view = require("base/ui/camera_view")
+local player_colors = require("base/ui/player_colors")
+local fight_hud = require("base/ui/fight_hud")
 local match = require("base/game/match")
 local background = require("base/game/background")
 local object_data = require("base/game/object_data")
@@ -110,7 +112,7 @@ function screen.snapshot(state, snapshot)
         order[position] = entry
     end
     snapshot.camera, snapshot.shake = state.camera, state.shake
-    snapshot.paused, snapshot.stage = nil, nil
+    snapshot.paused, snapshot.held_by, snapshot.stage = nil, nil, nil
     return snapshot
 end
 
@@ -294,11 +296,11 @@ local function label_font(team)
     end
     return "pe/words0"
 end
-local function glyphs(context, sheet, text, x, y, advance)
+local function glyphs(context, sheet, text, x, y, advance, tint)
     for position = 1, #text do
         local code = text:byte(position)
         context.sprite(sheet, {(code % 16) * 16, math.floor(code / 16) * 16 + 1, 8, 16},
-            x + (position - 1) * advance, y, true)
+            x + (position - 1) * advance, y, true, false, false, tint)
     end
 end
 
@@ -315,7 +317,8 @@ for frame = 1, 4 do
     spark_frames[frame + 15] = {0x3d * frame, 0xd0, 0x3d, 0x30}
 end
 
-local function draw_item(context, stage, view, entry, bounds, lighting)
+-- colored: the new fight screen's names in the player colors (base/ui/player_colors), not in the team fonts.
+local function draw_item(context, stage, view, entry, bounds, lighting, colored)
     local frame = entry.record.frame(entry.frame)
     local blink = math.abs(entry.blink)
     local camera = view.camera
@@ -388,7 +391,14 @@ local function draw_item(context, stage, view, entry, bounds, lighting)
             if x < 0 then x = 0 end
             if x > constants.screen.width - length * 9 then x = constants.screen.width - length * 9 end
         end
-        glyphs(context, sheet, label, x, entry.z + 3, 9)
+        local slot = colored and player_colors.slot(entry.index)
+        if slot then
+            -- A dark shadow keeps the light colors readable on light ground.
+            glyphs(context, "pe/words0", label, x + 1, entry.z + 4, 9, 0x101018)
+            glyphs(context, "pe/words0", label, x, entry.z + 3, 9, player_colors.of(slot))
+        else
+            glyphs(context, sheet, label, x, entry.z + 3, 9)
+        end
     end
     for _, spark in ipairs(entry.sparks) do
         local source = spark_frames[spark.frame]
@@ -500,6 +510,7 @@ function screen.describe(state)
     local parts = {"frame=" .. current.frame_number, "background=" .. current.background_row,
         "camera=" .. current.camera, "round=" .. current.round_counter, "winner=" .. current.winner}
     if current.paused then parts[#parts + 1] = "paused" end
+    if current.menu_hold then parts[#parts + 1] = "menu_hold=" .. current.menu_hold end
     if current.mode == constants.modes.demo then parts[#parts + 1] = current.random_game and "demo" or "demo_ending" end
     if current.cheat_lock > 0 then
         local counts = current.function_counts
@@ -623,7 +634,8 @@ follow_step = function(state, current)
     state.follow_camera, state.follow_motion = camera, step
 end
 
--- camera: the camera of this computer ({mode = "dynamic", widest = N}) or nil (classic or wide by window_bounds).
+-- camera: the new fight screen's camera of this computer ({mode = "modern", widest = N, zoom = percent or 0}), or nil
+-- for the classic picture.
 function screen.draw(state, context, window_bounds, camera)
     context.viewport(constants.screen.width, constants.screen.height, 0, 0, 0)
     local view = state.view
@@ -631,78 +643,44 @@ function screen.draw(state, context, window_bounds, camera)
     if not view then return end
     local spectated = state.follow and state.spectated
     if state.follow and state.follow_camera then
-        view = {camera = math.floor(state.follow_camera), items = view.items, paused = view.paused, shake = view.shake,
+        view = {camera = math.floor(state.follow_camera), items = view.items, paused = view.paused, held_by = view.held_by, shake = view.shake,
             stage = view.stage}
     end
-    local bounds, passable_bounds, wide
-    local dynamic = camera and camera.mode == "dynamic" and context.render_scale
-    if dynamic then
-        -- Without a window (headless runs) the camera uses the classic picture.
+    local bounds, passable_bounds, wide, closed, layout
+    local modern = camera and camera.mode == "modern" and context.render_scale
+    if modern then
+        -- Without a window (headless runs) the screen uses the classic picture's size.
         window_bounds = window_bounds or {left = 0, top = 0, right = constants.screen.width, bottom = constants.screen.height}
-        -- The dynamic camera (base/ui/camera_view): the world draws 1:1 into a texture `width` units across and the
+        -- The new fight screen (docs/fight-screen.md): the cards at the top, the world in the middle of the rows under
+        -- them. The camera (base/ui/camera_view) draws the world 1:1 into a texture `width` units across and the
         -- art's height, and the engine scales it into the window's width; the HUD draws over it at its own size.
-        state.camera_view = state.camera_view or camera_view.create()
-        local window_width = window_bounds.right - window_bounds.left
-        local left, width = camera_view.step(state.camera_view, view, current, state.follow, window_width, camera.widest)
+        local info = fight_hud.stage_info(current)
+        layout = fight_hud.layout(window_bounds, current, info)
+        state.hud_layout, state.stage_info = layout, info
+        state.camera_view = state.camera_view or camera_view.create(camera.zoom)
+        local window_width = layout.width
+        local art_top, art_bottom = camera_view.top, camera_view.bottom(current)
+        local rows = art_bottom - art_top
+        local region = math.max(layout.region_bottom - layout.region_top, 1)
+        local left, width = camera_view.step(state.camera_view, view, current, state.follow,
+            {window_width = window_width, closest = window_width * rows / region, widest = camera.widest})
         local scale = window_width / width
-        local band = camera_view.bottom - camera_view.top
-        local height = math.floor(band * scale + 0.5)
+        local height = math.floor(rows * scale + 0.5)
+        layout.band_top = layout.region_top + math.floor((region - height) / 2)
+        layout.band_bottom = layout.band_top + height
+        layout.view_left, layout.view_width = left, width
         local stage_width = current.stage.width or constants.screen.width
         wide = {left = 0, right = width, camera = left}
-        view = {camera = left, items = view.items, paused = view.paused, shake = view.shake, stage = view.stage}
+        view = {camera = left, items = view.items, paused = view.paused, held_by = view.held_by, shake = view.shake,
+            stage = view.stage}
         bounds = {left = math.max(0, -left), right = math.min(width, stage_width - left)}
         passable_bounds = {left = bounds.left, right = bounds.right}
-        if current.stage_bound > 0 then passable_bounds.right = math.min(bounds.right, current.stage_bound - left) end
-        -- The band ends at the bottom of the classic picture; the HUD keeps the rows above it.
-        context.render_area(window_bounds.left, camera_view.bottom - height, window_width, height, 0, camera_view.top,
-            math.floor(scale * 1000 + 0.5))
-        context.clip(passable_bounds.left, camera_view.top, passable_bounds.right - passable_bounds.left, band)
-    elseif window_bounds and (window_bounds.left < 0 or window_bounds.top < 0
-            or window_bounds.right > constants.screen.width or window_bounds.bottom > constants.screen.height) then
-        -- The stage's edges are the screen's edges: a window of the full screen width scrolls across the stage
-        -- (slower than the game's camera, which follows the fighters on a 794 wide view) and always contains
-        -- that classic view. Nothing is scaled and nothing slides in at the stage ends.
-        local stage_width = current.stage.width or constants.screen.width
-        local window_width = window_bounds.right - window_bounds.left
-        -- The window scrolls across the part of the stage that is open, so that its edge is the screen's edge: the
-        -- whole stage, or, in Stage mode, the current section (it grows step by step). Nothing is drawn beyond a
-        -- section that is narrower than the window.
-        local limit = stage_width
-        if current.stage_bound >= window_width and current.stage_bound < limit then limit = current.stage_bound end
-        local camera
-        if stage_width > window_width and current.stage_bound > 0 and current.stage_bound < window_width then
-            -- The open section is narrower than the window: all of it is shown, from its left edge.
-            camera = 0
-        elseif stage_width > window_width then
-            camera = math.floor(math.min(view.camera, limit - constants.screen.width) * (limit - window_width) / (limit - constants.screen.width))
-        else
-            -- A stage narrower than the window is centred.
-            camera = math.floor((stage_width - window_width) / 2)
+        -- Stage mode's closed part shows darker (drawn after the fighters).
+        if current.stage_bound > 0 and current.stage_bound - left < bounds.right then
+            closed = {left = math.max(bounds.left, current.stage_bound - left), right = bounds.right, top = art_top, rows = rows}
         end
-        if stage_width > window_width then
-            -- The window moves smoothly when the section opens up, and always holds the classic 794 wide view.
-            local previous = state.wide_camera
-            if previous then camera = math.max(previous - 10, math.min(previous + 10, camera)) end
-            camera = math.max(view.camera + constants.screen.width - window_width, math.min(view.camera, camera))
-            camera = math.max(0, math.min(stage_width - window_width, camera))
-            state.wide_camera = camera
-        end
-        wide = {left = window_bounds.left, right = window_bounds.right, camera = camera}
-        -- World x is drawn at x - shift in viewport coordinates.
-        local shift = camera - window_bounds.left
-        local classic_right = view.camera + constants.screen.width - shift
-        view = {camera = shift, items = view.items, paused = view.paused, shake = view.shake, stage = view.stage}
-        -- Only matters for a stage narrower than the window.
-        bounds = {left = math.max(window_bounds.left, -shift), right = math.min(window_bounds.right, stage_width - shift)}
-        passable_bounds = {left = bounds.left, right = bounds.right}
-        if current.stage_bound > 0 then
-            -- Preserve the original picture; restrict only the extended area.
-            passable_bounds.right = math.min(bounds.right, math.max(classic_right, current.stage_bound - shift))
-        end
-        context.render_area(window_bounds.left, window_bounds.top,
-            window_bounds.right - window_bounds.left, window_bounds.bottom - window_bounds.top)
-        context.clip(passable_bounds.left, window_bounds.top,
-            passable_bounds.right - passable_bounds.left, window_bounds.bottom - window_bounds.top)
+        context.render_area(layout.left, layout.band_top, window_width, height, 0, art_top, math.floor(scale * 1000 + 0.5))
+        context.clip(passable_bounds.left, art_top, passable_bounds.right - passable_bounds.left, rows)
     end
     if current.background_row == constants.background_rows.lee_on_road then
         background.paint_lee_on_road(context, view.camera, bounds)
@@ -713,18 +691,32 @@ function screen.draw(state, context, window_bounds, camera)
         passable_bounds and passable_bounds.right - passable_bounds.left or constants.screen.width, constants.screen.height - 128)
     local lighting = options.current()
     for _, entry in ipairs(view.items) do
-        draw_item(context, current.stage, view, entry, passable_bounds, lighting)
+        draw_item(context, current.stage, view, entry, passable_bounds, lighting, modern)
     end
     context.clip()
     -- Ghosts and combo counters (OpenLF2 extension).
     fight_effects.draw(state.effects, context, view)
-    -- The dynamic camera: everything after the world (the HUD, the texts, the flow's overlays) draws at the
-    -- window's scale over the picture.
-    if dynamic then context.overlay(true) end
+    if closed then context.fill(closed.left, closed.top, closed.right - closed.left, closed.rows, 0, 0, 0, 150) end
+    -- The new fight screen: everything after the world (the HUD, the texts, the flow's overlays) draws at the
+    -- window's scale over the picture, and the free rows above and below the world get a dark gradient.
+    if modern then
+        context.overlay(true)
+        local function gradient(top, bottom, from, to)
+            local steps = 8
+            for step = 0, steps - 1 do
+                local y0 = top + math.floor((bottom - top) * step / steps)
+                local y1 = top + math.floor((bottom - top) * (step + 1) / steps)
+                local value = math.floor(from + (to - from) * step / (steps - 1))
+                if y1 > y0 then context.fill(layout.left, y0, layout.width, y1 - y0, value, value, math.floor(value * 1.6)) end
+            end
+        end
+        gradient(layout.top, layout.band_top, 8, 22)
+        gradient(layout.band_bottom, layout.bottom, 22, 8)
+    end
     if spectated then
         local name = spectated < 8 and controls.name(spectated) or "Com"
-        font.gdi(context, "Following " .. name .. "  (Tab: next)", math.floor(constants.screen.width / 2), 132,
-            0xffffff, nil, "center")
+        font.gdi(context, "Following " .. name .. "  (Tab: next)", math.floor(constants.screen.width / 2),
+            layout and layout.region_top or 132, 0xffffff, nil, "center")
     end
     for _, command in ipairs(view.stage or {}) do
         if command[1] == "sprite" then context.sprite(command[2], command[3], command[4], command[5], true)
@@ -739,7 +731,11 @@ function screen.draw(state, context, window_bounds, camera)
             else
                 context.fill(command[2], command[3], command[4], command[5], 0, 0, 0)
             end
-        elseif command[1] == "text" then font.gdi(context, command[2], command[3], command[4], command[5] and colorref(command[5]))
+        elseif command[1] == "text" then
+            -- The new fight screen shows Stage mode's status line in its stage panel and cards.
+            if not (layout and command.status) then
+                font.gdi(context, command[2], command[3], command[4], command[5] and colorref(command[5]))
+            end
         elseif command[1] == "caption" then
             -- Outlined bitmap text in a team font (the original's four-way offset draw).
             for _, offset in ipairs({{-1, 1}, {-1, 0}, {0, 1}, {0, 0}}) do
@@ -747,9 +743,21 @@ function screen.draw(state, context, window_bounds, camera)
             end
         end
     end
-    draw_status(context, current)
+    if layout then
+        fight_hud.draw_cards(context, current, layout)
+        fight_hud.draw_bosses(context, layout)
+    else
+        draw_status(context, current)
+    end
     if view.paused then
         context.image("pe/pause", 360, 288, true)
+        -- A network game's settings menus hold the fight (base/game/match "menu_hold"): who holds it.
+        if view.held_by then
+            local names = {}
+            for slot in view.held_by:gmatch("%d") do names[#names + 1] = controls.name(tonumber(slot)) end
+            font.gdi(context, "Paused by " .. table.concat(names, ", ") .. " (settings menu)",
+                math.floor(constants.screen.width / 2), 330, 0xffffff, nil, "center")
+        end
         return
     end
     -- After the end loop: the demo's exit hint and DEMO picture, or the function-key line (GDI

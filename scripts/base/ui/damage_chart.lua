@@ -4,90 +4,24 @@
 -- Damage share chart (OpenLF2 extension): a 100% stacked area chart over a fight, like the timeline at the end of a
 -- game of Age of Empires II. The chart always has the same height; at each moment, each fighter's band is their
 -- share of all damage dealt so far, and each kill is a mark on the killer's band. It only reads the fight, so it
--- never changes a network game or a recording. Dragging the chart moves it, dragging its bottom-right corner resizes
--- it, and the place and size are saved in config.json ("damage_chart").
+-- never changes a network game or a recording. It is a panel (base/ui/panels): it can move anywhere in the window.
 local font = require("base/ui/font")
 local controls = require("base/ui/controls")
-local constants = require("base/game/constants")
 
 local chart = {}
 
-local screen_width, screen_height = constants.screen.width, constants.screen.height
--- Below the status panels at the top right, so that the HP bars stay visible.
-local defaults = {x = screen_width - 226, y = 132, width = 220, height = 100}
-local limits = {width = {120, 600}, height = {64, 400}}
 -- A sample every half second of fight time (30 fight frames per second).
 local sample_frames = 15
 local max_columns = 40
 local title_height, legend_height, handle_size = 13, 13, 9
--- One color for each player slot.
-local colors = {{0x4e, 0x9b, 0xff}, {0xff, 0x6b, 0x6b}, {0x4c, 0xd0, 0x7d}, {0xff, 0xc2, 0x3d},
-    {0xb0, 0x7c, 0xff}, {0x3d, 0xd6, 0xd0}, {0xff, 0x8f, 0xc7}, {0xff, 0x9a, 0x3d}}
-
-local function clamp(value, low, high) return math.max(low, math.min(high, value)) end
-
-local function fit(layout)
-    layout.width = clamp(layout.width, limits.width[1], limits.width[2])
-    layout.height = clamp(layout.height, limits.height[1], limits.height[2])
-    layout.x = clamp(layout.x, 0, screen_width - layout.width)
-    layout.y = clamp(layout.y, 0, screen_height - layout.height)
-end
+local panels = require("base/ui/panels")
+-- One color for each player slot (base/ui/player_colors).
+local player_colors = require("base/ui/player_colors")
+local colors = {}
+for slot = 0, 7 do colors[slot + 1] = {player_colors.rgb(player_colors.of(slot))} end
 
 function chart.create()
-    local state = {x = defaults.x, y = defaults.y, width = defaults.width, height = defaults.height,
-        samples = {}, kills = {}, kill_counts = {}, button = false}
-    local document = engine.read_settings()
-    local saved = type(document) == "table" and document.damage_chart
-    if type(saved) == "table" then
-        for _, key in ipairs({"x", "y", "width", "height"}) do
-            local value = saved[key]
-            if type(value) == "number" and value == value and value > -10000 and value < 10000 then
-                state[key] = math.floor(value)
-            end
-        end
-    end
-    fit(state)
-    return state
-end
-
-local function save(state)
-    local document = engine.read_settings()
-    if type(document) ~= "table" then document = {} end
-    document.damage_chart = {x = state.x, y = state.y, width = state.width, height = state.height}
-    engine.write_settings(document)
-end
-
-local function inside(state, x, y)
-    return x >= state.x and x < state.x + state.width and y >= state.y and y < state.y + state.height
-end
-
--- The local mouse (before a network game exchanges input): a press on the chart starts a move, or a resize on the
--- bottom-right corner; releasing the button saves the new place.
-function chart.pointer(state, input)
-    local x, y = input.pointer_x, input.pointer_y
-    local valid = x and y and x >= 0 and y >= 0
-    local pressed = input.button and not state.button
-    state.button = input.button
-    if pressed and valid and inside(state, x, y) then
-        if x >= state.x + state.width - handle_size and y >= state.y + state.height - handle_size then
-            state.drag = {resize = true, dx = state.x + state.width - x, dy = state.y + state.height - y}
-        else
-            state.drag = {dx = x - state.x, dy = y - state.y}
-        end
-    end
-    local drag = state.drag
-    if drag and input.button and valid then
-        if drag.resize then
-            state.width = clamp(x + drag.dx - state.x, limits.width[1], math.min(limits.width[2], screen_width - state.x))
-            state.height = clamp(y + drag.dy - state.y, limits.height[1], math.min(limits.height[2], screen_height - state.y))
-        else
-            state.x, state.y = x - drag.dx, y - drag.dy
-        end
-        fit(state)
-    elseif drag and not input.button then
-        state.drag = nil
-        save(state)
-    end
+    return {samples = {}, kills = {}, kill_counts = {}}
 end
 
 -- The fighter in each player slot: a player's, or the computer's in that slot.
@@ -110,11 +44,13 @@ function chart.observe(state, match)
         state.closed = false
     end
     local over = (match.round_counter or 0) > 0
-    if match.frame_number == state.last_frame or over and state.closed then return end
+    -- Fight time (`elapsed`), which stops while the fight is paused or held, not the frames, which go on.
+    local time = match.elapsed or match.frame_number
+    if time == state.last_frame or over and state.closed then return end
     -- A sample every `sample_frames` frames of the fight, also when one look covers many frames (a network game
     -- that catches up runs many ticks a frame).
-    local due = not state.last_frame or math.floor(match.frame_number / sample_frames) ~= math.floor(state.last_frame / sample_frames)
-    state.last_frame = match.frame_number
+    local due = not state.last_frame or math.floor(time / sample_frames) ~= math.floor(state.last_frame / sample_frames)
+    state.last_frame = time
     local list = fighters(match)
     for _, fighter in ipairs(list) do
         local kills = fighter.value.kills or 0
@@ -147,8 +83,8 @@ local function bands(sample, slots, top, height)
     return edges
 end
 
-function chart.draw(state, context)
-    local x, y, width, height = state.x, state.y, state.width, state.height
+-- The chart at (x, y), `width` x `height` (its panel, base/ui/panels).
+function chart.draw(state, context, x, y, width, height)
     context.fill(x, y, width, height, 0x0c, 0x10, 0x24, 190)
     context.fill(x, y, width, 1, 0x80, 0x88, 0xb0)
     context.fill(x, y + height - 1, width, 1, 0x80, 0x88, 0xb0)
@@ -206,12 +142,7 @@ function chart.draw(state, context)
         font.gdi(context, name, legend_x + 10, legend_y - 1, 0xd0d0e8)
         legend_x = legend_x + needed
     end
-    -- The resize corner: three short diagonal lines.
-    for _, length in ipairs({3, 6, 9}) do
-        for step = 0, length - 1 do
-            context.fill(x + width - 3 - step, y + height - 3 - (length - 1 - step), 1, 1, 0xa0, 0xa8, 0xd0)
-        end
-    end
+    panels.draw_handle(context, x, y, width, height)
 end
 
 return chart

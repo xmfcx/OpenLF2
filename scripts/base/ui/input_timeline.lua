@@ -5,14 +5,12 @@
 -- per key, scrolling from right to left and fading with age. A thin grey line is the key as held on the keyboard; the
 -- colored bar under it is the key as the fight read it (it reads the keys on every second fight frame, marked by the
 -- ticks under the rows), so the input buffer of the game speed menu (base/ui/flow) shows at work. The header shows
--- how many key states wait in that buffer. V shows or hides it, dragging moves it, and both are saved in config.json
--- ("input_timeline"). It only reads the keys, so it never changes a network game or a recording.
+-- how many key states wait in that buffer. V shows or hides it. It is a panel (base/ui/panels): it can move anywhere
+-- in the window. It only reads the keys, so it never changes a network game or a recording.
 local font = require("base/ui/font")
-local constants = require("base/game/constants")
 
 local timeline = {}
 
-local screen_width, screen_height = constants.screen.width, constants.screen.height
 local history = 150
 local column = 2
 local label_width, row_height, header_height, footer_height = 26, 9, 13, 6
@@ -28,53 +26,18 @@ local keys = {
 local fade_frames = 25
 local toggle_key = 0x56
 
-local function clamp(value, low, high) return math.max(low, math.min(high, value)) end
+timeline.width, timeline.height = width, height
 
 function timeline.create()
-    local state = {x = 6, y = screen_height - height - 6, shown = true, frames = {}, button = false}
-    local document = engine.read_settings()
-    local saved = type(document) == "table" and document.input_timeline
-    if type(saved) == "table" then
-        if type(saved.x) == "number" and saved.x == saved.x then state.x = math.floor(saved.x) end
-        if type(saved.y) == "number" and saved.y == saved.y then state.y = math.floor(saved.y) end
-        if type(saved.shown) == "boolean" then state.shown = saved.shown end
-    end
-    state.x = clamp(state.x, 0, screen_width - width)
-    state.y = clamp(state.y, 0, screen_height - height)
-    return state
+    return {frames = {}}
 end
 
-local function save(state)
-    local document = engine.read_settings()
-    if type(document) ~= "table" then document = {} end
-    document.input_timeline = {x = state.x, y = state.y, shown = state.shown}
-    engine.write_settings(document)
-end
-
--- The local keys and mouse, before a network game exchanges input: V shows or hides the timeline, and a press on it
--- starts a move.
-function timeline.pointer(state, input)
+-- The local keys, before a network game exchanges input: returns true when V asks to show or hide the timeline.
+function timeline.toggled(state, input)
     local toggle = input.keys[toggle_key] == true
-    if toggle and not state.toggle_held then
-        state.shown = not state.shown
-        save(state)
-    end
+    local fresh = toggle and not state.toggle_held
     state.toggle_held = toggle
-    local x, y = input.pointer_x, input.pointer_y
-    local valid = x and y and x >= 0 and y >= 0
-    local pressed = input.button and not state.button
-    state.button = input.button
-    if state.shown and pressed and valid and x >= state.x and x < state.x + width and y >= state.y
-       and y < state.y + height then
-        state.drag = {dx = x - state.x, dy = y - state.y}
-    end
-    if state.drag and input.button and valid then
-        state.x = clamp(x - state.drag.dx, 0, screen_width - width)
-        state.y = clamp(y - state.drag.dy, 0, screen_height - height)
-    elseif state.drag and not input.button then
-        state.drag = nil
-        save(state)
-    end
+    return fresh
 end
 
 -- One frame of a fight: `held`, the keys as held; `read`, the keys the fight read this frame (nil when it did not
@@ -108,9 +71,9 @@ local function runs(context, frames, left, y, h, test, color)
     end
 end
 
-function timeline.draw(state, context)
-    if not state.shown or not state.match then return end
-    local x, y = state.x, state.y
+-- The timeline at (x, y) (its panel, base/ui/panels).
+function timeline.draw(state, context, x, y)
+    if not state.match then return end
     context.fill(x, y, width, height, 0x0a, 0x0e, 0x1e, 185)
     context.fill(x, y, width, 1, 0x70, 0x78, 0xa0)
     context.fill(x, y + height - 1, width, 1, 0x70, 0x78, 0xa0)

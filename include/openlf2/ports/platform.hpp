@@ -159,8 +159,11 @@ struct UiCommand {
     // slider: an integer from x to y (value as text); image: the bitmap `value`, the source rectangle "x,y,w,h" in
     // `label` (empty: the whole bitmap), then "|" and the colors (RRGGBB hex, comma separated) of cursor frames.
     // progress: a bar filled to x per mille, with `label` on it.
+    // bar: a plain bar (the fight screen's HP and MP): filled to x per mille in `color`, to y per mille behind it in the
+    // first color of `value` and the rest in the second ("RRGGBB,RRGGBB" hex), with `label` at its right end.
+    // group, end_group: the elements between them act as one (a face, then its name and bars on the same line).
     enum class Kind { window, end_window, text, button, input, selectable, same_line, separator, spacing, child, end_child,
-        slider, image, progress };
+        slider, image, progress, bar, group, end_group };
     Kind kind = Kind::text;
     std::string id;    // letters, digits and '_'; the events name it
     std::string label; // the text shown (an input's hint)
@@ -171,10 +174,11 @@ struct UiCommand {
 };
 // Flags of UiCommand: a window without a title bar, a text that wraps, a big text, an input that takes the keyboard
 // when it appears, a child with a border, a button or selectable that cannot be used, a see-through window (over a
-// fight), a window that clicks pass through, an image that is also a button, a dim image.
+// fight), a window that clicks pass through, an image that is also a button, a dim image, a window with small spaces
+// (the fight screen's cards), a small text.
 enum UiFlag : int {
     ui_no_title = 1, ui_wrap = 2, ui_large = 4, ui_focus = 8, ui_border = 16, ui_disabled = 32, ui_glass = 64, ui_passive = 128,
-    ui_clickable = 256, ui_dim = 512
+    ui_clickable = 256, ui_dim = 512, ui_compact = 1024, ui_small = 2048
 };
 // What the player did with the menu elements of the previous frame.
 struct UiEvent {
@@ -220,6 +224,8 @@ struct InputSnapshot {
     // Alt+Enter was pressed: the host consumed both keys (Enter is not in `keys` or `key_downs`); the scripts
     // switch between fullscreen and window.
     bool toggle_fullscreen = false;
+    // Whole steps of the mouse wheel since the previous poll (positive: away from the player).
+    int wheel = 0;
 };
 // Setup screens shown before any game data exists, drawn with SDL's built-in 8x8 font (ASCII only).
 class SetupDialog {
