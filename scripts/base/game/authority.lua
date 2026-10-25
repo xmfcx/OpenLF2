@@ -19,11 +19,13 @@ local resend_limit = 32
 -- A hash of the true state every this many ticks, for the clients to compare.
 authority.hash_interval = 30
 
--- options: match = a fight (base/game/match) and random = its random position; owners[slot] = client id;
--- function_owner = the client whose function keys count; clients = list of client ids.
+-- options: owners[slot] = client id; clients = list of client ids; function_owner = the client whose function keys
+-- count, or all_functions = true for the function keys of every client together (a server session, like the
+-- original's network game); match = a fight to run on the final ticks and random = its random position, or none (a
+-- server session: the clients run the game).
 function authority.create(options)
     local state = {match = options.match, random = options.random, owners = options.owners,
-        function_owner = options.function_owner, tick = 0, final = {}, last_final = ticks.empty(), clients = {},
+        function_owner = options.function_owner, all_functions = options.all_functions, tick = 0, final = {}, last_final = ticks.empty(), clients = {},
         hashes = {}, results = {}, stats = {late = 0, predicted = 0}}
     for _, id in ipairs(options.clients) do
         -- `newest`: the newest tick up to which every input of the client arrived; `heard`: its newest message time
@@ -52,7 +54,7 @@ function authority.receive(state, message, now)
             for slot = 0, 7 do
                 if state.owners[slot] == message.from then own.slots[slot] = input.slots[slot] or "" end
             end
-            if state.function_owner == message.from then
+            if state.all_functions or state.function_owner == message.from then
                 own.functions, own.function_presses = input.functions or "", input.function_presses or ""
             end
             client.inputs[tick] = own
@@ -76,9 +78,14 @@ local function finalize(state, tick, now)
             final.slots[slot] = now - client.heard > neutral_ms and "" or state.last_final.slots[slot]
         end
     end
-    local function_client = state.clients[state.function_owner]
-    local function_input = function_client and function_client.inputs[tick]
-    if function_input then final.functions, final.function_presses = function_input.functions, function_input.function_presses end
+    -- Function keys are not predicted: a missing input has none.
+    for id, client in pairs(state.clients) do
+        local input = client.inputs[tick]
+        if input and (state.all_functions or id == state.function_owner) then
+            final.functions = ticks.merge(final.functions, input.functions or "")
+            final.function_presses = ticks.merge(final.function_presses, input.function_presses or "")
+        end
+    end
     state.final[tick], state.last_final = final, final
     -- Inputs for a final tick are not needed anymore, from any client.
     for _, client in pairs(state.clients) do
@@ -86,6 +93,7 @@ local function finalize(state, tick, now)
         if client.newest < tick then client.newest = tick end
         while client.inputs[client.newest + 1] do client.newest = client.newest + 1 end
     end
+    if not state.match then return end
     local result = ticks.with_random(state, function()
         local stepped = match.step(state.match, ticks.held(final))
         sounds.flush(state.match)

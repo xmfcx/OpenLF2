@@ -103,6 +103,10 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 - Every 30 ticks, each client sends a hash of its confirmed state for a tick, and the server compares it with its own. On a difference, the server sends a snapshot of the true state, the client takes it, and the client writes both states and the last inputs to the log. The game heals itself and the bug can be found.
 - The profile check stays: all clients and the server must run the same scripts and engine version. The versions feature delivers them.
 
+### A session (built)
+
+The server program does not run the game itself yet. After the lobby, a session starts: the server sends its random state and the players' slots, and from then on it makes every tick of the whole game final, in the menus and in the fights. The clients run the original menus in lockstep on the final ticks (base/game/online `exchange`): each frame takes the next final tick, like the original's network game, so the menus have the delay of one round trip. A fight runs with rollback on the same ticks, counted from its first tick; once the tick that ends it is final, the menus go on from the next tick. Every 30 ticks of a fight, each client sends a hash of its final state, and the server compares the clients and logs a difference. To run the game on the server (for returning players and saved matches), the server needs the flow without a window.
+
 ## Bad connections
 
 | Problem | What happens |

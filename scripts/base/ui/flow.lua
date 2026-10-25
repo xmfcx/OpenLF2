@@ -22,6 +22,8 @@ local speed_menu = require("base/ui/speed_menu")
 local damage_chart = require("base/ui/damage_chart")
 local input_timeline = require("base/ui/input_timeline")
 local chat = require("base/ui/chat")
+local online = require("base/game/online")
+local imgui = require("base/ui/imgui")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -146,8 +148,10 @@ end
 -- Ends the session (a network connection, or a local game) and opens the launch menu with a clean state: the next
 -- game starts as after a program start. `message` (or nil) shows on the launch menu.
 local function disconnect(state, message)
-    if state.session then network.close(state.session) end
-    state.session = nil
+    local online_session = state.session and state.session.online
+    if online_session then online.close(state.session)
+    elseif state.session then network.close(state.session) end
+    state.session, state.leave_dialog = nil, nil
     controls.replace_names(nil)
     unlock.end_replay()
     state.active, state.wait_release = "launch", nil
@@ -157,6 +161,22 @@ local function disconnect(state, message)
     state.speed_menu, state.speed_release = nil, nil
     speed.fast = false
     music.play("bgm/main.wma")
+    -- A server's session: the network menu, with the reason.
+    if online_session then
+        state.online_menu = require("base/ui/online_menu").create(state.options, message)
+        state.active = "online_menu"
+    end
+end
+-- The end of a server's session while connected (the title's Quit, or the server ended it): back to its lobby.
+local function back_to_lobby(state)
+    state.session, state.leave_dialog = nil, nil
+    controls.replace_names(nil)
+    state.title = title.create(state.options)
+    state.characters, state.championship, state.championship_options, state.battle_config = nil, nil, nil, nil
+    state.speed_menu, state.speed_release = nil, nil
+    speed.fast = false
+    music.play("bgm/main.wma")
+    state.active, state.wait_release = "online_lobby", true
 end
 
 local function route(state, input, context)
@@ -187,6 +207,12 @@ local function route(state, input, context)
        and state.match.match.replay and (requested == "title" or requested == "round_over") then
         context.action("quit")
         return
+    end
+    -- A server's session starts like the original's network game: the title menu, on the server's final ticks.
+    if requested == "online_session" then
+        state.network = {session = state.online_lobby.online}
+        state.network.session.online = true
+        requested = "network_ready"
     end
     if requested == "versions" then
         state.versions = require("base/ui/versions").create(state.options)
@@ -228,19 +254,6 @@ local function route(state, input, context)
         state.online_lobby = require("base/ui/online_lobby").create(state.options, request.address,
             state.options.network_port or constants.network.default_port, request.host and 20000 or nil)
         state.active = "online_lobby"
-    elseif requested == "online_fight" then
-        -- A server program started a fight: the server's random state and setup make the same fight here.
-        local lobby = state.online_lobby
-        -- The fighters show the names of the players who own them, the same on every computer.
-        local names = {}
-        for _, player in ipairs(lobby.online.lobby and lobby.online.lobby.players or {}) do names[player.slot + 1] = player.name end
-        controls.replace_names(names)
-        local options = require("base/game/online").fight_options(lobby.online, lobby.start)
-        state.match = require("base/ui/match_screen").create(options, lobby.online, lobby.start)
-        state.active, state.wait_release = "match", false
-    elseif requested == "round_over" and state.match.online then
-        state.active = "online_lobby"
-        state.wait_release = true
     elseif requested == "launch" then
         state.active = "launch"
         state.session = nil
@@ -260,9 +273,11 @@ local function route(state, input, context)
         else
             options = require("base/ui/character_select").match_options(state.characters)
         end
-        state.match = require("base/ui/match_screen").create(with_recording(state, options))
+        -- A server's session runs its fights with rollback (base/game/online).
+        local online_session = state.session and state.session.online and state.session or nil
+        state.match = require("base/ui/match_screen").create(with_recording(state, options), online_session)
         state.active = "match"
-        state.wait_release = true
+        state.wait_release = not online_session
     elseif requested == "championship" or requested == "team_championship" then
         state.championship_options = state.championship_options or (state.characters and state.characters.options)
             or {background = constants.background_rows.random, random_background = true, difficulty = 0}
@@ -336,9 +351,15 @@ local function route(state, input, context)
     elseif requested == "quit" and state.active == "title" then
         -- The title's Quit (OpenLF2 change): the original closes the program here, OpenLF2 goes back to the launch
         -- menu, whose Exit closes it. In a network game both computers choose it on the same frame and each closes
-        -- its side of the connection.
-        disconnect(state, nil)
-        state.wait_release = true
+        -- its side of the connection. In a server's session every client chooses it on the same tick and goes back to
+        -- the lobby, still connected.
+        if state.session and state.session.online then
+            online.send(state.session, {type = "lobby_return"})
+            back_to_lobby(state)
+        else
+            disconnect(state, nil)
+            state.wait_release = true
+        end
     elseif requested then context.action(requested) end
 end
 function flow.describe(state)
@@ -378,14 +399,25 @@ end
 -- own (the character selection, the fight) show it for three seconds after the mouse moves. Drawing only: the
 -- screens' own logic keeps the pointer it always had.
 local pointer_shown_ms = 3000
--- The connection to a server program while its lobby or one of its fights shows (base/game/online), and whether
--- a fight shows (it has the chat window of base/ui/chat; the lobby has its own chat panel).
+-- The connection to a server program while its lobby or its session shows (base/game/online), and whether the
+-- session shows (it has the chat window of base/ui/chat; the lobby has its own chat panel).
 local function online_connection(state)
-    local lobby = state.online_lobby
-    if not lobby then return nil end
-    if state.active == "match" and state.match.online then return lobby.online, true end
-    if state.active == "online_lobby" then return lobby.online, false end
+    if state.session and state.session.online then return state.session, true end
+    if state.active == "online_lobby" and state.online_lobby then return state.online_lobby.online, false end
     return nil
+end
+-- A short line about the screens and the network session, which the tests read from a window (OPENLF2_PROBE=1:
+-- the flow logs it every 15 frames).
+function flow.probe(state)
+    local connection = online_connection(state)
+    local parts = {"probe screen=" .. state.active}
+    if connection then
+        parts[#parts + 1] = string.format("online=%s chat_open=%s chat_lines=%d taunts_played=%d chat_release=%s",
+            connection.phase, tostring(state.chat and state.chat.open or false), #connection.chat,
+            connection.taunts_played or 0, tostring(state.chat and state.chat.release or false))
+    end
+    if state.leave_dialog then parts[#parts + 1] = "leave_dialog" end
+    return table.concat(parts, " ")
 end
 -- Screens drawn with Dear ImGui (base/ui/imgui), which draws its own pointer.
 local imgui_screens = {online_menu = true, online_lobby = true}
@@ -435,6 +467,15 @@ function flow.draw(state, context)
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
     local connection, fighting = online_connection(state)
     if fighting and state.chat then chat.draw(state.chat, context, connection) end
+    if state.leave_dialog then
+        imgui.window(context, "leave", "Leave the network game?", 247, 0, 300, 0)
+        imgui.text(context, "The others go on playing. Your fighter stands still.", nil, imgui.wrap)
+        imgui.spacing(context, 4)
+        imgui.button(context, "leave_game", "Leave", 120, 28)
+        imgui.same_line(context)
+        imgui.button(context, "stay", "Stay", -1, 28)
+        imgui.end_window(context)
+    end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
     if not pointer_drawn and state.local_pointer_x and not imgui_screens[state.active]
@@ -622,13 +663,15 @@ function flow.update(state, raw, context)
     -- The chat of a server program (base/ui/chat), in its lobby and its fights: while its line is open, it takes the
     -- keys, and the players' keys are held back.
     local connection, fighting = online_connection(state)
+    state.chat_open = false
     if connection then
         state.chat = state.chat or chat.create()
-        if fighting and chat.update(state.chat, input, connection) then
+        state.chat_open = fighting and chat.update(state.chat, input, connection)
+        if state.chat_open then
+            state.escape_held = true
             for slot = 0, 7 do input[slot] = "" end
             input.functions, input.function_presses, input.keys, input.presses, input.text = "", "", {}, {}, ""
         end
-        chat.play_taunts(connection, context)
     end
     -- The damage share chart follows the local mouse, before a network game exchanges input.
     if state.active == "match" then
@@ -640,13 +683,13 @@ function flow.update(state, raw, context)
     if state.active == "match" then
         local follow = nil
         if state.session then follow = state.session.host and {0, 1, 2, 3} or {4, 5, 6, 7} end
-        if state.match.online and state.match.online.slot then follow = {state.match.online.slot} end
+        if state.session and state.session.online then follow = {state.session.slot} end
         state.match.follow = follow
         local tab = input.keys[virtual_keys.tab] == true
         if tab and not state.tab_held then state.match.follow_next = (state.match.follow_next or 0) + 1 end
         state.tab_held = tab
     end
-    if state.session then
+    if state.session and not state.session.online then
         -- The game speed menu in a network game works on the local keys before they are sent. The game below keeps
         -- running (both peers must run the same frames), so the local players' keys are held back instead, while
         -- the menu is open and until the keys that closed it are let go; Escape closes it without disconnecting.
@@ -675,7 +718,40 @@ function flow.update(state, raw, context)
             input.functions, input.function_presses = "", ""
         end
     end
-    if state.session then
+    if state.session and state.session.online then
+        -- A server's session: the server ended it, or the connection failed.
+        local session = state.session
+        if session.phase == "lobby" then
+            back_to_lobby(state)
+            return
+        elseif session.phase ~= "session" then
+            disconnect(state, session.problem or i18n.tr("Network game disconnected"))
+            return
+        end
+        -- Escape asks before leaving; the game goes on meanwhile, with this computer's keys held back.
+        local events = imgui.events(input)
+        local escape = input.keys[virtual_keys.escape] == true and not state.chat_open
+        if escape and not state.escape_held then state.leave_dialog = not state.leave_dialog end
+        state.escape_held = input.keys[virtual_keys.escape] == true
+        if state.leave_dialog and events.clicked.leave_game then
+            disconnect(state, nil)
+            return
+        end
+        if events.clicked.stay then state.leave_dialog = nil end
+        if state.leave_dialog then
+            for slot = 0, 7 do input[slot] = "" end
+            input.functions, input.function_presses = "", ""
+        end
+        -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
+        if not (state.active == "match" and state.match.online) then
+            local combined, problem = online.exchange(session, input)
+            if problem then
+                disconnect(state, problem)
+                return
+            elseif not combined then return false
+            else input = combined end
+        end
+    elseif state.session then
         unlock.observe(input)
         if not state.session.pending then input.unlock_bits = unlock.take_pending() end
         if input.keys[virtual_keys.escape] and not (state.speed_menu or state.speed_release) then
@@ -795,6 +871,13 @@ function flow.update(state, raw, context)
         state.volume_frames = state.volume_frames - 1
     end
     music.flush(context)
+    -- Taunts play here: the commands of a frame that waits for the server are not used, and its sounds would be lost.
+    local taunting = online_connection(state)
+    if taunting and state.chat then chat.play_taunts(taunting, context) end
+    if state.options.probe then
+        state.probe_frames = (state.probe_frames or 0) + 1
+        if state.probe_frames % 15 == 0 then context.action("log " .. flow.probe(state)) end
+    end
     recording.tick_status(state.active == "match" and state.match.match.paused)
     context.speed(speed.fast)
     -- Show FPS (OpenLF2 extension): measured FPS, nil for a trace unless given; drawn in flow.draw.

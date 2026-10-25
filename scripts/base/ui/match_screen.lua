@@ -33,9 +33,9 @@ end
 
 screen.make_capture = make_capture
 
--- options: see base/game/match create(). connection, start: a fight of a server program (base/game/online), with
--- options from online.fight_options.
-function screen.create(options, connection, start)
+-- options: see base/game/match create(). connection: the session of a server program (base/game/online) that runs
+-- this fight with rollback.
+function screen.create(options, connection)
     -- --net-sim (developer, base/game/netsim): the fight runs through a simulated network; recording is off, because
     -- the screen's fight runs predicted ticks.
     local start_random
@@ -46,7 +46,7 @@ function screen.create(options, connection, start)
     local state = {match = match.create(options), effects = fight_effects.create()}
     state.match.capture = make_capture()
     if connection then
-        online.begin_fight(connection, start, state.match)
+        online.begin_match(connection, state.match)
         state.online = connection
     elseif netsim.params then
         state.netsim = netsim.create(state.match, options, start_random, make_capture)
@@ -174,20 +174,13 @@ local function rollback_compare(state)
 end
 
 -- A frame of a fight with rollback, through the simulated network or a server program: its sounds play here, and a
--- result counts once its tick is final. Escape leaves a server's fight.
+-- result counts once its tick is final.
 local function rollback_update(state, held, context)
     local played, results, stepped
     if state.online then
-        local escape = held.keys[constants.virtual_keys.escape] == true
-        if escape and not state.escape_held then
-            online.close(state.online)
-            context.action("launch")
-            return
-        end
-        state.escape_held = escape
+        -- Escape, and the end of the session, belong to the flow (base/ui/flow).
         played, results, stepped = online.frame(state.online, held)
         if state.online.client then state.overlay_match = rollback_client.confirmed_view(state.online.client) end
-        if state.online.phase == "failed" then results = {"finished"} end
     else
         played, results, stepped = netsim.frame(state.netsim, held)
         state.overlay_match = netsim.confirmed(state.netsim)
@@ -199,6 +192,7 @@ local function rollback_update(state, held, context)
     for _, result in ipairs(results) do
         if result == "finished" then context.action("round_over") return end
         if result == "leave" then context.action("title") return end
+        if result == "replay_error" then context.action("replay_error") return end
     end
 end
 
@@ -517,7 +511,10 @@ function screen.describe(state)
             run.phase, run.go, run.shutter, run.result, current.stage_bound, current.stage.width or constants.screen.width)
     end
     if state.netsim then parts[#parts + 1] = netsim.describe(state.netsim) end
-    if state.online and state.online.client then parts[#parts + 1] = "online=" .. rollback_client.describe(state.online.client) end
+    if state.online and state.online.client then
+        parts[#parts + 1] = "online=" .. rollback_client.describe(state.online.client) .. ",sent=" .. (state.online.hashes_sent or 0)
+            .. ",fights=" .. (state.online.fights or 0)
+    end
     local check = state.rollback_check
     if check then
         -- Times are averages per check, in milliseconds; `differ` names the fields of the first failed check.

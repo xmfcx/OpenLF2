@@ -899,9 +899,17 @@ private:
     void draw_ui(const Viewport& viewport) {
         if (ui_.empty()) {
             ui_keyboard_ = ui_mouse_ = false;
+            ui_shown_ = false;
             return;
         }
         if (!start_ui()) return;
+        // Without menus ImGui runs no frames, so the events of that time wait in its queue. A menu that appears must
+        // not take them: the Enter that opened a chat line would send it at once.
+        if (!ui_shown_) {
+            ImGui::GetIO().ClearEventsQueue();
+            ImGui::GetIO().ClearInputKeys();
+            ui_shown_ = true;
+        }
         int width = 0;
         int height = 0;
         if (!SDL_GetRenderOutputSize(renderer_.get(), &width, &height) || viewport.width < 1 || viewport.height < 1) return;
@@ -1490,6 +1498,7 @@ private:
     bool imgui_backend_ = false;
     bool ui_keyboard_ = false;
     bool ui_mouse_ = false;
+    bool ui_shown_ = false; // the previous frame had menus
 #endif
     // Touch: the finger that acts as the pointer, its last position in viewport coordinates,
     // and whether the pointer last moved by touch rather than by the mouse or a key.

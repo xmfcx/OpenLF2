@@ -20,6 +20,14 @@ function ticks.held(input)
     return held
 end
 
+-- The letters of `b` added to `a` (function keys of several clients).
+function ticks.merge(a, b)
+    for letter in b:gmatch(".") do
+        if not a:find(letter, 1, true) then a = a .. letter end
+    end
+    return a
+end
+
 function ticks.same(a, b)
     if (a.functions or "") ~= (b.functions or "") or (a.function_presses or "") ~= (b.function_presses or "") then
         return false

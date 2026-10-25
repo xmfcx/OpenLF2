@@ -151,7 +151,7 @@ function client.update(state, now)
     -- Results of final ticks only, so that a prediction cannot end a round that the server does not end.
     local last = math.min(state.confirmed, state.tick - 1)
     for tick = state.reported + 1, last do
-        if state.results[tick] then state.results_out[#state.results_out + 1] = state.results[tick] end
+        if state.results[tick] then state.results_out[#state.results_out + 1] = {result = state.results[tick], tick = tick} end
     end
     state.reported = math.max(state.reported, last)
     -- The server hashed its state after tick T; the client's state after T is the saved state of T + 1.
@@ -212,7 +212,7 @@ function client.describe(state)
         stats.hash_failures, state.delay, state.rtt or -1)
 end
 
--- Takes the sounds and results collected since the last call.
+-- Takes the sounds and results collected since the last call (each result with its tick: {result, tick}).
 function client.take(state)
     local played, results = state.sounds_out, state.results_out
     state.sounds_out, state.results_out = {}, {}

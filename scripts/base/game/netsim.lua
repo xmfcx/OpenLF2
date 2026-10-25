@@ -77,7 +77,9 @@ function netsim.frame(session, held)
     -- The rest of the frame (the screens) continues with client A's random position.
     engine.set_random_position(main.random[1], main.random[2], main.random[3])
     rollback_client.take(session.clients.b)
-    local played, results = rollback_client.take(main)
+    local played, entries = rollback_client.take(main)
+    local results = {}
+    for index, entry in ipairs(entries) do results[index] = entry.result end
     return played, results, main.new_ticks
 end
 

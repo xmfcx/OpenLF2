@@ -1032,6 +1032,7 @@ Result<void> run(const Configuration& config) {
         (config.preview_ending ? ", start_screen=\"ending\"" : "") +
         (config.replay ? ", start_screen=\"replay\"" : "") +
         (config.mouse_touch ? ", mouse_touch=true" : "") +
+        (std::getenv("OPENLF2_PROBE") != nullptr ? ", probe=true" : "") +
         (config.rollback_check ? ", rollback_check=true" : "") +
         (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
         (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
@@ -1439,6 +1440,11 @@ Result<void> run(const Configuration& config) {
                 else std::cerr << "Server: " << started.error().message << '\n';
                 continue;
             }
+            // A script's log line (the server program's log; the test probe, OPENLF2_PROBE).
+            if (action.starts_with("log ")) {
+                std::cout << action.substr(4) << std::endl;
+                continue;
+            }
             if (action == "open_recordings") {
                 if (const auto folder = recording_directory->path()) {
                     auto shown = platform->open_folder(*folder);
@@ -1489,6 +1495,11 @@ Result<void> run(const Configuration& config) {
         if (!presented) return std::unexpected(presented.error());
         auto music = platform->music(frame->music);
         if (!music) return std::unexpected(music.error());
+        // OPENLF2_LOG_SOUNDS=1 (tests): each sound the frame plays.
+        static const bool log_sounds = std::getenv("OPENLF2_LOG_SOUNDS") != nullptr;
+        if (log_sounds) {
+            for (const auto& sound : frame->sounds) std::cout << "sound " << sound.resource << ' ' << sound.volume << std::endl;
+        }
         auto played = platform->play(frame->sounds);
         if (!played) return std::unexpected(played.error());
         auto rumbled = platform->rumble(frame->rumbles);
