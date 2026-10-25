@@ -5,6 +5,7 @@
 #include "openlf2/core/json.hpp"
 #include "openlf2/core/files.hpp"
 #include "openlf2/ports/versions.hpp"
+#include "openlf2/ports/messages.hpp"
 #include "openlf2_build_info.hpp"
 #include <algorithm>
 #include <cmath>
@@ -52,9 +53,9 @@ struct BridgeSlot {
 struct ResourceBridge {
     ResourceBridge(const ResourceSource& source, const ScriptDataSource& data_source, ScriptRandom& generator,
                    SettingsStore& settings_store, ScriptRecordings& recording_service, NetworkTransport& transport,
-                   VersionStore* version_store)
+                   VersionStore* version_store, MessageTransport* message_transport)
         : resources(source), data(data_source), random(generator), settings(settings_store),
-          recordings(recording_service), network(transport), versions(version_store) {}
+          recordings(recording_service), network(transport), versions(version_store), messages(message_transport) {}
     const ResourceSource& resources;
     const ScriptDataSource& data;
     ScriptRandom& random;
@@ -62,7 +63,38 @@ struct ResourceBridge {
     ScriptRecordings& recordings;
     NetworkTransport& network;
     VersionStore* versions;
+    MessageTransport* messages;
     std::optional<Result<std::string>> pending_network;
+    // UDP messages (ports/messages.hpp): the result of the last operation, read by messages_operation.
+    std::optional<Result<std::vector<MessageEvent>>> pending_events;
+    std::optional<Result<std::uint32_t>> pending_peer;
+    std::optional<PeerQuality> pending_quality;
+    bool message_operation(std::string_view operation, std::string_view text, std::uint32_t first, std::uint32_t second)
+        noexcept {
+        try {
+            pending_events.reset();
+            pending_peer.reset();
+            pending_quality.reset();
+            const auto status = [this](Result<void> outcome) {
+                if (outcome) pending_peer = 0U;
+                else pending_peer = std::unexpected(outcome.error());
+            };
+            if (operation == "listen") status(messages->listen(text, static_cast<std::uint16_t>(first), second));
+            else if (operation == "connect") pending_peer = messages->connect(text, static_cast<std::uint16_t>(first));
+            else if (operation == "send") {
+                status(messages->send(first, static_cast<std::uint8_t>(second), std::span<const char>(text.data(), text.size())));
+            } else if (operation == "service") pending_events = messages->service();
+            else if (operation == "disconnect") { messages->disconnect(first); pending_peer = 0U; }
+            else if (operation == "close") { messages->close(); pending_peer = 0U; }
+            else if (operation == "quality") { pending_quality = messages->quality(first); pending_peer = 0U; }
+            else pending_peer = fail(ErrorCode::script, "Unknown messages operation");
+            return true;
+        } catch (...) {
+            pending_events.reset();
+            pending_peer.reset();
+            return false;
+        }
+    }
     std::optional<Result<ScriptValue>> pending_version;
     // Game versions (OpenLF2 extension, see ports/versions.hpp): "describe", "index", "install" id, "poll",
     // "delete" id, "launch" id [join address, port].
@@ -380,7 +412,10 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
                 break;
             case FrameOpcode::action: {
                 const auto name = reader.text();
-                if (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string_view::npos)
+                // "log TEXT": a line for the server program's output (printable ASCII only).
+                const bool log_line = name.starts_with("log ") && name.size() <= 512
+                    && std::all_of(name.begin(), name.end(), [](char character) { return character >= 0x20 && character <= 0x7e; });
+                if (!log_line && (name.empty() || name.find_first_not_of("abcdefghijklmnopqrstuvwxyz_") != std::string_view::npos))
                     throw std::runtime_error("invalid frame action");
                 frame.actions.emplace_back(name);
                 break;
@@ -392,6 +427,97 @@ Result<ScriptFrame> decode_frame(lua_State* state, int table, int count) {
     } catch (const std::exception& error) { return fail(ErrorCode::script, error.what()); }
 }
 
+// engine.messages(operation, ...): UDP messages to many peers (docs/netcode.md, ports/messages.hpp).
+//   "listen", address, port, peers -> true        "connect", address, port -> server peer number
+//   "send", peer, channel, bytes -> true           "service" -> list of {kind, peer, channel, data}
+//   "disconnect", peer / "close" -> true           "quality", peer -> round trip, its variance (ms), loss (per mille)
+// A failure returns nil and a message. `kind` is "connected", "disconnected" or "message".
+int messages_operation(lua_State* state) {
+    auto* bridge = resource_bridge(state);
+    if (!bridge->messages) {
+        lua_pushnil(state);
+        lua_pushliteral(state, "UDP messages are unavailable");
+        return 2;
+    }
+    if (lua_type(state, 1) != LUA_TSTRING) return luaL_error(state, "messages operation must be a string");
+    std::size_t operation_size = 0, size = 0;
+    const auto* operation = lua_tolstring(state, 1, &operation_size);
+    const std::string_view name(operation, operation_size);
+    const char* text = "";
+    std::uint32_t first = 0, second = 0;
+    const auto number = [state](int index, double low, double high) -> std::uint32_t {
+        if (lua_type(state, index) != LUA_TNUMBER) luaL_error(state, "messages argument %d must be a number", index);
+        const auto value = lua_tonumber(state, index);
+        if (!(value >= low && value <= high) || value != std::floor(value)) luaL_error(state, "messages argument %d out of range", index);
+        return static_cast<std::uint32_t>(value);
+    };
+    if (name == "listen" || name == "connect") {
+        if (lua_type(state, 2) != LUA_TSTRING) return luaL_error(state, "messages address must be a string");
+        text = lua_tolstring(state, 2, &size);
+        if (size > 64) return luaL_error(state, "messages address too long");
+        first = number(3, 1, 65535);
+        if (name == "listen") second = number(4, 1, 4095);
+    } else if (name == "send") {
+        first = number(2, 1, 4294967295.0);
+        second = number(3, 0, MessageTransport::channels - 1);
+        if (lua_type(state, 4) != LUA_TSTRING) return luaL_error(state, "messages data must be a string");
+        text = lua_tolstring(state, 4, &size);
+        if (size > MessageTransport::max_message_bytes) return luaL_error(state, "messages data too large");
+    } else if (name == "disconnect" || name == "quality") {
+        first = number(2, 1, 4294967295.0);
+    }
+    if (!bridge->message_operation(name, std::string_view(text, size), first, second)) {
+        return luaL_error(state, "messages allocation failed");
+    }
+    if (bridge->pending_events) {
+        if (!bridge->pending_events->has_value()) {
+            lua_pushnil(state);
+            const auto& message = bridge->pending_events->error().message;
+            lua_pushlstring(state, message.data(), message.size());
+            return 2;
+        }
+        const auto& events = bridge->pending_events->value();
+        lua_createtable(state, static_cast<int>(events.size()), 0);
+        for (std::size_t index = 0; index < events.size(); ++index) {
+            const auto& event = events[index];
+            lua_createtable(state, 0, 4);
+            lua_pushstring(state, event.kind == MessageEvent::Kind::connected ? "connected"
+                : event.kind == MessageEvent::Kind::disconnected ? "disconnected" : "message");
+            lua_setfield(state, -2, "kind");
+            lua_pushnumber(state, static_cast<lua_Number>(event.peer));
+            lua_setfield(state, -2, "peer");
+            lua_pushnumber(state, static_cast<lua_Number>(event.channel));
+            lua_setfield(state, -2, "channel");
+            lua_pushlstring(state, event.data.data(), event.data.size());
+            lua_setfield(state, -2, "data");
+            lua_rawseti(state, -2, static_cast<int>(index) + 1);
+        }
+        return 1;
+    }
+    if (!bridge->pending_peer || !bridge->pending_peer->has_value()) {
+        lua_pushnil(state);
+        if (bridge->pending_peer) {
+            const auto& message = bridge->pending_peer->error().message;
+            lua_pushlstring(state, message.data(), message.size());
+        } else {
+            lua_pushliteral(state, "messages failed");
+        }
+        return 2;
+    }
+    if (name == "connect") {
+        lua_pushnumber(state, static_cast<lua_Number>(bridge->pending_peer->value()));
+        return 1;
+    }
+    if (name == "quality") {
+        if (!bridge->pending_quality) return 0;
+        lua_pushnumber(state, static_cast<lua_Number>(bridge->pending_quality->round_trip_ms));
+        lua_pushnumber(state, static_cast<lua_Number>(bridge->pending_quality->round_trip_variance_ms));
+        lua_pushnumber(state, static_cast<lua_Number>(bridge->pending_quality->packet_loss_permille));
+        return 3;
+    }
+    lua_pushboolean(state, 1);
+    return 1;
+}
 // Binary transport only; the base Lua session owns packet schemas, handshake and lockstep.
 int network_operation(lua_State* state) {
     auto* bridge = resource_bridge(state);
@@ -768,6 +894,7 @@ int open_libraries(lua_State* state) {
     lua_setglobal(state, "openlf2_write_settings");
     const std::pair<const char*, lua_CFunction> recording_functions[] = {
         {"openlf2_network", network_operation}, {"openlf2_network_time", network_time}, {"openlf2_versions", version_operation},
+        {"openlf2_messages", messages_operation},
         {"openlf2_random_state", random_state}, {"openlf2_set_random_state", set_random_state},
         {"openlf2_random_position", random_position}, {"openlf2_set_random_position", set_random_position},
         {"openlf2_reset_random_sequence", reset_random_sequence}, {"openlf2_save_recording", save_recording},
@@ -900,8 +1027,10 @@ private:
 Result<std::unique_ptr<ScriptRuntime>> make_script_runtime(bool enable_jit, const ResourceSource& resources,
                                                            const ScriptDataSource& data, ScriptRandom& random,
                                                            SettingsStore& settings, ScriptRecordings& recordings,
-                                                           NetworkTransport& network, VersionStore* versions) {
-    auto bridge = std::make_unique<ResourceBridge>(resources, data, random, settings, recordings, network, versions);
+                                                           NetworkTransport& network, VersionStore* versions,
+                                                           MessageTransport* messages) {
+    auto bridge = std::make_unique<ResourceBridge>(resources, data, random, settings, recordings, network, versions,
+                                                   messages);
     State state(luaL_newstate());
     if (!state) return fail(ErrorCode::script, "cannot allocate Lua state");
 #ifdef __EMSCRIPTEN__

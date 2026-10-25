@@ -253,4 +253,12 @@ Result<std::unique_ptr<Platform>> make_platform(const ResourceSource& resources,
 Result<std::filesystem::path> settings_directory();
 // Starts another program with `arguments` and returns without waiting for it (game versions, OpenLF2 extension).
 Result<void> launch_program(const std::filesystem::path& program, std::span<const std::string> arguments);
+// A program that this one started and stops when this one quits (the server program of a hosted game).
+class ChildProgram {
+public:
+    virtual ~ChildProgram() = default;
+    [[nodiscard]] virtual bool running() noexcept = 0;
+};
+Result<std::unique_ptr<ChildProgram>> start_child_program(const std::filesystem::path& program,
+                                                         std::span<const std::string> arguments);
 }

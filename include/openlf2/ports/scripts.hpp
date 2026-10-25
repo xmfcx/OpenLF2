@@ -80,9 +80,11 @@ public:
     virtual Result<std::string> describe() = 0;
 };
 class VersionStore;
+class MessageTransport;
 // All services must outlive the runtime. `versions` is optional (game versions, OpenLF2 extension).
 Result<std::unique_ptr<ScriptRuntime>> make_script_runtime(bool enable_jit, const ResourceSource& resources,
                                                            const ScriptDataSource& data, ScriptRandom& random,
                                                            SettingsStore& settings, ScriptRecordings& recordings,
-                                                           NetworkTransport& network, VersionStore* versions = nullptr);
+                                                           NetworkTransport& network, VersionStore* versions = nullptr,
+                                                           MessageTransport* messages = nullptr);
 }

@@ -15,6 +15,7 @@
 #include "openlf2/ports/platform.hpp"
 #include "openlf2/ports/scripts.hpp"
 #include "openlf2/ports/versions.hpp"
+#include "openlf2/ports/messages.hpp"
 #include "openlf2_build_info.hpp"
 #include "openlf2/resources/background_data.hpp"
 #include "openlf2/resources/stage_data.hpp"
@@ -112,6 +113,10 @@ struct Configuration {
     std::string network_address;
     std::uint16_t network_port = 12345;
     bool headless = false;
+    // The server program (docs/netcode.md): no window, scripts run on the frame clock until the process stops.
+    bool server = false;
+    // A client of a server program: its address (with --port).
+    std::string connect_address;
     bool jit = OPENLF2_DEFAULT_JIT != 0;
     bool help = false;
     bool preview_backgrounds = false;
@@ -411,6 +416,17 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
         else if (argument == "--rollback-check") config.rollback_check = true;
+        else if (argument == "--server") {
+            config.server = true;
+            config.headless = true;
+        } else if (argument == "--connect") {
+            if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a value");
+            const auto& value = arguments[index];
+            if (value.empty() || value.size() > 15 || value.find_first_not_of("0123456789.") != std::string::npos) {
+                return fail(ErrorCode::format, "--connect needs a numeric IPv4 address");
+            }
+            config.connect_address = value;
+        }
         else if (argument == "--net-sim") {
             if (++index == arguments.size()) return fail(ErrorCode::format, argument + " needs a value");
             config.net_sim = arguments[index];
@@ -483,6 +499,9 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
             }
             else config.mods.emplace_back(value);
         } else return fail(ErrorCode::format, "unrecognized argument: " + argument);
+    }
+    if (config.server && (!config.network_role.empty() || !config.connect_address.empty() || config.replay)) {
+        return fail(ErrorCode::format, "--server runs alone, without --host, --join, --connect or a recording");
     }
     if (config.replay && (!config.network_role.empty() || config.preview_backgrounds || config.preview_ending)) {
         return fail(ErrorCode::format, "a recording cannot be combined with network or preview startup");
@@ -957,6 +976,7 @@ Result<void> run(const Configuration& config) {
         std::cerr << "OpenLF2 needs LF2_v2.0a.exe or lf2_v20a_Setup.exe; stopping.\n";
         return {};
     }
+    const std::filesystem::path installer_path = **installer;
     auto opened = InstallerArchive::open(**installer, *decompressor);
     if (!opened) return std::unexpected(opened.error());
     archive = std::move(*opened);
@@ -987,8 +1007,10 @@ Result<void> run(const Configuration& config) {
     if (config.replay) recordings.offer(*config.replay);
     auto network = make_network_transport();
     if (!network) return std::unexpected(network.error());
+    // UDP messages for the server design (docs/netcode.md); platforms without UDP run without them.
+    auto messages = make_message_transport();
     auto runtime = make_script_runtime(config.jit, resources, original_data, random, *settings, recordings, **network,
-                                       versions.get());
+                                       versions.get(), messages ? messages->get() : nullptr);
     if (!runtime) return std::unexpected(runtime.error());
     // Settings are host-generated literals; screens decide what an entry point means.
     const auto sources = bundle_source(scripts->modules) + std::string(bootstrap->begin(), bootstrap->end());
@@ -1011,12 +1033,39 @@ Result<void> run(const Configuration& config) {
         (config.replay ? ", start_screen=\"replay\"" : "") +
         (config.mouse_touch ? ", mouse_touch=true" : "") +
         (config.rollback_check ? ", rollback_check=true" : "") +
-        (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") + "}\n" + sources;
+        (config.net_sim.empty() ? std::string{} : ", net_sim=\"" + config.net_sim + "\"") +
+        (config.server ? ", server_port=" + std::to_string(config.network_port) : std::string{}) +
+        (config.connect_address.empty() ? std::string{} : ", connect_address=\"" + config.connect_address +
+            "\", connect_port=" + std::to_string(config.network_port)) + "}\n" + sources;
     Simulation simulation(std::move(*runtime), !config.headless);
     auto loaded = simulation.load(bundle);
     if (!loaded) return std::unexpected(loaded.error());
     if ((*network)->status() == NetworkStatus::listening) {
         std::cout << "Network listening on " << config.network_address << ':' << (*network)->local_port() << std::endl;
+    }
+    if (config.server) {
+        // The server program: one script frame on each tick of the original clock, until the process stops or the
+        // scripts ask to quit. An action "log TEXT" prints TEXT.
+        std::cout << "OpenLF2 server on UDP port " << config.network_port << std::endl;
+        const auto origin = std::chrono::steady_clock::now();
+        const auto milliseconds = [origin] {
+            return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - origin).count());
+        };
+        FrameClock clock(milliseconds());
+        while (true) {
+            if (!clock.due(milliseconds())) {
+                const auto wait = clock.sleep_ms(milliseconds());
+                std::this_thread::sleep_for(std::chrono::milliseconds(wait > 0 ? wait : 1));
+                continue;
+            }
+            auto frame = simulation.frame("");
+            if (!frame) return std::unexpected(frame.error());
+            for (const auto& action : frame->actions) {
+                if (action == "quit") return {};
+                if (action.starts_with("log ")) std::cout << action.substr(4) << std::endl;
+            }
+        }
     }
     if (config.headless) {
         // Runs each traced frame (or one idle frame) and loads every drawn resource once.
@@ -1030,7 +1079,12 @@ Result<void> run(const Configuration& config) {
         std::string music_track;
         bool music_running = false;
         bool music_available = true;
+        // A client of a server program follows real time: its trace frames keep the 33 ms clock.
+        const auto paced_origin = std::chrono::steady_clock::now();
         for (std::size_t index = 0; index < frames.size(); ++index) {
+            if (!config.connect_address.empty()) {
+                std::this_thread::sleep_until(paced_origin + std::chrono::milliseconds(FrameClock::normal_step * index));
+            }
             auto frame = simulation.frame(frames[index]);
             if (!frame) return std::unexpected(frame.error());
             // A trace frame denotes a committed script tick, not a socket polling attempt.
@@ -1119,6 +1173,8 @@ Result<void> run(const Configuration& config) {
     std::optional<std::string> chosen_file;
     std::optional<std::filesystem::path> dropped_file;
     bool accept_replay_drop = initial_frame->replay_drop.value_or(false);
+    // The server program of a game this computer hosts (stops with this program).
+    std::unique_ptr<ChildProgram> server_program;
     // Taps, typed text and controller buttons that came and went between two script frames.
     bool pressed = false;
     bool toggle_fullscreen = false; // Alt+Enter
@@ -1325,6 +1381,29 @@ Result<void> run(const Configuration& config) {
                 save_window();
                 return {};
             }
+            // Hosting a game (docs/netcode.md): this computer runs the server program on the same UDP port, until this
+            // program quits. The scripts then join it at 127.0.0.1.
+            if (action == "start_server") {
+                if (server_program && server_program->running()) continue;
+#ifdef _WIN32
+                const auto program = config.program_directory / "openlf2.exe";
+#else
+                const auto program = config.program_directory / "openlf2";
+#endif
+                const auto installer_text = installer_path.u8string();
+                const auto scripts_text = config.scripts.u8string();
+                std::vector<std::string> arguments{"--server", "--port", std::to_string(config.network_port), "--installer",
+                    std::string(installer_text.begin(), installer_text.end()), "--scripts",
+                    std::string(scripts_text.begin(), scripts_text.end())};
+                if (config.config_directory) {
+                    const auto directory = config.config_directory->u8string();
+                    arguments.insert(arguments.end(), {"--config-dir", std::string(directory.begin(), directory.end())});
+                }
+                auto started = start_child_program(program, arguments);
+                if (started) server_program = std::move(*started);
+                else std::cerr << "Server: " << started.error().message << '\n';
+                continue;
+            }
             if (action == "open_recordings") {
                 if (const auto folder = recording_directory->path()) {
                     auto shown = platform->open_folder(*folder);
@@ -1419,6 +1498,7 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "--renderer picks the SDL renderer for testing, e.g. opengl, opengles2, gpu or software; without it the GPU\n"
                          "        renderer is tried first (SDL_RENDER_DRIVER overrides).\n"
                          "--host IPv4 / --join IPv4 starts an OpenLF2 network game; --port N defaults to 12345.\n"
+                         "--server runs the server program (no window) on UDP --port N; --connect IPv4 joins a server.\n"
                          "FILE.lfr or --replay FILE opens a recording immediately, without navigating the menus.\n"
                          "        Use -- before a file name beginning with '-'; open one recording per process.\n"
                          "--config-dir keeps config.json there instead of the per-user directory (headless: in memory).\n"

@@ -1282,6 +1282,42 @@ Result<void> launch_program(const std::filesystem::path& program, std::span<cons
     return {};
 #endif
 }
+#if !(defined(__SWITCH__) || defined(__vita__) || defined(__EMSCRIPTEN__) || defined(__ANDROID__))
+namespace {
+class SdlChildProgram final : public ChildProgram {
+public:
+    explicit SdlChildProgram(SDL_Process* process) : process_(process) {}
+    ~SdlChildProgram() override {
+        if (running()) SDL_KillProcess(process_, false);
+        SDL_DestroyProcess(process_);
+    }
+    bool running() noexcept override {
+        int code = 0;
+        return !SDL_WaitProcess(process_, false, &code);
+    }
+private:
+    SDL_Process* process_;
+};
+}
+#endif
+Result<std::unique_ptr<ChildProgram>> start_child_program(const std::filesystem::path& program,
+                                                         std::span<const std::string> arguments) {
+#if defined(__SWITCH__) || defined(__vita__) || defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+    (void)program;
+    (void)arguments;
+    return fail(ErrorCode::unsupported, "this platform cannot start other programs");
+#else
+    const auto name = program.u8string();
+    std::vector<std::string> owned{std::string(name.begin(), name.end())};
+    owned.insert(owned.end(), arguments.begin(), arguments.end());
+    std::vector<const char*> argv;
+    for (const auto& argument : owned) argv.push_back(argument.c_str());
+    argv.push_back(nullptr);
+    SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+    if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
+    return std::unique_ptr<ChildProgram>(std::make_unique<SdlChildProgram>(process));
+#endif
+}
 Result<std::unique_ptr<Platform>> make_platform(const ResourceSource& resources, const Viewport& viewport,
                                                 const MusicDecoder& decoder, std::string_view renderer,
                                                 const std::optional<WindowPlacement>& placement) {

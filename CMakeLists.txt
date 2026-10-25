@@ -241,6 +241,20 @@ target_link_libraries(openlf2_adapter_network PRIVATE openlf2_core)
 if(WIN32)
     target_link_libraries(openlf2_adapter_network PRIVATE ws2_32)
 endif()
+# UDP messages to many peers (docs/netcode.md): ENet, built from its release archive. The web build has no UDP.
+if(OPENLF2_DEPENDENCY_PROVIDER STREQUAL "web")
+    target_sources(openlf2_adapter_network PRIVATE src/adapters/web/messages.cpp)
+else()
+    include(FetchContent)
+    FetchContent_Declare(enet
+        URL https://github.com/lsalzman/enet/archive/refs/tags/v1.3.18.tar.gz
+        URL_HASH SHA256=28603c895f9ed24a846478180ee72c7376b39b4bb1287b73877e5eae7d96b0dd)
+    FetchContent_MakeAvailable(enet)
+    target_sources(openlf2_adapter_network PRIVATE src/adapters/network/messages.cpp)
+    # ENet's own build sets its include folder for its directory only.
+    target_include_directories(openlf2_adapter_network SYSTEM PRIVATE ${enet_SOURCE_DIR}/include)
+    target_link_libraries(openlf2_adapter_network PRIVATE enet)
+endif()
 
 add_library(openlf2_adapter_download STATIC ${openlf2_download_source})
 target_link_libraries(openlf2_adapter_download PRIVATE openlf2_core)

@@ -23,6 +23,8 @@ local function new_array(capacity)
     return {}
 end
 local network, network_time = openlf2_network, openlf2_network_time
+-- UDP messages to many peers (OpenLF2 extension, docs/netcode.md); runtimes before it have none.
+local messages = openlf2_messages
 -- Game versions (OpenLF2 extension); runtimes before it have none.
 local versions = openlf2_versions
 local set_environment = setfenv
@@ -64,7 +66,7 @@ local function evaluate(declaration, previous, require_module)
             random_position = random_position, set_random_position = set_random_position,
             reset_random_sequence = reset_random_sequence, save_recording = save_recording,
             take_recording = take_recording, local_time = local_time, build_label = build_label,
-            network = network, network_time = network_time, scripts = script_declarations,
+            network = network, network_time = network_time, scripts = script_declarations, messages = messages,
             -- The most commands one frame may hold (MAX_FRAME_COMMANDS below; older runtimes allow 4096).
             frame_command_limit = 1048576, versions = versions,
             replace_scripts = function(list, changes) return replace_scripts(list, changes) end},
