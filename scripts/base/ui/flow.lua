@@ -598,6 +598,17 @@ local function fight_due(state, input)
     end
     return due
 end
+-- The settings menu's function keys (F1, F5, F6 to F9) are held for three frames: the fight reads the function keys
+-- on every second tick, and a release clears a key that it has not read (base/game/match "note_function_keys").
+local function hold_functions(state, input)
+    local hold = state.function_hold
+    if not hold then return end
+    for letter in hold.keys:gmatch(".") do
+        if not input.functions:find(letter, 1, true) then input.functions = input.functions .. letter end
+    end
+    hold.frames = hold.frames - 1
+    if hold.frames <= 0 then state.function_hold = nil end
+end
 -- raw: the host's input; screens get it per player slot, with the last known pointer position
 -- and `click`, a fresh press of the left button.
 function flow.update(state, raw, context)
@@ -758,7 +769,6 @@ function flow.update(state, raw, context)
             else state.fight_menu = nil end
         end
         state.escape_held = input.keys[virtual_keys.escape] == true
-        local functions = ""
         if state.fight_menu then
             local answer = fight_menu.update(state.fight_menu, input, menu_env(state))
             if answer and answer.leave then
@@ -766,11 +776,12 @@ function flow.update(state, raw, context)
                 return
             end
             if answer and answer.control then state.control_request = {letter = answer.control[2], frames = 3} end
-            if answer and answer.functions then functions = answer.functions end
+            if answer and answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer and answer.close then state.fight_menu = nil end
             for slot = 0, 7 do input[slot] = "" end
-            input.functions, input.function_presses = functions, functions
+            input.functions, input.function_presses = "", ""
         end
+        hold_functions(state, input)
         -- A fight runs with rollback in its screen (base/ui/match_screen); the menus take one final tick a frame.
         if not (state.active == "match" and state.match.online) then
             local combined, problem = online.exchange(session, input)
@@ -858,7 +869,7 @@ function flow.update(state, raw, context)
         if answer then
             if answer.end_fight then state.pending_leave = 3 end
             if answer.control then state.control_request = {slot = answer.control[1], letter = answer.control[2], frames = 3} end
-            if answer.functions then state.pending_functions = answer.functions end
+            if answer.functions then state.function_hold = {keys = answer.functions, frames = 3} end
             if answer.speed then speed.tenths = answer.speed end
             if answer.cheat_keys then unlock.mark_function_keys() end
             if answer.close then state.fight_menu, state.swallow_pointer = nil, true end
@@ -872,12 +883,7 @@ function flow.update(state, raw, context)
     elseif escape_pressed and escape_free(state) then
         state.quit_dialog = quit_dialog.create(state.active == "match" and "leave" or "exit")
     end
-    if state.pending_functions and not state.fight_menu then
-        for letter in state.pending_functions:gmatch(".") do
-            if not input.functions:find(letter, 1, true) then input.functions = input.functions .. letter end
-        end
-        state.pending_functions = nil
-    end
+    if not state.session and not state.fight_menu then hold_functions(state, input) end
     if state.pending_leave and not state.quit_dialog then
         if state.active == "match" and not input.functions:find("4", 1, true) then input.functions = input.functions .. "4" end
         state.pending_leave = state.pending_leave > 1 and state.pending_leave - 1 or nil

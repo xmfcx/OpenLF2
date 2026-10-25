@@ -35,7 +35,8 @@ end
 
 -- This frame's keys of the client's own slots (an input as in base/game/ticks).
 function client.sample(state, input)
-    state.sample = input
+    state.sample = ticks.sample(state.sample_pending and state.sample, input)
+    state.sample_pending = true
 end
 
 -- The keys of the client's own slots for `tick`: the newest sample at or before it.
@@ -142,7 +143,10 @@ function client.update(state, now)
                 break
             end
             local into = state.tick + state.delay
-            if not state.local_inputs[into] then state.local_inputs[into] = state.sample end
+            if not state.local_inputs[into] then
+                state.local_inputs[into] = ticks.take(state.sample, state.sample_pending)
+                state.sample_pending = false
+            end
             run_tick(state, state.tick)
             state.tick = state.tick + 1
             state.new_ticks = state.new_ticks + 1

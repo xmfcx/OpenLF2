@@ -199,10 +199,13 @@ function online.exchange(state, held)
         -- Keys sampled now go to the tick that the server makes final after they arrive.
         local lead = state.rtt / 2 + 2 * state.jitter + 10
         local target = math.floor((now + state.offset + lead) / tick_ms)
-        local sample, given = own_input(state, held), 0
+        -- A frame that waits for the server runs these scripts again with the same keys; merging them changes nothing.
+        local sample, given = ticks.sample(state.pending_sample, own_input(state, held)), 0
+        state.pending_sample = sample
         while state.sent_tick < target and given < sample_limit do
             state.sent_tick = state.sent_tick + 1
-            state.local_inputs[state.sent_tick] = sample
+            state.local_inputs[state.sent_tick] = ticks.take(sample, given == 0)
+            state.pending_sample = nil
             given = given + 1
         end
     end

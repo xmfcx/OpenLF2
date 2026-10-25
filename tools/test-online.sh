@@ -58,7 +58,8 @@ server_checks() { # scenario, whether the clients' hashes must have been compare
 # 1. A whole versus game: lobby, start, the original title menu and character selection, a fight with rollback;
 #    F4 ends it, the character selection comes back, and a second fight starts (rollback, then lockstep, then rollback).
 TITLE="c$(wait_frames 30)"                           # Versus
-AGAIN="4$(wait_frames 120)c$(wait_frames 60)"      # F4, the options of the character selection, Fight! again
+# F4 held for three frames: the fight reads the function keys on every second tick, and a release clears the key.
+AGAIN="4,4,4$(wait_frames 118)c$(wait_frames 60)"  # F4, the options of the character selection, Fight! again
 run_session versus 23601 "$START$TITLE$PICK$MENU$FIGHT$AGAIN$FIGHT" \
     "$START$(wait_frames 31)$PICK$(wait_frames 136)$FIGHT$(wait_frames 180)$FIGHT"
 for side in one two; do

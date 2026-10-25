@@ -28,6 +28,24 @@ function ticks.merge(a, b)
     return a
 end
 
+-- The keys of this computer's frames go to the ticks it runs. A frame that runs no tick must not lose its keys (a
+-- key or F-key held for one frame): the next frame's sample adds them (`sample`), and a press goes to one tick only
+-- (`take`). `pending` is the sample that no tick took yet, or nil.
+function ticks.sample(pending, input)
+    if not pending then return input end
+    local merged = ticks.empty()
+    for slot = 0, 7 do merged.slots[slot] = ticks.merge(pending.slots[slot] or "", input.slots[slot] or "") end
+    merged.functions = ticks.merge(pending.functions or "", input.functions or "")
+    merged.function_presses = ticks.merge(pending.function_presses or "", input.function_presses or "")
+    return merged
+end
+-- The input for one tick from the frame's sample: the first tick takes the presses, later ones the held keys only.
+function ticks.take(sample, first)
+    if first then return sample end
+    local held = {slots = sample.slots, functions = sample.functions, function_presses = ""}
+    return held
+end
+
 function ticks.same(a, b)
     if (a.functions or "") ~= (b.functions or "") or (a.function_presses or "") ~= (b.function_presses or "") then
         return false
