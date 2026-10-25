@@ -111,7 +111,6 @@ Later decisions of 2026-10-25 (723d449, 60216e1):
 ### 2. Pre-game menus
 
 - The settings menu does not replace the launch options page yet: the upscaling filter, the shading, the shadows, Controls and Language stay there. The settings menu has the pages Game, Sound and Display, without Overlays, Controls and Language.
-- "Change fighters" after a fight sends every human slot back to the grid, not only the player who pressed it.
 - The arena cards show the first layer of each background, not a picture made from all layers. The stage cards have no boss portraits and no best result.
 - The setup screen marks a ready player's panel with ">" in front of its title, not with a colored frame. It has no tooltips, and it does not show who changed a value in a network game.
 - Battle mode's troop panel and the championships keep their classic screens.
@@ -151,9 +150,6 @@ The first version of the dynamic camera is built (docs/camera.md, "What is built
 - The championship rollback check, and a faster hash for battle mode.
 - Remove the old two-computer protocol once every player has the new engine.
 - The web build has no UDP and no network game.
-- Some comments of the code are out of date. They name the room role (base/game/online.lua, base/ui/online_lobby.lua), or they say that network games keep the classic screens (`setup_screen_used` in base/ui/flow.lua). `online.role_slot` and the session's `role_slot` have no use since the players are equal.
-- The summary in the start bar of the setup screen shows the local game speed (`speed.tenths`), not the speed of the session. The slider above it shows the speed of the session.
-- The leave question of the settings menu says "The others go on playing", but the game of the others waits for the player who left.
 
 ## Rules for all work
 

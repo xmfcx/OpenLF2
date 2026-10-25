@@ -55,8 +55,8 @@ local function gamepad_mode(state)
     end
     return "full"
 end
--- The match setup screen replaces the classic character selection, except with "Classic menus" (or --classic-menus)
--- and in network games, which keep the classic screens in lockstep.
+-- The match setup screen replaces the title menu and the classic character selection, except with "Classic menus"
+-- (or --classic-menus), in a server session whose server says so, and in the old two-computer game.
 local function setup_screen_used(state)
     -- A server's session: every client uses the same screen, as the server says.
     if state.session and state.session.online then return not state.session.classic end
