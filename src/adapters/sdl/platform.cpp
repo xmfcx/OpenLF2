@@ -27,6 +27,7 @@
 #include <SDL3/SDL.h>
 #ifdef OPENLF2_IMGUI
 #include <imgui.h>
+#include <imgui_internal.h> // ImGuiInputTextState: a field with the keyboard takes a value that the scripts replaced
 #include <imgui_impl_sdl3.h>
 #include <imgui_impl_sdlrenderer3.h>
 #endif
@@ -1096,6 +1097,7 @@ private:
         int children = 0;
         int groups = 0;
         int compact = 0; // style values pushed for the open window
+        std::vector<bool> bottoms; // the open children that stay at their bottom
         for (const auto& element : ui_) {
             const auto labelled = element.label + "##" + element.id;
             if (element.kind != UiCommand::Kind::window && windows == 0) continue;
@@ -1174,16 +1176,33 @@ private:
                 // The scripts' value wins when it changes (a cleared chat line); otherwise the typed text stays.
                 auto& text = ui_inputs_[element.id];
                 auto& given = ui_given_[element.id];
-                if (given != element.value) text = given = element.value;
+                // The scripts echo the typed text some frames later; only a value of their own (a cleared chat line)
+                // replaces the field's text.
+                auto& reported = ui_reported_[element.id];
+                const bool replaced = given != element.value
+                    && std::ranges::find(reported, element.value) == reported.end();
+                given = element.value;
+                if (replaced) {
+                    text = element.value;
+                    reported.clear();
+                }
                 if ((element.flags & ui_focus) && focused_.insert(element.id).second) ImGui::SetKeyboardFocusHere();
                 ImGui::SetNextItemWidth(element.width > 0 ? size(element.width) : -1.0f);
                 std::array<char, 256> buffer{};
                 std::memcpy(buffer.data(), text.data(), std::min(text.size(), buffer.size() - 1));
                 const auto hidden = "##" + element.id;
+                // A field that has the keyboard keeps its own text and writes it back over a new value: the cleared
+                // chat line after Enter stayed, and the next message repeated it. It lets the keyboard go for the
+                // new value and takes it again.
+                const bool refocus = replaced && ImGui::GetActiveID() == ImGui::GetID(hidden.c_str());
+                if (refocus) ImGui::ClearActiveID();
                 if (ImGui::InputTextWithHint(hidden.c_str(), element.label.c_str(), buffer.data(), buffer.size())) {
                     text = buffer.data();
+                    reported.push_back(text);
+                    if (reported.size() > 32) reported.erase(reported.begin());
                     ui_events_.push_back({UiEvent::Kind::changed, element.id, text});
                 }
+                if (refocus) ImGui::SetKeyboardFocusHere(-1);
                 if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
                     ui_events_.push_back({UiEvent::Kind::submitted, element.id, text});
                     // Enter leaves the field; it takes the keyboard again, so that the next line can follow.
@@ -1214,10 +1233,17 @@ private:
                 ImGui::BeginChild(hidden.c_str(), {size(element.width), size(element.height)},
                                   (element.flags & ui_border) ? ImGuiChildFlags_Borders : ImGuiChildFlags_None);
                 ++children;
+                bottoms.push_back((element.flags & ui_bottom) != 0);
                 break;
             }
             case UiCommand::Kind::end_child:
                 if (children > 0) {
+                    // A chat log: while it shows its last line, a new line keeps it at the bottom; scrolled up to
+                    // read, it stays where it is.
+                    if (!bottoms.empty() && bottoms.back() && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 1.0f) {
+                        ImGui::SetScrollHereY(1.0f);
+                    }
+                    if (!bottoms.empty()) bottoms.pop_back();
                     ImGui::EndChild();
                     --children;
                 }
@@ -1274,6 +1300,7 @@ private:
         std::erase_if(focused_, [&](const std::string& id) { return !shown(id); });
         std::erase_if(ui_inputs_, [&](const auto& entry) { return !shown(entry.first); });
         std::erase_if(ui_given_, [&](const auto& entry) { return !shown(entry.first); });
+        std::erase_if(ui_reported_, [&](const auto& entry) { return !shown(entry.first); });
         ImGui::Render();
         ui_keyboard_ = io.WantTextInput;
         ui_mouse_ = io.WantCaptureMouse;
@@ -1697,6 +1724,7 @@ private:
     std::vector<UiEvent> ui_events_;
     std::map<std::string, std::string> ui_inputs_; // each input's text as typed
     std::map<std::string, std::string> ui_given_;  // each input's value as the scripts last gave it
+    std::map<std::string, std::vector<std::string>> ui_reported_; // each input's recent texts that went to the scripts
     std::map<std::string, Texture, std::less<>> ui_textures_; // the bitmaps of menu images
     std::set<std::string, std::less<>> ui_missing_;            // menu images that cannot load
     std::set<std::string> focused_;                // inputs that took the keyboard when they appeared

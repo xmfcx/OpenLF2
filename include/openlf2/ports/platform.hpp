@@ -175,10 +175,10 @@ struct UiCommand {
 // Flags of UiCommand: a window without a title bar, a text that wraps, a big text, an input that takes the keyboard
 // when it appears, a child with a border, a button or selectable that cannot be used, a see-through window (over a
 // fight), a window that clicks pass through, an image that is also a button, a dim image, a window with small spaces
-// (the fight screen's cards), a small text.
+// (the fight screen's cards), a small text, a child that stays at its bottom while new lines come (a chat log).
 enum UiFlag : int {
     ui_no_title = 1, ui_wrap = 2, ui_large = 4, ui_focus = 8, ui_border = 16, ui_disabled = 32, ui_glass = 64, ui_passive = 128,
-    ui_clickable = 256, ui_dim = 512, ui_compact = 1024, ui_small = 2048
+    ui_clickable = 256, ui_dim = 512, ui_compact = 1024, ui_small = 2048, ui_bottom = 4096
 };
 // What the player did with the menu elements of the previous frame.
 struct UiEvent {

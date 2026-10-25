@@ -15,6 +15,8 @@ imgui.glass, imgui.passive = 64, 128
 imgui.clickable, imgui.dim = 256, 512
 -- A window with small spaces (the fight screen's cards), and a small text (older engines ignore both).
 imgui.compact, imgui.small = 1024, 2048
+-- A child that stays at its bottom while new lines come (a chat log; older engines ignore it).
+imgui.bottom = 4096
 
 -- Whether this engine draws menus (older runtimes have no context.ui).
 function imgui.available(context) return context.ui ~= nil end
@@ -55,8 +57,9 @@ function imgui.same_line(context, x) context.ui("same_line", "", "", "", x or 0)
 function imgui.separator(context) context.ui("separator") end
 function imgui.spacing(context, height) context.ui("spacing", "", "", "", 0, 0, 0, height or 4) end
 -- A scrolling area inside a window.
-function imgui.child(context, id, width, height, border)
-    context.ui("child", id, "", "", 0, 0, width or 0, height or 0, -1, border and imgui.border or 0)
+-- bottom: it stays at its bottom while new lines come (a chat log).
+function imgui.child(context, id, width, height, border, bottom)
+    context.ui("child", id, "", "", 0, 0, width or 0, height or 0, -1, (border and imgui.border or 0) + (bottom and imgui.bottom or 0))
 end
 function imgui.end_child(context) context.ui("end_child") end
 -- A bar filled to `fraction` (0 to 1) with `label` on it (older engines show the label alone).

@@ -148,7 +148,7 @@ function screen.draw(state, context)
         imgui.button(context, "join_code", "Join the room", -1, 0)
         imgui.separator(context)
         imgui.text(context, "Chat", 0xa8b8e8)
-        imgui.child(context, "chat_log", -1, 74, true)
+        imgui.child(context, "chat_log", -1, 74, true, true)
         for _, line in ipairs(connection.chat) do imgui.text(context, line.name .. ": " .. line.text, nil, imgui.wrap) end
         imgui.end_child(context)
         imgui.input(context, "chat", state.chat_text, "Message (a number from 1 to 42 plays a taunt)", 420)
