@@ -183,6 +183,9 @@ Result<void> untar(std::span<const char> archive, const std::filesystem::path& t
             long_name.clear();
         }
         if (type != '0' && type != '\0' && type != '5') continue;
+        // The package's own folder ("./", from `tar -C dir .`) is the target itself.
+        if (type == '5' && std::all_of(name.begin(), name.end(), [](char c) { return c == '.' || c == '/'; })
+            && name.find("..") == std::string::npos) continue;
         const auto relative = package_path(name);
         if (!relative) return fail(ErrorCode::format, "the version package has an unsafe path: " + name);
         const auto path = target / *relative;
