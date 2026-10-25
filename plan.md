@@ -41,6 +41,23 @@ This plan collects the requested features for network play with friends and the 
 - ENet is the UDP library. Dear ImGui draws the new menus.
 - The decisions of the pre-game redesign are in docs/pregame-ui-redesign.md, "Decisions": the new setup screen is the default and the classic screens stay behind "Classic menus"; any player sets the shared values and the game speed; the game starts unlocked; the cheat keys get a button.
 
+Decisions of 2026-10-25 (the owner's answers before the work of the night):
+
+- Order: the small and safe parts first (network polish, AI control, local music, no locks, the settings menu, the game speed), then the setup screen, then the server snapshot with drops and returns, then rooms.
+- Releases: build and pack only (`publish-version.sh --dry-run`), no upload and no public link. The owner publishes.
+- The server runs the game itself (the scripts without a window, on the final ticks). Returns, spectators, autosaves and resume use its snapshot.
+- After the setup commands go through the server, network games use only the new setup screen. The classic screens stay for local games.
+- A long drop: the match pauses after 3 s without the player. The room role chooses (wait, AI, give the fighter to a person, stop and resume later). With no choice in 30 s, the AI takes over, and the player gets the fighter back on return.
+- Escape opens the settings menu in all games. It has "Leave game" (online) or "End fight" (local), with a confirmation. The game keeps running online.
+- AI control: "Let the AI play" and "Take control" are buttons in that menu.
+- UPnP: the game maps UDP 12345 with miniupnpc when it hosts, and the lobby shows the public address.
+- Rooms: the server lobby lists the open rooms, and a private room joins by a short code.
+- Spectators run the final ticks 1 s behind, without rollback. They can chat and send taunts.
+- Resume: the server keeps the autosave. Its lobby shows "Resume" when the same player names are back, and the room role starts it.
+- The setup screen uses the theme of the network menus with the blue and gold of LF2.
+- The old TCP game stays until every player has the new engine.
+- Work: one commit per step on `arena`, each with passing tests. A fresh agent reviews each large part.
+
 ## Done
 
 - Quit to the launch menu (81bf33c).
@@ -55,7 +72,7 @@ This plan collects the requested features for network play with friends and the 
 
 1. Build the Windows version with the new engine and the taunts (tools: ~/programs/openlf2-windows/publish-version.sh).
 2. Create the public link of the versions folder on Nextcloud (needs the owner's approval), then publish the version. The friend downloads the new Windows build once; later versions arrive through the Versions screen.
-3. Map UDP port 12345 with UPnP; the script maps only TCP today.
+3. Map UDP port 12345 with UPnP from the game (miniupnpc). No UPnP code exists today.
 4. Play a real game over the internet and note what to tune.
 
 ### 2. Network polish
@@ -63,7 +80,6 @@ This plan collects the requested features for network play with friends and the 
 - Less delay: the server and the clients handle messages once per 33 ms frame, so the round trip on one machine is 99 ms. Handle messages as soon as they arrive (or several times per frame).
 - The server program stops with its host only when the host quits normally. It must also stop when the host crashes (a parent-death signal on Linux, a job object on Windows).
 - The game keeps its own volume: today the sound server stores one volume for every program with the role "game", which started OpenLF2 at 19 %.
-- The game speed in server sessions (pre-game step 4 below).
 
 ### 3. The pre-game redesign
 
