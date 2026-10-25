@@ -81,3 +81,5 @@ On 2026-10-24, we uploaded `OpenLF2-Windows-x64-portable.zip` (37291045 bytes) t
 ## Upload of v1.1.1 with the speed menu
 
 On 2026-10-24, we uploaded `OpenLF2-Windows-x64-portable-mfd.zip` (37313363 bytes) to `/Games/LF2/OpenLF2`. This zip is the v1.1.1 portable build with the game speed menu and script sharing scripts. Its launcher keeps the settings in `%APPDATA%\OpenLF2`. The public link is https://cloud.evim.dev/s/jxWdsWzeeTggYck. The scripts in this zip have LF line endings, so they match a Linux build for network play.
+
+On 2026-10-25, we created the public read-only link of the versions folder `/Games/LF2/OpenLF2/versions`: https://cloud.evim.dev/s/trAWB2wyHyWewWb. Its token is in `~/programs/openlf2-windows/versions-share-token`, and `publish-version.sh` uploads each game version there. The first version is `2026.10.25-30` (c1d1b40).
