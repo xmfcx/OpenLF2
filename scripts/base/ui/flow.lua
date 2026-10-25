@@ -56,6 +56,7 @@ local function can_drop_replay(state)
         or (state.active == "launch" and state.launch.page == "menu"))
 end
 function flow.create(options)
+    require("base/game/rollback").check = options.rollback_check == true
     local settings = controls.load(options.default_controller)
     -- OpenLF2's own options (base/game/options), e.g. the unlocked characters.
     user_options.start()

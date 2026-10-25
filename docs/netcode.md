@@ -143,6 +143,21 @@ Every pause, for a drop or for the pause key, ends with the same countdown, so t
 - A rollback test without network: run a fight, save the state at tick N, run M more ticks, restore tick N, run the same M ticks again, and compare the hashes. A difference shows state that the save does not contain. Run this over many seeds and every mode.
 - Linux `tc netem` on the loopback interface can test real UDP behavior. It needs root, so the owner runs it.
 
+## Measurements
+
+The rollback check (`--rollback-check`, base/game/rollback.lua) runs in a fight: every 45 ticks it saves the state, keeps the next 8 inputs, goes back, runs them again and compares the hashes. It passes in versus, stage, survival, battle mode and the demo, on several seeds. The championship is not checked yet.
+
+The state of a fight is the match table and the position of the random streams (`engine.random_position`, new in this engine). The object records, the record cache, the stage description, the background animation counters and the last drawn snapshot are shared, not copied.
+
+Costs in the release build, per operation:
+
+| Mode | Save | Hash | One tick |
+| --- | --- | --- | --- |
+| Versus, 2 fighters | 0.16 ms | 0.69 ms | 0.19 ms |
+| Battle mode, many soldiers | 1.39 ms | 8.2 ms | 0.59 ms |
+
+A save on every tick fits in the 33 ms frame, also in battle mode. A rollback of 8 ticks in battle mode costs about 5 ms. The hash of battle mode is too slow to run often: it must get faster (a fixed field order instead of sorting, numbers without text) or cover fewer fields, before the hash checks of step 4.
+
 ## Many clients, rooms and chat
 
 ### Rooms
@@ -177,7 +192,7 @@ Every pause, for a drop or for the pause key, ends with the same countdown, so t
 
 ## Steps
 
-1. Foundation, scripts only: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode.
+1. Foundation: a hash of the match state, save and restore of the match state, the rollback test above for all modes, and measurements of the cost of a tick and of a save in each mode. Done except the championship check and a faster hash (see Measurements).
 2. Local rollback: two simulated clients in one program, with the simulator between them and no real network. The rollback engine, the sound rules and the overlays on confirmed ticks are built and tuned here.
 3. Transport and server: ENet in the engine, the server program (docs/ui-network-architecture.md), the clock, the redundant inputs and the deadlines.
 4. The rollback client against the server, with the hash checks and the snapshots.

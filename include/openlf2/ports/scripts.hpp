@@ -28,6 +28,12 @@ struct RandomState {
     std::array<std::uint8_t, 3000> table{};
     std::int32_t index = 0;
 };
+// The position of both random streams, without the table: enough to go back to an earlier frame (rollback).
+struct RandomPosition {
+    std::int32_t index = 0;
+    std::int32_t sequence = 0;
+    std::uint32_t crt = 0;
+};
 // Seeded compatibility random numbers; scripts must not use host randomness.
 class ScriptRandom {
 public:
@@ -35,6 +41,8 @@ public:
     [[nodiscard]] virtual RandomState state() const noexcept = 0;
     virtual void restore(const RandomState& state) noexcept = 0;
     virtual void reset_sequence() noexcept = 0;
+    [[nodiscard]] virtual RandomPosition position() const noexcept = 0;
+    virtual void set_position(const RandomPosition& position) noexcept = 0;
     virtual std::int32_t next(std::int32_t range) noexcept = 0;
     // The C runtime rand() stream (0..32767) the original also calls directly. Must not throw.
     virtual std::int32_t crt() noexcept = 0;

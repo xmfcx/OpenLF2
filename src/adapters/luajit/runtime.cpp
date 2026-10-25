@@ -573,6 +573,32 @@ int set_random_state(lua_State* state) {
     bridge->random.restore(restored);
     return 0;
 }
+// engine.random_position(): index, sequence and C runtime state of the random streams (for a rollback).
+int random_position(lua_State* state) {
+    auto* bridge = resource_bridge(state);
+    const auto position = bridge->random.position();
+    lua_pushnumber(state, static_cast<lua_Number>(position.index));
+    lua_pushnumber(state, static_cast<lua_Number>(position.sequence));
+    lua_pushnumber(state, static_cast<lua_Number>(position.crt));
+    return 3;
+}
+// engine.set_random_position(index, sequence, crt)
+int set_random_position(lua_State* state) {
+    auto* bridge = resource_bridge(state);
+    for (int argument = 1; argument <= 3; ++argument) {
+        if (lua_type(state, argument) != LUA_TNUMBER) return luaL_error(state, "random position needs three numbers");
+    }
+    const auto index = lua_tonumber(state, 1);
+    const auto sequence = lua_tonumber(state, 2);
+    const auto crt = lua_tonumber(state, 3);
+    if (index < 0 || index >= 3000 || index != std::floor(index) || sequence < 0 || sequence >= 1234
+        || sequence != std::floor(sequence) || crt < 0 || crt > 4294967295.0 || crt != std::floor(crt)) {
+        return luaL_error(state, "invalid random position");
+    }
+    bridge->random.set_position(RandomPosition{static_cast<std::int32_t>(index), static_cast<std::int32_t>(sequence),
+        static_cast<std::uint32_t>(crt)});
+    return 0;
+}
 int reset_random_sequence(lua_State* state) {
     auto* bridge = resource_bridge(state);
     bridge->random.reset_sequence();
@@ -743,6 +769,7 @@ int open_libraries(lua_State* state) {
     const std::pair<const char*, lua_CFunction> recording_functions[] = {
         {"openlf2_network", network_operation}, {"openlf2_network_time", network_time}, {"openlf2_versions", version_operation},
         {"openlf2_random_state", random_state}, {"openlf2_set_random_state", set_random_state},
+        {"openlf2_random_position", random_position}, {"openlf2_set_random_position", set_random_position},
         {"openlf2_reset_random_sequence", reset_random_sequence}, {"openlf2_save_recording", save_recording},
         {"openlf2_take_recording", take_recording}, {"openlf2_local_time", local_time}};
     for (const auto& [name, function] : recording_functions) {

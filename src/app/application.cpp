@@ -115,6 +115,7 @@ struct Configuration {
     bool jit = OPENLF2_DEFAULT_JIT != 0;
     bool help = false;
     bool preview_backgrounds = false;
+    bool rollback_check = false;
     bool preview_ending = false;
     // Lets a held mouse button stand in for touch when testing the on-screen gamepad.
     bool mouse_touch = false;
@@ -408,6 +409,7 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         }
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
+        else if (argument == "--rollback-check") config.rollback_check = true;
         else if (argument == "--mouse-touch") {
             config.mouse_touch = true;
             config.lasting_arguments.push_back(argument);
@@ -563,6 +565,12 @@ public:
     }
     void restore(const RandomState& state) noexcept override { generator_.restore(state.table, state.index); }
     void reset_sequence() noexcept override { generator_.reset_sequence(); }
+    [[nodiscard]] RandomPosition position() const noexcept override {
+        return RandomPosition{generator_.index(), generator_.sequence(), generator_.crt_state()};
+    }
+    void set_position(const RandomPosition& position) noexcept override {
+        generator_.restore_position(position.index, position.sequence, position.crt);
+    }
 private:
     CompatibilityRandom generator_;
 };
@@ -993,7 +1001,8 @@ Result<void> run(const Configuration& config) {
         (config.preview_backgrounds ? ", start_screen=\"backgrounds\"" : "") +
         (config.preview_ending ? ", start_screen=\"ending\"" : "") +
         (config.replay ? ", start_screen=\"replay\"" : "") +
-        (config.mouse_touch ? ", mouse_touch=true" : "") + "}\n" + sources;
+        (config.mouse_touch ? ", mouse_touch=true" : "") +
+        (config.rollback_check ? ", rollback_check=true" : "") + "}\n" + sources;
     Simulation simulation(std::move(*runtime), !config.headless);
     auto loaded = simulation.load(bundle);
     if (!loaded) return std::unexpected(loaded.error());
@@ -1386,9 +1395,12 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
         if (config->help) {
             std::cout << "openlf2 [--installer PATH] [--scripts DIR] [--mod DIR] [--headless] [--jit|--no-jit]\n"
                          "        [--preview-backgrounds] [--preview-ending] [--input-trace FRAMES] [--seed MS]\n"
-                         "        [--config-dir DIR] [--replay FILE] [--renderer NAME] [--mouse-touch] [--default-controller] [FILE.lfr]\n"
+                         "        [--config-dir DIR] [--replay FILE] [--renderer NAME] [--mouse-touch] [--default-controller] [--rollback-check]\n"
+                         "        [FILE.lfr]\n"
                          "--mouse-touch (off by default): a held mouse button stands in for one finger on the\n"
                          "        on-screen gamepad, to try it without a touch screen.\n"
+                         "--rollback-check (developer): fights save their state, run ahead, go back and run again, and the\n"
+                         "        headless description reports whether the state came out the same.\n"
                          "--default-controller (off by default; always on for consoles): until controls are saved, player 1 uses the\n"
                          "        first controller instead of the keyboard.\n"
                          "JIT is enabled by default on desktop and Android builds; --no-jit uses the interpreter.\n"

@@ -14,6 +14,8 @@ public:
         state_ = state_ * 214013U + 2531011U;
         return static_cast<std::int32_t>((state_ >> 16) & 0x7fffU);
     }
+    [[nodiscard]] std::uint32_t state() const { return state_; }
+    void restore(std::uint32_t state) { state_ = state; }
 private:
     std::uint32_t state_;
 };
@@ -39,6 +41,14 @@ public:
     void restore(const std::array<std::uint8_t, table_size>& table, std::int32_t index) {
         table_ = table;
         index_ = index;
+    }
+    // Where both streams are, without the table (which a match does not change): a rollback restores it.
+    [[nodiscard]] std::int32_t sequence() const { return sequence_; }
+    [[nodiscard]] std::uint32_t crt_state() const { return crt_.state(); }
+    void restore_position(std::int32_t index, std::int32_t sequence, std::uint32_t crt_state) {
+        index_ = index;
+        sequence_ = sequence;
+        crt_.restore(crt_state);
     }
 
 private:

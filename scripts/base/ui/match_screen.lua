@@ -13,6 +13,7 @@ local rumble = require("base/game/rumble")
 local controls = require("base/ui/controls")
 local options = require("base/game/options")
 local fight_effects = require("base/ui/fight_effects")
+local rollback = require("base/game/rollback")
 local screen = {}
 local replay_lines, mode_line, follow_step
 
@@ -87,8 +88,70 @@ function screen.snapshot(state, snapshot)
     return snapshot
 end
 
+-- --rollback-check (developer, base/game/rollback): every `rollback.interval` ticks the state is saved and the next
+-- `rollback.span` inputs are kept; then the fight goes back to the saved state and runs them again. Both runs must
+-- end with the same hash. The times are summed for the description.
+local function rollback_check(state, held)
+    local check = state.rollback_check
+    if not check then
+        check = {ticks = 0, count = 0, failures = 0, save_ms = 0, run_ms = 0, hash_ms = 0}
+        state.rollback_check = check
+    end
+    check.ticks = check.ticks + 1
+    if not check.saved and check.ticks % rollback.interval == 0 then
+        local started = engine.network_time()
+        check.saved, check.inputs = rollback.save(state.match), {}
+        check.save_ms = check.save_ms + engine.network_time() - started
+        check.saved_hash = rollback.hash(state.match)
+        check.inventory = check.inventory or rollback.inventory(state.match)
+    end
+    if check.saved then check.inputs[#check.inputs + 1] = rollback.copy_input(held) end
+end
+local function rollback_compare(state)
+    local check = state.rollback_check
+    if not (check and check.saved and #check.inputs >= rollback.span) then return end
+    local started = engine.network_time()
+    local first = rollback.hash(state.match)
+    check.hash_ms = check.hash_ms + engine.network_time() - started
+    local first_fields = rollback.field_hashes(state.match)
+    rollback.restore(state.match, check.saved)
+    -- A restore alone must give back the saved hash.
+    if rollback.hash(state.match) == check.saved_hash then check.restored = (check.restored or 0) + 1 end
+    started = engine.network_time()
+    for position, input in ipairs(check.inputs) do
+        match.step(state.match, input)
+        -- The first run played the sounds and rumbles of each tick but the last (which update plays below); the run
+        -- again drops them.
+        if position < #check.inputs then
+            sounds.flush(state.match)
+            rumble.flush(state.match)
+        end
+    end
+    check.run_ms = check.run_ms + engine.network_time() - started
+    local second = rollback.hash(state.match)
+    check.count = check.count + 1
+    if first ~= second then
+        check.failures = check.failures + 1
+        check.first_failure = check.first_failure or state.match.frame_number
+        if not check.differ then
+            local second_fields, names = rollback.field_hashes(state.match), {}
+            for name, value in pairs(first_fields) do
+                if second_fields[name] ~= value then names[#names + 1] = name end
+            end
+            for name in pairs(second_fields) do
+                if first_fields[name] == nil then names[#names + 1] = name .. "(new)" end
+            end
+            table.sort(names)
+            check.differ = table.concat(names, ";")
+        end
+    end
+    check.saved, check.inputs = nil, nil
+end
+
 function screen.update(state, held, context)
+    if rollback.check then rollback_check(state, held) end
     local result = match.step(state.match, held)
+    if rollback.check and result == nil then rollback_compare(state) end
     if result == "leave" then
         -- F4 in Championship or during a replay: the game state becomes 10, the title.
         context.action("title")
@@ -397,6 +460,15 @@ function screen.describe(state)
     if run then
         parts[#parts + 1] = string.format("stage=%d phase=%d go=%d shutter=%d result=%d bound=%d width=%d", run.id,
             run.phase, run.go, run.shutter, run.result, current.stage_bound, current.stage.width or constants.screen.width)
+    end
+    local check = state.rollback_check
+    if check then
+        -- Times are averages per check, in milliseconds; `differ` names the fields of the first failed check.
+        local count = math.max(check.count, 1)
+        parts[#parts + 1] = string.format("rollback=checks:%d,failures:%d,restored:%d,first:%s,save_ms:%.2f,run_ms:%.2f,"
+            .. "hash_ms:%.2f differ=%s inventory=%s", check.count, check.failures, check.restored or 0,
+            tostring(check.first_failure), check.save_ms / count, check.run_ms / count, check.hash_ms / count,
+            check.differ or "", check.inventory or "")
     end
     for index = 0, constants.item_slots - 1 do
         local value = current.items[index]

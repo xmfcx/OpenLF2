@@ -12,6 +12,7 @@ local crt_random = openlf2_crt_random
 local read_settings = openlf2_read_settings
 local write_settings = openlf2_write_settings
 local random_state, set_random_state = openlf2_random_state, openlf2_set_random_state
+local random_position, set_random_position = openlf2_random_position, openlf2_set_random_position
 local reset_random_sequence = openlf2_reset_random_sequence
 local save_recording, take_recording = openlf2_save_recording, openlf2_take_recording
 local local_time = openlf2_local_time
@@ -60,6 +61,7 @@ local function evaluate(declaration, previous, require_module)
             random = random, crt_random = crt_random, new_array = new_array,
             read_settings = read_settings, write_settings = write_settings,
             random_state = random_state, set_random_state = set_random_state,
+            random_position = random_position, set_random_position = set_random_position,
             reset_random_sequence = reset_random_sequence, save_recording = save_recording,
             take_recording = take_recording, local_time = local_time, build_label = build_label,
             network = network, network_time = network_time, scripts = script_declarations,

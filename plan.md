@@ -82,9 +82,9 @@ Split each menu into a shared model and a local UI (see docs/ui-network-architec
 
 Make sure that headless traces of the menus give the same results as before the split.
 
-## Phase 3: rollback foundation (scripts only)
+## Phase 3: rollback foundation
 
-Step 1 of docs/netcode.md:
+Step 1 of docs/netcode.md. Done, except the championship check and a faster hash for battle mode (results in docs/netcode.md, Measurements):
 
 - A hash of the match state.
 - Save and restore of the match state, including the random generator of the engine and the module state that the fight changes. The fixed game data is shared and not copied.
@@ -135,7 +135,7 @@ Step 7 of docs/netcode.md: the automatic input delay, the clock lead, the connec
 | 0 Quit to the launch menu | small, done | no |
 | 1 Delay log | medium | yes (key times, log files) |
 | 2 Models, commands, local UI | large | no |
-| 3 Rollback foundation | medium | no |
+| 3 Rollback foundation | medium, mostly done | yes (random position) |
 | 4 Local rollback | large | no |
 | 5 Server program | large | yes |
 | 6 Drops, returns, AI control | large | no for AI control, yes for the rest |
