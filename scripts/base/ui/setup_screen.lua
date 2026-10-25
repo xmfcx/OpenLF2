@@ -566,19 +566,19 @@ local function start_bar(state, context)
         imgui.button(context, "wait", i18n.tr("Wait (Jump)"), -1, 30)
         return
     end
-    imgui.text(context, table.concat(summary, " - "))
     local problem = setup.problem(model, names())
+    -- The reason why the fight cannot start yet, in place of the summary.
+    if problem then imgui.text(context, i18n.tr(problem), 0xff9b9b, imgui.wrap) else imgui.text(context, table.concat(summary, " - ")) end
     local focus = model.slots[state.focus]
     if focus.kind == "human" and not focus.ready then
         -- The step that players miss: they must say that they are ready.
         imgui.same_line(context, 330)
-        imgui.button(context, "ready_" .. state.focus, i18n.tr("I am ready (Attack)"), 160, 30, false, 0xffb347)
+        imgui.button(context, "ready_" .. state.focus, i18n.tr("I am ready"), 150, 30, false, 0xffb347)
         imgui.same_line(context)
     else
         imgui.same_line(context, 500)
     end
     imgui.button(context, "start", marked(state, "start", i18n.tr("Start the fight (Defend)")), -1, 30, problem ~= nil)
-    if problem then imgui.text(context, i18n.tr(problem), 0xff9b9b) end
 end
 
 function screen.draw(state, context)
@@ -589,21 +589,20 @@ function screen.draw(state, context)
     local model = state.setup
     imgui.window(context, "setup", i18n.tr("Match setup"), 6, 6, 782, 538, imgui.no_title)
     for _, mode in ipairs({modes.versus, modes.stage, modes.battle}) do
-        imgui.selectable(context, "mode_" .. mode, i18n.tr(setup.mode_names[mode]), model.mode == mode, 70, 22)
+        imgui.selectable(context, "mode_" .. mode, i18n.tr(setup.mode_names[mode]), model.mode == mode, 56, 22)
         imgui.same_line(context)
     end
-    imgui.same_line(context, 250)
-    imgui.button(context, "championship", i18n.tr("Championship"), 110, 22)
+    imgui.button(context, "championship", i18n.tr("Championship"), 0, 22)
     imgui.same_line(context)
-    imgui.button(context, "team_championship", i18n.tr("Team champ."), 100, 22)
+    imgui.button(context, "team_championship", i18n.tr("Teams"), 0, 22)
     if not state.network then
         imgui.same_line(context)
-        imgui.button(context, "demo", i18n.tr("Demo"), 60, 22)
+        imgui.button(context, "demo", i18n.tr("Demo"), 0, 22)
         imgui.same_line(context)
-        imgui.button(context, "replay", i18n.tr("Replay"), 70, 22)
+        imgui.button(context, "replay", i18n.tr("Replay"), 0, 22)
     end
-    imgui.same_line(context, 610)
-    imgui.button(context, "settings", i18n.tr("Settings"), 80, 22)
+    imgui.same_line(context)
+    imgui.button(context, "settings", i18n.tr("Settings"), 0, 22)
     imgui.same_line(context)
     imgui.button(context, "exit", i18n.tr("Exit"), -1, 22)
     if state.results then
