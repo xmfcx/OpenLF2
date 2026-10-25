@@ -21,6 +21,7 @@ local quit_dialog = require("base/ui/quit_dialog")
 local speed_menu = require("base/ui/speed_menu")
 local damage_chart = require("base/ui/damage_chart")
 local input_timeline = require("base/ui/input_timeline")
+local chat = require("base/ui/chat")
 local flow = {}
 local function screen_module(name)
     if name == "characters" then return require("base/ui/character_select") end
@@ -369,6 +370,13 @@ end
 -- own (the character selection, the fight) show it for three seconds after the mouse moves. Drawing only: the
 -- screens' own logic keeps the pointer it always had.
 local pointer_shown_ms = 3000
+-- The connection to a server program while its lobby or one of its fights shows (base/game/online).
+local function online_connection(state)
+    local lobby = state.online_lobby
+    if not lobby then return nil end
+    if state.active == "online_lobby" or (state.active == "match" and state.match.online) then return lobby.online end
+    return nil
+end
 local function pointer_position(state)
     return math.min(state.local_pointer_x, 0x307), math.min(state.local_pointer_y + 2, 0x217)
 end
@@ -413,6 +421,8 @@ function flow.draw(state, context)
     end
     if state.active == "match" and state.chart.match then damage_chart.draw(state.chart, context) end
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
+    local connection = online_connection(state)
+    if connection and state.chat then chat.draw(state.chat, context, connection) end
     if state.speed_menu then speed_menu.draw(state.speed_menu, context) end
     if state.quit_dialog then quit_dialog.draw(state.quit_dialog, context) end
     if not pointer_drawn and state.local_pointer_x
@@ -596,6 +606,17 @@ function flow.update(state, raw, context)
             state.pointer_moved_at = engine.network_time()
         end
         state.local_pointer_x, state.local_pointer_y = input.pointer_x, input.pointer_y
+    end
+    -- The chat of a server program (base/ui/chat), in its lobby and its fights: while its line is open, it takes the
+    -- keys, and the players' keys are held back.
+    local connection = online_connection(state)
+    if connection then
+        state.chat = state.chat or chat.create()
+        if chat.update(state.chat, input, connection, context) then
+            for slot = 0, 7 do input[slot] = "" end
+            input.functions, input.function_presses, input.keys, input.presses, input.text = "", "", {}, {}, ""
+        end
+        chat.play_taunts(connection, context)
     end
     -- The damage share chart follows the local mouse, before a network game exchanges input.
     if state.active == "match" then

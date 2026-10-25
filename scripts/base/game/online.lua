@@ -18,7 +18,7 @@ local connect_ms = 10000
 -- options: the runtime settings (network_profile). retry_ms: how long to connect again after a failed attempt.
 function online.create(options, address, port, retry_ms)
     local state = {phase = "connecting", address = address, port = port, profile = options.network_profile,
-        started = engine.network_time(), lobby = nil, events = {},
+        started = engine.network_time(), lobby = nil, events = {}, chat = {}, taunts = {},
         retry_until = retry_ms and engine.network_time() + retry_ms or nil}
     if not engine.messages then
         state.phase, state.problem = "failed", "This game version cannot connect to a server"
@@ -73,6 +73,15 @@ end
 handlers["end"] = function(state, message)
     state.client = nil
     state.events[#state.events + 1] = message
+end
+-- A chat line; a number from 1 to 42 alone is a taunt, which plays its sound (base/ui/chat).
+local chat_kept = 20
+function handlers.chat(state, message)
+    local log = state.chat
+    log[#log + 1] = {name = tostring(message.name), text = tostring(message.text), at = engine.network_time()}
+    if #log > chat_kept then table.remove(log, 1) end
+    local number = tonumber(tostring(message.text):match("^%s*(%d+)%s*$"))
+    if number and number >= 1 and number <= 42 then state.taunts[#state.taunts + 1] = number end
 end
 function handlers.ticks(state, message)
     if state.client then rollback_client.receive(state.client, message, engine.network_time()) end

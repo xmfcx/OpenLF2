@@ -117,6 +117,8 @@ function screen.describe(state)
         parts[#parts + 1] = string.format("player{slot=%d,name=%s,fighter=%d,team=%d,ready=%s,role=%s}", player.slot,
             player.name, player.fighter, player.team, tostring(player.ready), tostring(player.role))
     end
+    local log = connection.chat or {}
+    if #log > 0 then parts[#parts + 1] = string.format("chat=%d last=%s", #log, log[#log].text) end
     return table.concat(parts, " ")
 end
 

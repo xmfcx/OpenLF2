@@ -179,6 +179,25 @@ function handlers.start(state, peer, message, now)
     if #state.order + state.settings.computers < 2 then return end
     start_fight(state, now)
 end
+-- Chat (docs/netcode.md "Chat and presence"): printable text up to 120 characters, at most 5 messages in 5 seconds
+-- for each player; the server sends it to everybody, the sender too.
+local chat_length, chat_burst, chat_window_ms = 120, 5, 5000
+function handlers.chat(state, peer, message, now)
+    local player = state.players[peer]
+    if not player or type(message.text) ~= "string" then return end
+    local text = message.text:gsub("[^\32-\126]", ""):sub(1, chat_length)
+    if text:match("^%s*$") then return end
+    player.chat_times = player.chat_times or {}
+    local recent = {}
+    for _, time in ipairs(player.chat_times) do
+        if now - time < chat_window_ms then recent[#recent + 1] = time end
+    end
+    if #recent >= chat_burst then return end
+    recent[#recent + 1] = now
+    player.chat_times = recent
+    broadcast(state, {type = "chat", name = player.name, text = text})
+    log(state, player.name .. ": " .. text)
+end
 function handlers.input(state, peer, message, now)
     if state.phase ~= "fight" or not state.players[peer] then return end
     message.from = peer
