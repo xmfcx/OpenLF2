@@ -66,6 +66,7 @@ run rollback_stage --scripts "$WORK/scripts9" --seed 1234 --ai-brain sentry --ro
 run netsim_idle --scripts scripts --seed 1234 --ai-brain idle --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run netsim_sentry --scripts scripts --seed 1234 --ai-brain 11=sentry --net-sim delay=80,jitter=30,loss=5,seed=1 --input-trace "$VERSUS" &
 run book --scripts scripts --seed 1 --ai-book --input-trace ",," &
+run learning --scripts scripts --ai-log 10 --fight "davis/tactician/shoto|davis/jumper;learn=1;time=3600;mirror=0" --fights 2 &
 run arena_batch --scripts scripts --fight "henry/sentry|dennis;seed=3" --fights 4 &
 for number in 1 2 3 4; do run "arena_$number" --scripts scripts --fight "henry/sentry|dennis;seed=3;first=$number" & done
 FIGHTERS="deep john henry rudolf louis firen freeze dennis woody davis bandit hunter mark jack sorcerer monk jan knight bat justin louisex firzen julian"
@@ -149,6 +150,14 @@ PYTHON
 distance=${result% *}; easy=${result#* }
 python3 -c "import sys; sys.exit(0 if float('$distance') >= 0.25 and float('$easy') <= 0.2 else 1)" 2>/dev/null
 check "personas: brawler and shoto differ by $distance (0.25 needed), Easy scores $easy against Crazy (0.2 at most)" $? "$result"
+
+# Learning (docs/ai-plan.md phase 12): against a fighter that jumps over every ball, a zoner throws fewer balls after
+# its first 600 ticks, and the next fight starts with that knowledge (fewer balls in its first 600 ticks).
+counts=$(awk '/ai-result/{f++} /ev=move m=ball1\/240/{match($0,/t=[0-9]+/); t=substr($0,RSTART+2,RLENGTH-2)+0;
+    c[(f+1) (t<600?"early":"late")]++} END{print c["1early"]+0, c["1late"]+0, c["2early"]+0}' "$WORK/learning.out")
+set -- $counts
+[ "${1:-0}" -gt "${2:-0}" ] && [ "${1:-0}" -gt "${3:-0}" ]
+check "learning: balls in fight 1 early $1, late $2, fight 2 early $3" $? "$counts"
 
 # The move book against the data files.
 if [ -f "$DATA/data/data.txt" ]; then

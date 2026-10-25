@@ -123,6 +123,8 @@ function handlers.session(state, message)
     state.catching, state.newest_final = nil, nil
     -- The values of the last match on this server, and its game speed.
     state.last_setup = type(message.last_setup) == "table" and message.last_setup or nil
+    -- The brains' learning at the start of the session (base/ai/learning), the same for every client.
+    state.ai_learning = require("base/ai/learning").clean(message.ai_learning)
     state.speed = state.last_setup and tonumber(state.last_setup.speed) or nil
     state.classic = message.classic == true
     state.events[#state.events + 1] = message

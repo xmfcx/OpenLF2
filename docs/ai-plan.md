@@ -328,6 +328,12 @@ Each phase ends with tests that pass. No phase changes the classic AI.
 
 - The opponent model, the move results, the stored learning block in the match options.
 - Tests: against a scripted opponent that always jumps over balls, a Zoner uses fewer balls in the second half of a fight, and starts the next fight with that knowledge.
+- Status: built.
+    - Move results: the tactician keeps, for up to 12 moves, the tries and the hits in three dense arrays of its memory. A try counts as a hit when the target loses hp before the move (and its ball's flight) is over, or before the next try starts. The hit chance of a move (when the hit is not sure) moves toward the measured rate by the persona's `adapt` (50 by default), and a persona's taste follows the chance. A ranged move with 4 or more tries and a rate below 20% drops out, and a zoner then stops zoning with it.
+    - Patience: the attack threshold falls by 4 for each tick since the fighter's last move, so two waiting fighters do not stand still forever.
+    - Across fights: base/ai/learning keeps a store by fighter id ({moves, tries, hits}, halved above 60 tries). A local game merges the brains' results into config.json (`ai_learning`) when a round ends, and the next fight with brains starts from it. In a network session every client merges the same fight into the session's store, and sends it to the server, which saves it for the next session. The session message carries the store of the session's start (also for a resumed session), so a returning player runs the fights from the same point. The arena's `learn=1` carries the results from fight to fight.
+    - The test brain `jumper` stands at a distance in the target's lane and steps out of the lane of every ball. Result: in fight 1 a shoto throws 3 balls in its first 600 ticks and none later; fight 2 starts with that knowledge and throws 1.
+    - Prediction keeps a defender inside the stage's edges, so a fighter that walks against an edge is not predicted out of reach.
 
 ### Phase 13: learning from data (later)
 

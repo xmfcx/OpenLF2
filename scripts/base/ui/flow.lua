@@ -394,6 +394,19 @@ local function route(state, input, context)
         end
         state.wait_release = true
     elseif requested == "round_over" then
+        -- What the brains learned in this fight (base/ai/learning): a session keeps it for its next fights (every client
+        -- merges the same fight, so the store stays the same everywhere) and tells the server, a local game saves it.
+        local fought = state.match.match
+        if fought.ai_brains or fought.ai_brain then
+            local learning = require("base/ai/learning")
+            local session = state.session and state.session.online and state.session
+            if session then
+                session.ai_learning = learning.merge(session.ai_learning or {}, fought)
+                online.send(session, {type = "ai_learning", store = session.ai_learning})
+            elseif not fought.replay and not fought.random_game then
+                learning.save(learning.merge(learning.load(), fought))
+            end
+        end
         local outcome = require("base/ui/match_screen").outcome(state.match)
         local selection = require("base/ui/character_select")
         if state.match.match.mode == constants.modes.championship

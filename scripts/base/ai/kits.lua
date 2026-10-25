@@ -67,8 +67,8 @@ kits.by_id = {
     }},
     -- Davis
     [11] = {personas = {
-        persona("brawler", {aggression = 90, combo_greed = 90, prefer = {[270] = 90, [300] = 60, [60] = 20}}),
-        persona("shoto", {aggression = 70, range = 200, spacing = 110, prefer = {[240] = 110, [300] = 40}}),
+        persona("brawler", {aggression = 90, combo_greed = 90, prefer = {[270] = 110, [300] = 70, [60] = 30, [240] = -60}}),
+        persona("shoto", {aggression = 70, range = 200, spacing = 110, prefer = {[240] = 140, [300] = 40, [60] = -40}}),
         persona("wild", {aggression = 85, mobility = 90, risk = 70, prefer = {[300] = 60, [290] = 40}}),
     }},
     -- Bandit, Hunter: no special moves.

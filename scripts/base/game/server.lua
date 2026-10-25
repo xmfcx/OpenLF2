@@ -38,7 +38,7 @@ local function new_room(top, code, private)
     -- original menus); otherwise they use the match setup screen.
     return {top = top, code = code, private = private, profile = top.profile, version = top.version, players = {},
         order = {}, phase = "lobby", hashes = {}, saved = server.load_saved(), classic = top.classic, spectators = {},
-        last_setup = server.load_last_setup()}
+        last_setup = server.load_last_setup(), ai_learning = require("base/ai/learning").load()}
 end
 -- options: the runtime settings (server_port, network_profile).
 function server.create(options)
@@ -150,7 +150,7 @@ local function session_message(state, rejoin)
     local owners = {}
     for slot, entry in pairs(session.slots) do owners[slot] = entry.peer end
     return {type = "session", owners = owners, names = session.names, role = state.order[1],
-        random = session.random, last_setup = state.last_setup,
+        random = session.random, last_setup = state.last_setup, ai_learning = session.ai_learning,
         rejoin = rejoin or nil, classic = state.classic or nil}
 end
 -- The final ticks so far, to a player who must run them to catch up (a return, or a resumed session).
@@ -201,7 +201,7 @@ local function start_session(state, now, saved)
     -- A resumed session goes on with its next tick, after the start delay.
     state.start_at = now + start_delay_ms - first * tick_ms
     state.session = {names = names, random = random, slots = slots, log = saved and saved.log or {}, logged = first - 1,
-        drops = {}}
+        drops = {}, ai_learning = saved and saved.ai_learning or state.ai_learning}
     broadcast(state, session_message(state))
     if first > 0 then
         for _, peer in ipairs(state.order) do send_log(state, peer) end
@@ -254,6 +254,7 @@ function server.load_saved()
         end
     end
     data.log, data.length, data.runs = log, tick, nil
+    data.ai_learning = require("base/ai/learning").clean(data.ai_learning)
     return data
 end
 -- Whether the players in the lobby are the players of the stopped session (by name), so that it can go on.
@@ -289,7 +290,8 @@ save_session = function(state)
             last, count = text, 1
         end
     end
-    local data = {slots = slots, random = session.random, speed = state.authority and state.authority.speed, runs = runs}
+    local data = {slots = slots, random = session.random, speed = state.authority and state.authority.speed, runs = runs,
+        ai_learning = session.ai_learning}
     local document = engine.read_settings()
     if type(document) ~= "table" then document = {} end
     -- As hex text: the random state is binary, and config.json must stay valid UTF-8.
@@ -504,6 +506,17 @@ function handlers.setup_used(state, peer, message)
     if same then return end
     state.last_setup = values
     save_last_setup(state)
+end
+-- The brains' learning after a fight of the session (every client sends the same store): saved for the next session.
+-- The session itself keeps the store of its start, so a returning player runs its fights from the same point.
+function handlers.ai_learning(state, peer, message)
+    if state.phase ~= "session" or not state.players[peer] then return end
+    local learning = require("base/ai/learning")
+    state.ai_learning = learning.clean(message.store)
+    local document = engine.read_settings()
+    if type(document) ~= "table" then document = {} end
+    document.ai_learning = state.ai_learning
+    engine.write_settings(document)
 end
 function handlers.lobby_return(state, peer)
     if state.phase == "session" and state.players[peer] then back_to_lobby(state, "quit") end

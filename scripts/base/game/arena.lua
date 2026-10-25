@@ -10,7 +10,8 @@
 --   time=TICKS (3600: at the limit the side with more hp wins, equal hp is a draw), difficulty=easy|normal|difficult|
 --   crazy|superhuman (crazy), background=ROW (1), seed=N (1), mirror=0|1 (1: every seed plays twice, the second time
 --   with the sides in swapped slots), first=K (the number of the first fight, for a single run of one fight), mp=N (the
---   mp of every fighter at the start).
+--   mp of every fighter at the start), learn=1 (each fight starts from what the brains learned in the fights before:
+--   the move results of the tactician, base/ai/brains/tactician, by side and place in the side).
 -- Fight K uses seed + (K - 1) / 2 with mirroring (seed + K - 1 without), and the engine's random streams start from
 -- that number alone, so a fight is the same in a batch and in a single run.
 local constants = require("base/game/constants")
@@ -71,6 +72,7 @@ function arena.parse(text)
         elseif key == "mirror" then spec.mirror = value ~= "0"
         elseif key == "first" then spec.first = assert(tonumber(value), "arena: first is a number")
         elseif key == "mp" then spec.mp = assert(tonumber(value), "arena: mp is a number")
+        elseif key == "learn" then spec.learn = value == "1"
         elseif parts[position] ~= "" then error("arena: unknown option " .. parts[position]) end
     end
     return spec
@@ -100,23 +102,24 @@ local function options_of(spec, number)
     local mirrored = spec.mirror and (number - 1) % 2 == 1
     local seed = spec.mirror and spec.seed + math.floor((number - 1) / 2) or spec.seed + number - 1
     local order = mirrored and {2, 1} or {1, 2}
-    local slots, brain_names, personas, members, levels = {}, {}, {}, {}, {}
+    local slots, brain_names, personas, members, levels, learning = {}, {}, {}, {}, {}, {}
     local slot = 0
     for _, side_number in ipairs(order) do
-        for _, fighter in ipairs(spec.sides[side_number]) do
+        for place, fighter in ipairs(spec.sides[side_number]) do
+            if spec.learn and spec.learned then learning[slot + 10] = spec.learned[side_number .. ":" .. place] end
             assert(slot <= 7, "arena: at most 8 fighters")
             slots[slot] = {kind = "computer", fighter = fighter.position, team = constants.teams.player_one + side_number - 1}
             if fighter.brain ~= "classic" then brain_names[slot + 10] = fighter.brain end
             personas[slot + 10] = fighter.persona
             levels[slot + 10] = fighter.level
-            members[#members + 1] = {index = slot + 10, side = side_number, fighter = fighter}
+            members[#members + 1] = {index = slot + 10, side = side_number, fighter = fighter, place = place}
             slot = slot + 1
         end
     end
     local options = {mode = constants.modes.versus, difficulty = spec.difficulty, background = spec.background,
         fighters = catalog.load(), backgrounds = catalog.backgrounds(), slots = slots,
         ai_brains = next(brain_names) and brain_names or nil, ai_personas = personas, ai_level = spec.level, start_mp = spec.mp,
-        ai_levels = next(levels) and levels or nil}
+        ai_levels = next(levels) and levels or nil, ai_learning = next(learning) and learning or nil}
     return options, seed, mirrored, members
 end
 
@@ -186,6 +189,21 @@ function arena.fight(spec, number)
         end
     end
     local hp1, hp2 = side_hp(state, members, 1), side_hp(state, members, 2)
+    -- What the brains learned, for the next fight (learn=1).
+    if spec.learn then
+        spec.learned = spec.learned or {}
+        for _, member in ipairs(members) do
+            local memory = state.items[member.index] and state.items[member.index].ai
+            if memory and memory.learn_moves then
+                local copy = {moves = {}, tries = {}, hits = {}}
+                for position = 1, #memory.learn_moves do
+                    copy.moves[position], copy.tries[position] = memory.learn_moves[position], memory.learn_tries[position]
+                    copy.hits[position] = memory.learn_hits[position]
+                end
+                spec.learned[member.side .. ":" .. member.place] = copy
+            end
+        end
+    end
     if winner == 0 and ticks_run >= spec.time then winner = hp1 > hp2 and 1 or (hp2 > hp1 and 2 or 0) end
     -- The AI time for each brain: microseconds for each fighter and tick.
     local timing = {}

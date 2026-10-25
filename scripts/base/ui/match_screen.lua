@@ -57,6 +57,13 @@ function screen.create(options, connection)
     if (brains.default or brains.by_index) and not connection and not options.demo and not options.replay then
         options.ai_brain, options.ai_brains = brains.default, brains.by_index
     end
+    -- Learning across fights (base/ai/learning): the move results of earlier fights, for brains other than classic. A
+    -- network session takes the store of its start (the same on every client), a local game this computer's.
+    if (options.ai_brains or options.ai_brain) and not options.demo and not options.replay and not options.ai_learning then
+        local learning = require("base/ai/learning")
+        local store = connection and connection.ai_learning or (not connection and learning.load()) or nil
+        options.ai_learning = store and learning.options_for(store, options) or nil
+    end
     local state = {match = match.create(options), effects = fight_effects.create()}
     ai_trace.watch(state.match, connection ~= nil or netsim.params ~= nil or rollback.check)
     -- A brain other than `classic` reads the move books: build them all now (also for Stage spawns, transforms and

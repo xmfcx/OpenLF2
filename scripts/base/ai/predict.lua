@@ -111,6 +111,9 @@ function predict.move_hit(attacker, move, from_tick, facing, defender, horizon, 
             local ahead = t - from_tick
             local steps = ahead + 1 + (lead or 0)
             local shift_x = moving and defender.vx * steps or 0
+            -- A defender stops at the stage's edges.
+            if defender.x + shift_x < 0 then shift_x = -defender.x end
+            if defender.x_max and defender.x + shift_x > defender.x_max then shift_x = defender.x_max - defender.x end
             local depth = az - (defender.z + (moving and defender.vz * steps or 0))
             for _, box in ipairs(list) do
                 if follows(box) and depth < box.zwidth and depth > -box.zwidth and touches(box, defender) then

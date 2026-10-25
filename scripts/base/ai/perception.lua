@@ -80,6 +80,8 @@ local function fill_entry(entry, state, index, value)
     entry.hp, entry.mp, entry.blink, entry.owner, entry.born = value.hp, value.mp, value.blink, value.owner, value.born or 0
     entry.attack_rest, entry.rest, entry.record = value.timer_ec, value.pair_rest, value.record
     entry.guard = value.timer_b8 or 0 -- the defend points that the last hits added (a defend breaks at 31)
+    -- The stage's edges in x: a fighter that walks into one does not move on (prediction clamps to them).
+    entry.x_max = (state.stage_bound or 0) > 0 and state.stage_bound or (state.stage.width or constants.screen.width)
     entry.holder = frame.state == states.held_item and value.holder or nil
     entry.character = kind == record_kinds.character
     entry.ball = flying[frame.state] == true

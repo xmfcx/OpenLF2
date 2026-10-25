@@ -30,7 +30,14 @@ local tactician = {name = "tactician", version = 1, interface = 2}
 
 -- The generic persona: whole numbers from 0 to 100, and distances in pixels.
 local generic = {aggression = 85, risk = 40, mp_thrift = 30, combo_greed = 60, defense = 60, range = 0, depth_offset = 0,
-    spacing = 38, mobility = 30, teamwork = 50}
+    spacing = 38, mobility = 30, teamwork = 50, adapt = 50}
+
+-- Learning (docs/ai-plan.md phase 12): the results of its moves, in the memory as three dense arrays (the start frame,
+-- the tries, the hits) of at most `learn_size` moves. A try counts as a hit when the target loses hp before the move
+-- ends. The hit chance of a move moves toward its measured rate by the persona's `adapt`. The match option
+-- `ai_learning[index]` (the results of earlier fights, base/game/arena and base/ui/flow) starts the arrays.
+local learn_size, learn_least, drop_tries = 12, 3, 4
+tactician.learn_size = learn_size
 tactician.generic = generic
 
 -- A kit's persona with the generic numbers for the ones that it does not set. Fixed data, cached by persona.
@@ -49,7 +56,16 @@ end
 
 function tactician.start(state, index, seed)
     local memory = {version = tactician.version, rng = seed, target = -1, intent = 0, path = {}, plan = 0, plan_tick = -1,
-        reflex_until = -1, combo = -1, moves = 0, thinks = 0, hp = state.items[index].hp, class = "", persona = 0}
+        reflex_until = -1, combo = -1, moves = 0, thinks = 0, hp = state.items[index].hp, class = "", persona = 0,
+        learn_moves = {}, learn_tries = {}, learn_hits = {}, try_move = 0, try_until = -1, try_target = -1, try_hp = 0}
+    local earlier = state.ai_learning and state.ai_learning[index]
+    if earlier then
+        for position = 1, math.min(#(earlier.moves or {}), learn_size) do
+            memory.learn_moves[position] = earlier.moves[position]
+            memory.learn_tries[position] = earlier.tries[position] or 0
+            memory.learn_hits[position] = earlier.hits[position] or 0
+        end
+    end
     actuator.start(memory)
     return memory
 end
@@ -122,6 +138,17 @@ local function score(context, board, candidate)
     elseif ranged then chance = 35
     elseif target.class == "attacking" then chance = 70
     else chance = 60 end
+    -- What this fight (and earlier ones) taught about this move.
+    local memory = context.memory
+    for position = 1, #memory.learn_moves do
+        if memory.learn_moves[position] == move.start and memory.learn_tries[position] >= learn_least and not sure then
+            local rate = math.floor(memory.learn_hits[position] * 100 / memory.learn_tries[position])
+            -- A ranged move that clearly does not work against this enemy drops out (an adapting persona only). A close
+            -- move keeps its place: its chance only moves toward its rate, so a few misses never stop all attacks.
+            if move.tags.ranged and board.persona.adapt > 0 and memory.learn_tries[position] >= drop_tries and rate < 20 then return nil end
+            chance = math.floor((chance * (100 - board.persona.adapt) + rate * board.persona.adapt) / 100)
+        end
+    end
     local value = chance * damage
     if move.tags.knockdown then value = value + chance * 10 end
     local persona = board.persona
@@ -129,20 +156,33 @@ local function score(context, board, candidate)
     -- A miss is punished only sometimes: the enemy must see it and choose to answer.
     value = value - math.floor((100 - chance) * risk * (100 - persona.risk) / 400)
     value = value - move.mp * persona.mp_thrift
-    -- The persona's taste for this move: a share of its value and a flat bonus, so that a persona picks its moves
-    -- when they hit, even against a move of a little more value.
+    -- The persona's taste for this move: a share of its value and a bonus by the hit chance, so that a persona picks
+    -- its moves when they hit, and drops a favorite that keeps missing (learning lowers the chance).
     local taste = persona.prefer and persona.prefer[move.start]
     if taste then
         if value > 0 then value = math.floor(value * (100 + taste) / 100) end
-        value = value + taste * 20
+        value = value + math.floor(taste * chance / 3)
     end
     return value, ticks + lead, sure
+end
+
+-- Whether learning dropped a move (by its results against this enemy).
+local function dropped(context, start)
+    local memory = context.memory
+    for position = 1, #memory.learn_moves do
+        if memory.learn_moves[position] == start and memory.learn_tries[position] >= drop_tries
+           and memory.learn_hits[position] * 100 < memory.learn_tries[position] * 20 then return true end
+    end
+    return false
 end
 
 local function best_attack(context, board)
     local best, best_value, best_ticks, best_sure
     for _, candidate in ipairs(candidates_of(context.book)) do
-        if candidate.move.tags.ranged and context.self.mp >= candidate.move.mp then board.candidate_ranged = true end
+        if candidate.move.tags.ranged and context.self.mp >= candidate.move.mp
+           and not (board.persona.adapt > 0 and dropped(context, candidate.move.start)) then
+            board.candidate_ranged = true
+        end
         local value, ticks, sure = score(context, board, candidate)
         if value and board.scores then
             board.scores[#board.scores + 1] = {name = candidate.move.name, start = candidate.move.start, value = value,
@@ -180,6 +220,7 @@ local function in_motion(me)
     return nil
 end
 
+local learn
 -- Starts a candidate: a turn first when the input does not choose the direction, then its keys.
 local function start_move(context, board, candidate, reason)
     local memory, me, target = context.memory, context.me, board.target
@@ -196,6 +237,10 @@ local function start_move(context, board, candidate, reason)
     end
     actuator.program(memory, masks, 0)
     memory.plan, memory.plan_tick, memory.moves = candidate.move.start, context.state.frame_number, memory.moves + 1
+    -- A try of this move: its result shows when the move (and its ball's flight) is over. An open try counts first.
+    learn(context, true)
+    memory.try_move, memory.try_target, memory.try_hp = candidate.move.start, target.index, context.state.items[target.index].hp
+    memory.try_until = context.state.frame_number + candidate.move.ticks + 12
     if context.log then
         context.log(context.state, context.index, string.format("ev=move m=%s/%d input=%s why=%s target=%d dx=%d dz=%d",
             candidate.move.name, candidate.move.start, candidate.input, reason, target.index, board.tx - me.x, board.tz - me.z))
@@ -338,7 +383,10 @@ local root = tree.selector(1, "root", {
         tree.condition(13, "a move pays", function(context, board)
             if context.me.class ~= "free" and context.me.class ~= "moving" then return false end
             if not board.candidate then board.candidate, board.value, board.ticks, board.sure = best_attack(context, board) end
-            local needed = (100 - board.persona.aggression) * 20
+            -- Patience runs out: the threshold falls by 4 for each tick since its last move, so two waiting fighters
+            -- do not stand still forever.
+            local quiet = context.state.frame_number - math.max(context.memory.plan_tick, 0)
+            local needed = math.max((100 - board.persona.aggression) * 20 - quiet * 4, 0)
             return board.candidate ~= nil and board.value >= needed
         end),
         tree.action(14, "start the move", function(context, board)
@@ -444,8 +492,34 @@ local function persona_of(context)
     return full_persona(kit and kit.personas[memory.persona]), kit
 end
 
+-- Counts the result of the last try when its time is over, or at once (`now`) when a new try starts.
+learn = function(context, now)
+    local memory, state = context.memory, context.state
+    if memory.try_move == 0 or (state.frame_number < memory.try_until and not now) then return end
+    local target = state.items[memory.try_target]
+    local hit = target ~= nil and target.hp < memory.try_hp
+    local slot
+    for position = 1, #memory.learn_moves do
+        if memory.learn_moves[position] == memory.try_move then slot = position end
+    end
+    if not slot and #memory.learn_moves < learn_size then
+        slot = #memory.learn_moves + 1
+        memory.learn_moves[slot], memory.learn_tries[slot], memory.learn_hits[slot] = memory.try_move, 0, 0
+    end
+    if slot then
+        memory.learn_tries[slot] = memory.learn_tries[slot] + 1
+        if hit then memory.learn_hits[slot] = memory.learn_hits[slot] + 1 end
+        if context.log then
+            context.log(state, context.index, string.format("ev=result m=%d hit=%d tries=%d hits=%d", memory.try_move, hit and 1 or 0,
+                memory.learn_tries[slot], memory.learn_hits[slot]))
+        end
+    end
+    memory.try_move = 0
+end
+
 local board = {}
 function tactician.tick(context)
+    learn(context)
     local memory, state = context.memory, context.state
     local now = state.frame_number
     for key in pairs(board) do board[key] = nil end
