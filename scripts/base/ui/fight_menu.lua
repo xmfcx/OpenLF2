@@ -19,7 +19,7 @@ local track_names = {[-1] = "Off", [0] = "Random", "Main Theme", "Stage 1", "Sta
     "Boss", "Final Boss"}
 -- The cheat keys of the original: F6 to F9.
 local cheats = {{key = "6", label = "Unlimited mana (F6)"}, {key = "7", label = "Heal all (F7)"},
-    {key = "8", label = "Weapons from the sky (F8)"}, {key = "9", label = "Remove the weapons (F9)"}}
+    {key = "8", label = "Weapons (F8)"}, {key = "9", label = "No weapons (F9)"}}
 
 function menu.create() return {page = "game", confirm = nil} end
 
@@ -81,6 +81,10 @@ function menu.update(state, input, env)
     if clicked.fullscreen then values.fullscreen, changed = not values.fullscreen, true end
     if clicked.show_fps then values.show_fps, changed = not values.show_fps, true end
     if clicked.classic_menus then values.classic_menus, changed = not values.classic_menus, true end
+    if clicked.show_connection then values.show_connection, changed = not values.show_connection, true end
+    for delay = -1, 2 do
+        if clicked["input_delay_" .. (delay + 1)] then values.input_delay, changed = delay, true end
+    end
     if changed then
         local stopped = values.music_track == -1 and music.choice ~= -1
         user_options.save(values)
@@ -99,7 +103,10 @@ local function game_page(context, env)
         imgui.button(context, "pause", env.online and i18n.tr("Pause for everyone (F1)") or i18n.tr("Pause (F1)"), -1, 26)
         if not env.online then imgui.button(context, "fast", i18n.tr("Fast mode (F5)"), -1, 26) end
         if cheats_work(env) then
-            for _, cheat in ipairs(cheats) do imgui.button(context, "cheat_" .. cheat.key, i18n.tr(cheat.label), -1, 24) end
+            for position, cheat in ipairs(cheats) do
+                if position % 2 == 0 then imgui.same_line(context) end
+                imgui.button(context, "cheat_" .. cheat.key, i18n.tr(cheat.label), position % 2 == 1 and 178 or -1, 24)
+            end
         end
         imgui.spacing(context, 4)
     end
@@ -108,6 +115,16 @@ local function game_page(context, env)
         or i18n.tr("Game speed: 0.%d", tenths) .. (tenths == 4 and " " .. i18n.tr("(recommended)") or "")
     imgui.text(context, label .. (env.speed_shared and "  " .. i18n.tr("[for everyone]") or ""))
     imgui.slider(context, "speed", "", tenths, 1, 10, -1, env.online and not env.speed_shared)
+    if env.online then
+        -- The input delay of this computer (docs/netcode.md "Input from the client"): it takes effect in the next fight.
+        local values = user_options.current()
+        imgui.text(context, i18n.tr("Input delay"))
+        local names = {[-1] = i18n.tr("Automatic"), [0] = "0", "1", "2"}
+        for delay = -1, 2 do
+            imgui.same_line(context)
+            imgui.selectable(context, "input_delay_" .. (delay + 1), names[delay], values.input_delay == delay, delay == -1 and 90 or 40, 0)
+        end
+    end
     if env.fight then
         imgui.spacing(context, 4)
         imgui.text(context, env.cheat_keys and i18n.tr("Cheat keys: all modes") or i18n.tr("Cheat keys: VS mode only"))
@@ -134,6 +151,7 @@ local function display_page(context)
     imgui.text(context, i18n.tr("[only on this computer]"))
     imgui.selectable(context, "fullscreen", i18n.tr("Fullscreen"), values.fullscreen, 0, 0)
     imgui.selectable(context, "show_fps", i18n.tr("Show FPS"), values.show_fps, 0, 0)
+    imgui.selectable(context, "show_connection", i18n.tr("Show the connection in network games"), values.show_connection, 0, 0)
     imgui.selectable(context, "classic_menus", i18n.tr("Classic menus (the character selection of the original)"),
         values.classic_menus, 0, 0)
 end

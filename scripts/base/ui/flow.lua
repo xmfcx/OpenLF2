@@ -553,6 +553,19 @@ function flow.draw(state, context)
         local fps_text = "FPS: " .. state.fps
         font.gdi(context, fps_text, math.floor((constants.screen.width - font.gdi_width(fps_text)) / 2), 0x213)
     end
+    -- The connection of a server's session (docs/netcode.md "What players see"): the round trip, and in a fight the
+    -- input delay, the rollbacks and the waits.
+    local session = state.session and state.session.online and state.session
+    if session and shown_options.show_connection and session.rtt then
+        local text = string.format("ping %d ms", math.floor(session.rtt + 0.5))
+        local client = state.active == "match" and session.client
+        if client then
+            text = text .. string.format("  delay %d  rollbacks %d  waits %d", client.delay or 0, client.stats.rollbacks,
+                client.stats.stalls)
+        end
+        if session.spectator then text = text .. "  " .. i18n.tr("watching") end
+        font.gdi(context, text, constants.screen.width - font.gdi_width(text) - 4, 0x213 - 14, 0x9fd0ff)
+    end
     if state.active == "match" and state.chart.match then damage_chart.draw(state.chart, context) end
     if state.active == "match" then input_timeline.draw(state.timeline, context) end
     local connection, fighting = online_connection(state)

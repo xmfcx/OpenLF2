@@ -9,13 +9,14 @@ This plan collects the requested features for network play with friends and the 
 
 ## Where the game is now
 
-- Network Game opens a menu (Dear ImGui): host a game, or join one by its address or from the saved servers. Host starts the server program (`openlf2 --server`, UDP with ENet) on this computer and joins it.
-- The lobby lists the players, each with a slot. They say ready, and the room role starts a session. The lobby has a chat, and a message that is only a number from 1 to 42 plays a taunt on every computer.
-- A session runs the whole game on the server's final ticks: the original title menu, character selection, every mode and the results run in lockstep, and the fights run with rollback. The server makes each tick final at its deadline and never waits for a player. The clients send a hash of their fight state every 30 ticks, and the server compares them.
-- During a session, Enter (or T) opens a chat window, and Escape asks before leaving. The title's Quit brings everybody back to the lobby.
+- Network Game opens a menu (Dear ImGui): host a game, or join one by its address or from the saved servers. Host starts the server program (`openlf2 --server --stop-with-parent --upnp`, UDP with ENet) on this computer and joins it. The server opens UDP 12345 on the home router with UPnP, and the lobby shows the public address.
+- The server holds a main room and private rooms (a code of four characters). The lobby lists the players and the open rooms. They say ready, and the room role starts a session. The lobby has a chat, and a message that is only a number from 1 to 42 plays a taunt on every computer.
+- A session runs the whole game on the server's final ticks: the title menu and the match setup screen (or the classic menus with `--server --classic-menus`), every mode and the results run in lockstep, and the fights run with rollback. Clicks on the setup screen go through the server as commands in the ticks. The server makes each tick final at its deadline and never waits for a player. The clients send a hash of their fight state every 30 ticks, and the server compares them. The round trip on one machine is about 7 to 21 ms.
+- During a session, Enter (or T) opens a chat window, and Escape opens the settings menu (the game goes on). Any player sets the game speed. A player who drops holds the game until the room role decides (wait, the computer plays, another player takes the fighter, stop and resume later). A returning player, a spectator and a resumed session run the session's final ticks again to catch up. A line shows the ping, the input delay and the rollbacks.
+- Local games: the title's VS, Stage and Battle open the match setup screen (portraits, arenas, difficulty, speed, start with a countdown, Results buttons after the fight). "Classic menus" keeps the original screens. Escape opens the settings menu in a fight, where the computer can play a player's fighter. The music is local, and the game starts unlocked.
 - The old two-computer TCP game stays for `--host` and `--join` only.
 - Game versions: players install complete builds and switch between them on the Versions screen.
-- Tests: tools/test-online.sh (headless sessions: versus with a second fight, stage mode, Quit back to the lobby, a player who leaves) and tools/test-online-ui.sh (two windows on Xvfb: host and join, the chat, taunts, the leave question).
+- Tests: tools/test-online.sh (headless: versus with a second fight, stage mode, Quit back to the lobby, the game speed, a player who leaves, a drop with the computer taking over, a return, stop and resume, a spectator, two rooms, the setup screen in a session) and tools/test-online-ui.sh (two windows on Xvfb: host and join, the chat, taunts, the setup screen, the settings menu, the computer control on both computers, the leave question, the server stopping with a crashed host).
 
 ## The requests
 
@@ -61,80 +62,54 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 ## Done
 
 - Quit to the launch menu (81bf33c).
-- Rollback foundation: save, restore and hash of a fight, `--rollback-check` (24f7506). Open: the championship check and a faster hash for battle mode.
+- Rollback foundation: save, restore and hash of a fight, `--rollback-check` (24f7506).
 - Local rollback with a simulated network, `--net-sim` (ba70510, 1016a8c).
 - The server program: ENet, `--server`, `--connect`, the lobby, chat and taunts, the ImGui network menus, sessions that run the whole game, the clients' hashes compared by the server, and the online tests (b4a651d to ba757dc).
 - The game's own audio stream name (ac31547).
+- Work of 2026-10-25 (one commit per step, 1d60443 to the end of the night):
+  - Network polish: a server frame on each message, sends at once, the server stops with its host (also after a crash), the game's own audio role.
+  - AI control (the letters `A` and `P`), the settings menu on Escape, local music and volumes, no locks, the game speed as a setting and in sessions (base/game/speed_gate), `--game-speed`, input traces with `=ID` menu clicks.
+  - UPnP with miniupnpc, the public address in the lobby.
+  - The match setup screen (base/game/setup, base/ui/setup_screen) with Stage and Battle modes and the Results buttons; in server sessions through commands in the ticks.
+  - Drops, returns, stop and resume, spectators and private rooms, all from the server's log of final ticks.
+  - The input delay setting and the connection line.
+  - Fixes from a review: the classic two-computer game handed every fighter to the computer, keys of frames that ran no tick were lost (the cause of a random test failure), a catching-up client lost final ticks, and others.
 
 ## Remaining work
 
 ### 1. Play with the friend
 
-1. Build the Windows version with the new engine and the taunts (tools: ~/programs/openlf2-windows/publish-version.sh).
-2. Create the public link of the versions folder on Nextcloud (needs the owner's approval), then publish the version. The friend downloads the new Windows build once; later versions arrive through the Versions screen.
-3. Done: a hosting game opens UDP 12345 with UPnP (miniupnpc), and the lobby shows the public address.
-4. Play a real game over the internet and note what to tune.
+1. Publish the version (the owner): create the public link of the versions folder, then run `~/programs/openlf2-windows/publish-version.sh`. A dry run of the night packed both builds (see the report).
+2. Play a real game over the internet and note what to tune.
 
-### 2. Network polish
+### 2. Pre-game menus
 
-Done: a frame on each message at the server and sends at once (the round trip on one machine went from 99 ms to 21 ms), the server stops with its hosting game also after a crash, and the game has its own audio role (its own stored volume).
+- The settings menu does not replace the launch options page yet: Display (filter, layout, shading, shadows), Controls and Language stay there.
+- The arena cards show the first layer of each background, not a picture made from all layers. The stage cards have no boss portraits and no best result.
+- The setup screen marks a ready player's panel with ">" in front of its title, not with a colored frame. It has no tooltips, and it does not show who changed a value in a network game.
+- Battle mode's troop panel and the championships keep their classic screens.
+- New texts have no German or Chinese translations yet.
 
-### 3. The pre-game redesign
+### 3. Drops and returns
 
-The steps of docs/pregame-ui-redesign.md, in its order. Done: steps 1 to 4 (local music, no locks, the settings menu on Escape with the game speed, AI control and the cheat keys, the game speed in server sessions) and the image and slider widgets of step 5. Open from step 3: the settings menu does not replace the launch options page yet (its Display, Controls and Language values).
+- The server does not run the game. A return, a spectator and a resume run the session's ticks again from its start, about 8 times faster than real time in a fight and 40 ticks a frame in the menus. A session of an hour takes some minutes to catch up. A snapshot would need a way to copy the whole game state.
+- Untested: "give the fighter to another player" (built, no test), a return in a Stage survival run.
+- One saved session for each server computer (in its config.json); a second stopped session replaces the first.
 
-1. Local sound and music: configuration values, a local random track, the music out of the shared options. Small; it also fixes the shared music in network games.
-2. No locks: all fighters and difficulties from the start, the `lf2.net` word off in live games, replays unchanged.
-3. The settings menu (Dear ImGui) with the game speed and the cheat keys button, in the menus and in the fight. Then remove the M, F, D sequence and the old options page.
-4. The game speed in fights of the server program, as a command in the tick stream.
-5. Engine work: an image widget, arena pictures, cursor frames over widgets.
-6. The setup model and its commands for VS mode with a local authority, drawn by the new screen; the classic screen stays. This is step 1 of docs/ui-network-architecture.md and replaces the old plan for models and commands.
-7. Stage mode on the new screen.
-8. The Results buttons (rematch, change fighters, setup, title).
-9. The network game: the setup commands through the server program; then the menus of a session no longer run in lockstep.
-10. Battle mode, then the championships.
+### 4. Rooms
 
-Each step needs headless traces with the player keys, and the online tests must still pass.
+- No presence, no invites beyond the code, no player rotation between matches.
 
-### 4. Drops, returns and AI control
+### 5. Measure and tune
 
-Step 5 of docs/netcode.md:
+- The delay log (the time of each key event, the tick that read it, the frame on which the fighter reacted) is not built.
+- Tuning needs a real game over the internet: the automatic input delay, the clock lead.
 
-- Done: AI control. The letters `A` and `P` in a slot's keys switch its fighter to the computer and back (base/game/match `read_control`), from the settings menu; a fresh key press takes it back after a second.
-- Long drops: the match pauses and the server makes an autosave. The players choose to wait, let the AI take over, give the fighter to another person, or stop and resume later.
-- Returns: a returning player gets a snapshot and the ticks since then. For this, the server must run the game itself (the flow without a window on the final ticks), or ask a client for a snapshot.
-- The server writes the final ticks, so that it can go on after a restart.
-
-Make sure that a client that quits during a survival stage and starts again returns to the same stage, at the same frame, with the same HP for all fighters.
-
-### 5. Rooms and spectators
-
-Step 6 of docs/netcode.md: many rooms on one server, spectators with a delayed stream, presence, invites with a room code. The chat is done.
-
-### 6. Measure and tune
-
-- The delay log: the time of each key event from the engine, the frame on which the fight read it and the frame on which the fighter reacted (a new `engine.log` and key times in the input).
-- Tuning (step 7 of docs/netcode.md): the automatic input delay, the clock lead, a connection line on the screen, and the logs.
-
-### 7. Leftovers
+### 6. Leftovers
 
 - The championship rollback check, and a faster hash for battle mode.
 - Remove the old two-computer protocol once every player has the new engine.
 - The web build has no UDP and no network game.
-
-## Order and size
-
-| Work | Size | Needs a new engine |
-| --- | --- | --- |
-| 1 Play with the friend | small | no (the build exists) |
-| 2 Network polish | small to medium | yes |
-| 3 Pre-game redesign | large | yes (step 5) |
-| 4 Drops, returns, AI control | large | no for AI control, yes for the rest |
-| 5 Rooms and spectators | large | yes |
-| 6 Measure and tune | medium | yes |
-| 7 Leftovers | small | no |
-
-Parts 2 and 3 do not depend on each other. The versions feature delivers engine changes, so each part can ship when it is ready.
 
 ## Rules for all work
 

@@ -56,7 +56,7 @@ local gamepad_defaults = {
 local defaults = {battlefield_layout = "classic", gamepad = gamepad_defaults, upscaling_filter = "linear", fullscreen = false, digipad = true, show_fps = false,
     rumble = false, show_gamepad = false, language = "default", font_antialiasing = true,
     character_shading = false, projected_shadows = false,
-    music_track = 0, music_volume = 100, sound_volume = 100, classic_menus = false,
+    music_track = 0, music_volume = 100, sound_volume = 100, classic_menus = false, input_delay = -1, show_connection = true,
     light_azimuth = -50, light_elevation = 70, shadow_blur = 2, shadow_opacity = 0.275}
 local current
 
@@ -104,7 +104,9 @@ local function copy(values)
         music_track = whole(values.music_track, defaults.music_track, -1, 8),
         music_volume = whole(values.music_volume, defaults.music_volume, 0, 100),
         sound_volume = whole(values.sound_volume, defaults.sound_volume, 0, 100),
-        classic_menus = values.classic_menus == true}
+        classic_menus = values.classic_menus == true,
+        input_delay = whole(values.input_delay, defaults.input_delay, -1, 2),
+        show_connection = values.show_connection ~= false}
 end
 
 -- The saved options, or the defaults for anything missing or invalid.
@@ -150,6 +152,8 @@ function options.load()
         values.music_volume = whole(saved.music_volume, defaults.music_volume, 0, 100)
         values.sound_volume = whole(saved.sound_volume, defaults.sound_volume, 0, 100)
         values.classic_menus = saved.classic_menus == true
+        values.input_delay = whole(saved.input_delay, defaults.input_delay, -1, 2)
+        values.show_connection = saved.show_connection ~= false
     end
     if type(saved) == "table" and (saved.battlefield_layout == "classic" or saved.battlefield_layout == "expand") then
         values.battlefield_layout = saved.battlefield_layout

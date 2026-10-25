@@ -153,13 +153,13 @@ expect "host: Escape opens the settings menu" host "settings=game"
 expect "host: the fight goes on behind the menu" host "screen=match online=session"
 press 95 Escape
 expect_not "host: Escape again closes the menu" host "settings="
-press 95 Escape; sleep 0.5; shot 95 settings; click 95 "$(gx 395)" "$(gy 78)"
+press 95 Escape; sleep 0.5; shot 95 settings; click 95 "$(gx 395)" "$(gy 98)"
 expect_not "host: Resume closes the menu" host "settings="
 expect "host: still in the fight after Resume" host "screen=match online=session"
 expect "join: the other player is still in the fight" join "screen=match online=session"
 
 # The computer plays the host's fighter, on both computers, and a key of the host takes it back.
-press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 156)"
+press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 177)"
 expect "host: the computer plays the host's fighter" host "computer_controls="
 expect "join: the computer plays the host's fighter there too" join "computer_controls="
 sleep 1.5; press 95 "$ATTACK"
@@ -167,7 +167,7 @@ expect_not "host: a key takes the control back" host "computer_controls="
 expect_not "join: the control is back there too" join "computer_controls="
 
 # Leave asks first; No keeps the game.
-press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 501)"
+press 95 Escape; sleep 0.5; click 95 "$(gx 395)" "$(gy 481)"
 expect "host: Leave asks first" host "settings=game:leave"
 shot 95 leave; press 95 Escape
 expect "host: Escape closes the question, not the menu" host "settings=game"

@@ -113,6 +113,8 @@ end
 
 -- The input delay in ticks, from the round trip: 0 to 2 (docs/netcode.md "Input from the client").
 local function input_delay(state)
+    -- The player can fix it in the settings menu (`fixed_delay`, base/game/options `input_delay`).
+    if state.fixed_delay then return state.fixed_delay end
     return math.max(0, math.min(2, math.floor((state.rtt or 0) / 2 / tick_ms)))
 end
 

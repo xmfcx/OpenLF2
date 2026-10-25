@@ -306,6 +306,9 @@ function online.begin_match(state, fight)
     local client = rollback_client.create({id = state.id, match = fight, random = {engine.random_position()},
         owned = owned_map(state), owns_functions = not state.spectator,
         delay_behind = state.spectator and online.spectator_delay or nil})
+    -- The input delay of this computer's configuration: automatic, or fixed (only this computer's keys wait).
+    local delay = require("base/game/options").current().input_delay
+    if delay and delay >= 0 then client.fixed_delay = delay end
     -- A speed set in the menus holds in the fight until a final tick says otherwise.
     if state.speed and state.speed < 10 then client.last_speed = state.speed end
     for tick = first, state.sent_tick do
