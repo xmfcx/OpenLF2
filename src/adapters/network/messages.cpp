@@ -72,6 +72,8 @@ public:
             enet_packet_destroy(packet);
             return fail(ErrorCode::io, "Cannot send a message");
         }
+        // Sent at once, not at the next service: a message waits a whole frame otherwise (docs/netcode.md, "Clock").
+        enet_host_flush(host_);
         return {};
     }
 
@@ -104,6 +106,12 @@ public:
         }
         enet_host_flush(host_);
         return events;
+    }
+
+    void wait(std::uint32_t milliseconds) noexcept override {
+        if (!host_) return;
+        enet_uint32 condition = ENET_SOCKET_WAIT_RECEIVE | ENET_SOCKET_WAIT_INTERRUPT;
+        enet_socket_wait(host_->socket, &condition, milliseconds);
     }
 
     void disconnect(std::uint32_t peer) noexcept override {

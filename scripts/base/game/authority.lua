@@ -39,7 +39,7 @@ function authority.receive(state, message, now)
     local client = state.clients[message.from]
     if not client then return end
     client.heard = now
-    if not client.echo or message.sent_at > client.echo then client.echo = message.sent_at end
+    if not client.echo or message.sent_at > client.echo then client.echo, client.echo_at = message.sent_at, now end
     if message.acknowledged and message.acknowledged > client.acknowledged then client.acknowledged = message.acknowledged end
     for tick, input in pairs(message.inputs or {}) do
         -- A client may only send keys for its own slots; an input for a tick that is already final is late.
@@ -119,8 +119,9 @@ function authority.update(state, now)
         for tick, hash in pairs(state.hashes) do
             if tick >= first - authority.hash_interval then hashes[tick] = hash end
         end
-        messages[id] = {from = "server", server_time = now, echo = client.echo, newest_input = client.newest,
-            ticks = list, hashes = hashes}
+        -- `held`: how long the server kept the echo, which the client takes off its round trip.
+        messages[id] = {from = "server", server_time = now, echo = client.echo, held = client.echo_at and now - client.echo_at,
+            newest_input = client.newest, ticks = list, hashes = hashes}
     end
     -- Final ticks and hashes that every client acknowledged are not needed anymore.
     local oldest = state.tick

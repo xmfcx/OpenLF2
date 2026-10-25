@@ -41,6 +41,8 @@ public:
     virtual Result<void> send(std::uint32_t peer, std::uint8_t channel, std::span<const char> bytes) = 0;
     // Sends what is queued and returns what happened since the last call.
     virtual Result<std::vector<MessageEvent>> service() = 0;
+    // Waits until a datagram arrives or `milliseconds` pass (a server sleeps here between its frames).
+    virtual void wait(std::uint32_t milliseconds) noexcept = 0;
     virtual void disconnect(std::uint32_t peer) noexcept = 0;
     virtual void close() noexcept = 0;
     [[nodiscard]] virtual std::optional<PeerQuality> quality(std::uint32_t peer) const noexcept = 0;

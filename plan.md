@@ -77,9 +77,7 @@ Decisions of 2026-10-25 (the owner's answers before the work of the night):
 
 ### 2. Network polish
 
-- Less delay: the server and the clients handle messages once per 33 ms frame, so the round trip on one machine is 99 ms. Handle messages as soon as they arrive (or several times per frame).
-- The server program stops with its host only when the host quits normally. It must also stop when the host crashes (a parent-death signal on Linux, a job object on Windows).
-- The game keeps its own volume: today the sound server stores one volume for every program with the role "game", which started OpenLF2 at 19 %.
+Done: a frame on each message at the server and sends at once (the round trip on one machine went from 99 ms to 21 ms), the server stops with its hosting game also after a crash, and the game has its own audio role (its own stored volume).
 
 ### 3. The pre-game redesign
 

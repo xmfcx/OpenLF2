@@ -94,6 +94,7 @@ start_window() { # display, name
         "$GAME" --installer "$INSTALLER" --scripts scripts --renderer software --config-dir "$WORK/$2" --port "$PORT" \
         > "$WORK/$2.log" 2>&1 &
     PIDS+=($!)
+    [ "$2" = host ] && HOST_PID=$!
 }
 start_window 95 host
 start_window 96 join
@@ -153,4 +154,9 @@ expect "join: the other player is still in the fight" join "screen=match online=
 
 ! grep -qiE "traceback|attempt to|error" "$WORK/host.log" "$WORK/join.log"
 check "no script errors" $? "$(grep -iE 'traceback|attempt to|error' "$WORK/host.log" "$WORK/join.log" | head -2)"
+
+# The host's game crashes: its server program stops too (--stop-with-parent).
+kill -9 "$HOST_PID"; wait "$HOST_PID" 2>/dev/null; sleep 2
+! ps -eo args | grep -v grep | grep -q -- "--server --stop-with-parent --port $PORT "
+check "the server stops when the hosting game crashes" $? "$(ps -eo pid,args | grep -- "--server --stop-with-parent --port $PORT " | grep -v grep)"
 exit $FAILED

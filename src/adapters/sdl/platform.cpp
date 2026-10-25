@@ -192,6 +192,9 @@ public:
         // The game's own name for the system: sound servers keep each program's volume by this name, and without it
         // the game shares "SDL Application" (and its stored volume) with every other SDL program.
         SDL_SetAppMetadata("OpenLF2", nullptr, "io.github.openlf2.OpenLF2");
+        // WirePlumber stores the volume of a stream by its role before its program name, and SDL's role "Game" is
+        // the same for every SDL game: one game turned down turned OpenLF2 down too. Its own role keeps its volume.
+        SDL_SetHint(SDL_HINT_AUDIO_DEVICE_STREAM_ROLE, "OpenLF2");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) return error();
         session_ = std::make_unique<QuitSdl>();
 #if TARGET_OS_IPHONE
@@ -1564,7 +1567,15 @@ Result<void> launch_program(const std::filesystem::path& program, std::span<cons
     for (const auto& argument : owned) argv.push_back(argument.c_str());
     argv.push_back(nullptr);
     // SDL_DestroyProcess only frees SDL's handle: the program keeps running after this one quits.
-    SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+    // The child's standard input is a pipe from this program: when this program ends, also by a crash, the system
+    // closes the pipe, and a server started with --stop-with-parent stops. Its output goes to this program's output.
+    const SDL_PropertiesID properties = SDL_CreateProperties();
+    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_APP);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_Process* process = SDL_CreateProcessWithProperties(properties);
+    SDL_DestroyProperties(properties);
     if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
     SDL_DestroyProcess(process);
     return {};
@@ -1601,7 +1612,15 @@ Result<std::unique_ptr<ChildProgram>> start_child_program(const std::filesystem:
     std::vector<const char*> argv;
     for (const auto& argument : owned) argv.push_back(argument.c_str());
     argv.push_back(nullptr);
-    SDL_Process* process = SDL_CreateProcess(argv.data(), false);
+    // The child's standard input is a pipe from this program: when this program ends, also by a crash, the system
+    // closes the pipe, and a server started with --stop-with-parent stops. Its output goes to this program's output.
+    const SDL_PropertiesID properties = SDL_CreateProperties();
+    SDL_SetPointerProperty(properties, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_APP);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_SetNumberProperty(properties, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+    SDL_Process* process = SDL_CreateProcessWithProperties(properties);
+    SDL_DestroyProperties(properties);
     if (!process) return fail(ErrorCode::platform, std::string("cannot start ") + owned.front() + ": " + SDL_GetError());
     return std::unique_ptr<ChildProgram>(std::make_unique<SdlChildProgram>(process));
 #endif

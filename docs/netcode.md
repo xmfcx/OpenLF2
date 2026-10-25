@@ -65,6 +65,7 @@ The cost is low. A release build runs one tick of a two-fighter fight in about 0
 - The server runs the session at a fixed tick rate (30.3 ticks per second, 33 ms, as the original). The game speed menu changes the tick rate of the server, and all clients follow it.
 - Each client measures the round-trip time (RTT, the time for a message to go to the server and back) and the jitter. It runs its own tick a little ahead of the server: half the RTT plus a margin for jitter. Then its input for a tick arrives at the server just before the server needs it.
 - To change its lead, a client runs its ticks a little faster or slower (up to about 3 %), never in jumps. Players do not see this.
+- The server program runs a frame on each arriving message and at least every 4 ms, and a message leaves at once (no wait for the next frame). The server tells how long it kept the echo of the client's time, and the client takes that off its round trip. On one machine the round trip went from 99 ms (one 33 ms frame on each side and at the server) to about 21 ms.
 
 ### Input from the client
 

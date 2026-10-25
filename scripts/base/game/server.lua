@@ -6,8 +6,8 @@
 -- session begins: the whole game (title menu, character selection, fights, results) runs on every client from the
 -- same ticks. The server is the authority of these ticks (base/game/authority): the clients send their keys, the
 -- server makes each tick final at its deadline, never waiting for a client, and sends the final ticks to everybody.
--- The clients run the menus on final ticks and the fights with rollback. It runs without a window, one frame on each
--- 33 ms tick.
+-- The clients run the menus on final ticks and the fights with rollback. It runs without a window, a frame on each
+-- message and at least every 4 ms.
 local constants = require("base/game/constants")
 local authority = require("base/game/authority")
 local wire = require("base/game/wire")
@@ -197,9 +197,15 @@ function server.update(state)
         end
     end
     if state.phase == "session" then
-        for peer, message in pairs(authority.update(state.authority, now - state.start_at)) do
-            message.type = "ticks"
-            send(peer, message, unreliable)
+        -- The program runs a frame on each message and every few milliseconds; the clients hear from the server
+        -- when a tick became final (and its message repeats the ticks they did not acknowledge yet).
+        local messages = authority.update(state.authority, now - state.start_at)
+        if state.authority.tick ~= state.sent_tick then
+            state.sent_tick = state.authority.tick
+            for peer, message in pairs(messages) do
+                message.type = "ticks"
+                send(peer, message, unreliable)
+            end
         end
         for tick in pairs(state.hashes) do
             if tick < state.authority.tick - 600 then state.hashes[tick] = nil end

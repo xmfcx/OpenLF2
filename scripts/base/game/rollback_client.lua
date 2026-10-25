@@ -82,7 +82,7 @@ end
 -- A message from the server: final ticks, hashes, and the times for the clock.
 function client.receive(state, message, now)
     if message.echo then
-        local sample = now - message.echo
+        local sample = math.max(0, now - message.echo - (message.held or 0))
         if not state.rtt then
             state.rtt, state.jitter = sample, sample / 4
         else

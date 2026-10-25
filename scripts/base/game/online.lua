@@ -68,7 +68,8 @@ end
 -- The round trip, its jitter and the server's clock, from the times in the server's messages.
 local function measure(state, message, now)
     if message.echo then
-        local sample = now - message.echo
+        -- `held`: the time the server kept the echo before its message (newer servers).
+        local sample = math.max(0, now - message.echo - (message.held or 0))
         if not state.rtt then
             state.rtt, state.jitter = sample, sample / 4
         else
@@ -83,7 +84,7 @@ end
 -- A message of session ticks as the rollback client sees it: ticks counted from the fight's first tick.
 local function fight_message(state, message)
     local first = state.base + 1
-    local converted = {server_time = message.server_time - first * tick_ms, echo = message.echo, ticks = {},
+    local converted = {server_time = message.server_time - first * tick_ms, echo = message.echo, held = message.held, ticks = {},
         newest_input = message.newest_input and message.newest_input - first}
     for tick, input in pairs(message.ticks or {}) do
         if tick >= first then converted.ticks[tick - first] = input end

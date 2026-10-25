@@ -115,6 +115,8 @@ struct Configuration {
     bool headless = false;
     // The server program (docs/netcode.md): no window, scripts run on the frame clock until the process stops.
     bool server = false;
+    // The server stops when its standard input closes (a pipe from the program that started it, which ended).
+    bool stop_with_parent = false;
     // A client of a server program: its address (with --port).
     std::string connect_address;
     bool jit = OPENLF2_DEFAULT_JIT != 0;
@@ -416,6 +418,9 @@ Result<Configuration> configuration(std::span<const std::string> arguments,
         else if (argument == "--preview-backgrounds") config.preview_backgrounds = true;
         else if (argument == "--preview-ending") config.preview_ending = true;
         else if (argument == "--rollback-check") config.rollback_check = true;
+        else if (argument == "--stop-with-parent") {
+            config.stop_with_parent = true;
+        }
         else if (argument == "--server") {
             config.server = true;
             config.headless = true;
@@ -1045,21 +1050,24 @@ Result<void> run(const Configuration& config) {
         std::cout << "Network listening on " << config.network_address << ':' << (*network)->local_port() << std::endl;
     }
     if (config.server) {
-        // The server program: one script frame on each tick of the original clock, until the process stops or the
-        // scripts ask to quit. An action "log TEXT" prints TEXT.
+        // The server program: script frames until the process stops or the scripts ask to quit. An action
+        // "log TEXT" prints TEXT.
         std::cout << "OpenLF2 server on UDP port " << config.network_port << std::endl;
-        const auto origin = std::chrono::steady_clock::now();
-        const auto milliseconds = [origin] {
-            return static_cast<std::uint32_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - origin).count());
-        };
-        FrameClock clock(milliseconds());
-        while (true) {
-            if (!clock.due(milliseconds())) {
-                const auto wait = clock.sleep_ms(milliseconds());
-                std::this_thread::sleep_for(std::chrono::milliseconds(wait > 0 ? wait : 1));
-                continue;
-            }
+        // A frame runs when a message arrives, and at least every 4 ms: the scripts make the ticks final by the
+        // server clock, so a frame on each message and near each deadline keeps the round trip short.
+        constexpr std::uint32_t server_wait_ms = 4;
+        // The game that hosts this server ended (also by a crash): its pipe to the standard input closes.
+        auto parent_gone = std::make_shared<std::atomic<bool>>(false);
+        if (config.stop_with_parent) {
+            std::thread([parent_gone] {
+                char buffer[256];
+                while (std::fread(buffer, 1, sizeof buffer, stdin) > 0) {}
+                parent_gone->store(true);
+            }).detach();
+        }
+        while (!parent_gone->load()) {
+            if (messages) (*messages)->wait(server_wait_ms);
+            else std::this_thread::sleep_for(std::chrono::milliseconds(server_wait_ms));
             auto frame = simulation.frame("");
             if (!frame) return std::unexpected(frame.error());
             for (const auto& action : frame->actions) {
@@ -1067,6 +1075,8 @@ Result<void> run(const Configuration& config) {
                 if (action.starts_with("log ")) std::cout << action.substr(4) << std::endl;
             }
         }
+        std::cout << "The game that hosts this server ended; the server stops." << std::endl;
+        return {};
     }
     if (config.headless) {
         // Runs each traced frame (or one idle frame) and loads every drawn resource once.
@@ -1428,7 +1438,7 @@ Result<void> run(const Configuration& config) {
 #endif
                 const auto installer_text = installer_path.u8string();
                 const auto scripts_text = config.scripts.u8string();
-                std::vector<std::string> arguments{"--server", "--port", std::to_string(config.network_port), "--installer",
+                std::vector<std::string> arguments{"--server", "--stop-with-parent", "--port", std::to_string(config.network_port), "--installer",
                     std::string(installer_text.begin(), installer_text.end()), "--scripts",
                     std::string(scripts_text.begin(), scripts_text.end())};
                 if (config.config_directory) {
@@ -1546,6 +1556,7 @@ int run_application(std::span<const std::string> arguments, const std::filesyste
                          "        renderer is tried first (SDL_RENDER_DRIVER overrides).\n"
                          "--host IPv4 / --join IPv4 starts an OpenLF2 network game; --port N defaults to 12345.\n"
                          "--server runs the server program (no window) on UDP --port N; --connect IPv4 joins a server.\n"
+                         "--stop-with-parent stops the server when its standard input closes (the hosting game ended).\n"
                          "FILE.lfr or --replay FILE opens a recording immediately, without navigating the menus.\n"
                          "        Use -- before a file name beginning with '-'; open one recording per process.\n"
                          "--config-dir keeps config.json there instead of the per-user directory (headless: in memory).\n"
